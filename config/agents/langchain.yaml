@@ -1,0 +1,29 @@
+# ReAct Agent Demos Configuration
+langchain_agents:
+  - name: "Weather"
+    tools:  
+     # - function: genai-graph.webapp.pages.demos.reAct_agent:my_custom_weather
+      - factory: genai_tk.tools.langchain.search_tools_factory:create_search_function
+        verbose: true
+    mcp_servers:
+      - "weather"
+      - "playwright"
+    examples:
+      - "What is the wind in NY?"
+      - "Quel temps fait-il à Toulouse"
+
+  - name: "Weather & PowerPoint"
+    mcp_servers:
+      - "weather"
+      - "ppt"
+    examples:
+      - "Get weather in Toulouse today. Create a PowerPoint file about it and usual climate in Toulouse"
+    
+  - name: "Web Research"
+    mcp_servers:
+      - "playwright"
+    examples:
+      - "Research the latest AI developments on OpenAI's website"
+      - "Find information about quantum computing on IBM's website"
+      - "Connect to atos.net with a browser, find the page with blogs, and get list of recent blog articles"
+  

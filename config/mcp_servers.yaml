@@ -1,0 +1,27 @@
+# MCP Servers configuration.  
+# Similar to their usual JSON equivalent, but loaded from OmegaConf so variable are resolved.
+mcpServers:
+  filesystem:
+      command: npx
+      args: 
+      - "-y"
+      - "@modelcontextprotocol/server-filesystem"
+      - ${paths.project}
+
+  playwright:
+    command: npx
+    args: 
+    - "@playwright/mcp@latest"
+    - "--headless"
+
+  playwright_ui:  # Does not seems to work in headed mode (in WSL...)
+    command: npx
+    args: 
+    - "@playwright/mcp@latest"
+
+  tavily-mcp: 
+    command: npx
+    args: [ "-y" ,"tavily-mcp"]
+    env: 
+      TAVILY_API_KEY : ${oc.env:TAVILY_API_KEY,  "dummy key"}
+  #  disabled: true

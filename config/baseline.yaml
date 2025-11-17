@@ -1,0 +1,87 @@
+# Default application configuration
+# Can be overriden in file 'overrides.yaml', with config selected either in code or by environment variable
+
+   
+#####
+# AI Components
+####
+llm:
+  list: ${paths.config}/providers/llm.yaml
+  # default_model: gpt_4omini_openai # gpt_35_azure # mistral_large_edenai 
+  models:
+    default: gpt_4o_openai   # Use full GPT-4o model for structured output support
+    ### 
+    # Optional model definitions (you can add your own type): 
+    ###
+    fake: parrot_local_fake 
+    fast:  llama31_8_groq
+    coder : qwen25_coder32_openrouter
+
+  cache : sqlite
+  cache_path: ${paths.data_root}/llm_cache/langchain.db
+
+ 
+embeddings:
+  list: ${paths.config}/providers/embeddings.yaml
+  models:
+    default:  ada_002_openai
+    local : artic_22_ollama
+  cache: ${paths.data_root}/hf_models
+
+embeddings_store:
+  default:
+    backend: Chroma 
+    embeddings: default
+    table_name_prefix: embeddings
+    config:
+      storage: ${paths.data_root}/vector_store  # Updated: was 'chroma_path'
+ 
+  chroma_indexed:
+    backend: Chroma 
+    embeddings: default
+    table_name_prefix: embeddings
+    record_manager: sqlite:///${paths.data_root}/vector_store/record_manager_cache.sql
+    config:
+      storage: ${paths.data_root}/vector_store  # Updated: was 'chroma_path'
+
+  in_memory:
+    backend: InMemory  
+    embeddings: default
+    table_name_prefix: embeddings
+  
+  in_memory_chroma:
+    backend: Chroma
+    embeddings: default
+    table_name_prefix: embeddings
+    config:
+      storage: '::memory::'  # In-memory Chroma storage
+  
+  local_fast:
+    backend: Chroma  
+    embeddings: local
+    table_name_prefix: embeddings_local
+    config:
+      storage: ${paths.data_root}/vector_store_local  # Updated: was 'chroma_path'
+  
+  postgres:
+    backend: PgVector 
+    embeddings: default
+    table_name_prefix: embeddings_pg
+    config:
+      postgres_url: ${paths.postgres}
+      postgres_schema: public
+
+rag:
+  embeddings_store: default
+  chunker: 
+
+documents:
+  base: ./use_case_data
+monitoring: 
+  langsmith : true
+  project: GenAI_demo
+
+kv_store: 
+  default:
+    type: LocalFileStore
+    path: ${paths.data_root}/kv_store

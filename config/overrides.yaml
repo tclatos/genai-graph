@@ -1,0 +1,55 @@
+
+#### 
+# Overridden configurations
+# Set by environment variable "BLUEPRINT_CONFIG", or by the 'default_config' key, or in code
+####   
+
+
+ekg_local:
+# Overide envivonment variable 
+  :env:
+    BAML_LOG: "warn"
+  llm:
+    models:
+      default: kimi_k2_openrouter
+  embeddings:
+    models:
+      default: qwen3_06b_deepinfra
+  vector_store:
+    default : PgVector
+  cli:
+    commands:  
+    - genai_tk.core.commands_core:CoreCommands
+    - genai_tk.core.commands_info:InfoCommands
+    - genai_tk.extra.commands_extra:ExtraCommands
+    - genai_tk.extra.agents.commands_agents:AgentCommands
+    - genai_tk.extra.structured.commands_baml:BamlCommands
+    - genai_graph.ekg.cli_commands.commands_ekg:EkgCommands
+
+  kv_store: 
+    default:
+      type: LocalFileStore
+      path: ${paths.data_root}/kv_store
+      
+    postgres: 
+      type: SQLStore
+      path: postgresql://${oc.env:POSTGRES_USER,unknown_user}:${oc.env:POSTGRES_PASSWORD,password}@localhost:5432/ekg
+
+  graph_db: 
+    default:
+      type: kuzu
+      path: ${paths.data_root}/kuzu/ekg_database.db
+    neo4j_local:
+      type: neo4j
+      path: neo4j://localhost
+      username : tcl
+      password: ${oc.env:NEO4_PASSWORD, null}
+      
+  paths:
+    ekg_data : ${oc.env:ONEDRIVE, null}/prj/atos-kg
+
+  structured:
+    default:
+      baml_client: genai_graph.ekg.baml_client
+    rainbow: 
+      baml_client: genai_graph.ekg.baml_client

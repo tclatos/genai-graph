@@ -1,0 +1,73 @@
+################
+# Application configuration file 
+################
+
+# Default configuration, as defined in baseline.yaml, overrides.yaml, here, or elsewhere.
+# It can be overidden by 'BLUEPRINT_CONFIG' environment variable, or in code
+
+#default_config: ${oc.env:BLUEPRINT_CONFIG,training_adn}
+default_config: ${oc.env:BLUEPRINT_CONFIG,ekg_local}
+
+# Note : configuration leverage OmegaConf solvers. See :
+# https://omegaconf.readthedocs.io/en/2.3_branch/usage.html#variable-interpolation
+
+
+paths:
+  data_root : ${oc.env:HOME}
+  project : ${oc.env:PWD}
+  src: ${paths.project}/genai_graph
+  config: ${paths.project}/config
+  demo_conf: ${paths.project}/config/demos
+  models: ${oc.env:HOME}/.models
+  postgres: postgresql://${oc.env:POSTGRES_USER,unknown_user}:${oc.env:POSTGRES_PASSWORD,password}@localhost:5432/ekg
+  datasets : ${paths.project}/use_case_data
+
+# Other config files merged to this one at launch time
+:merge:
+  - ${paths.config}/baseline.yaml
+  - ${paths.config}/overrides.yaml
+  - ${paths.config}/mcp_servers.yaml
+
+
+#### 
+# User Interface Configuration : list of Streamlit pages, authentication, ... 
+####    
+ui:
+  app_name : Enterprise Knowledge Graph Demos
+  pages_dir : ${paths.src}/webapp/pages
+  navigation:
+
+    settings:
+      - settings/welcome.py
+      - settings/configuration.py
+      - settings/MCP_servers.py
+    demos:
+      - demos/reAct_agent.py
+
+
+
+
+#### 
+# Authentication
+####  
+auth:
+  enabled: ${oc.env:BASIC_AUTH_ENABLED,false}
+  config_file: ${paths.config}/basic_auth.yaml
+
+#####
+# Command Line Interface configuration
+####
+cli:
+  commands:  # List modules:functions to register CLI commands
+    - genai_tk.core.commands_core:CoreCommands
+    - genai_tk.core.commands_info:InfoCommands
+    - genai_tk.extra.commands_extra:ExtraCommands
+    - genai_tk.extra.agents.commands_agents:AgentCommands
+    - genai_tk.extra.structured.commands_baml:BamlCommands
+    - genai_tk.main.cli:register_commands
+ 
+logging:
+  format: "<cyan>{time:HH:mm:ss}</cyan>-<level>{level: <7}</level> | <magenta>{file.name}</magenta>:<green>{line} <italic>{function}</italic></green>- <level>{message}</level>"
+  level: INFO
+  backtrace : True  # Should be False in production  - see https://loguru.readthedocs.io/en/stable/overview.html#fully-descriptive-exceptions
+  

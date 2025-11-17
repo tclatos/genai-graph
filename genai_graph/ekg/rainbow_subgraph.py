@@ -11,8 +11,9 @@ from typing import Any, Type
 from pydantic import BaseModel
 
 from genai_graph.core.graph_registry import register_subgraph
+from genai_graph.core.graph_schema import GraphSchema
 from genai_graph.ekg.baml_client.types import ReviewedOpportunity
-from genai_graph.ekg.subgraph import PydanticSubgraph, Subgraph
+from genai_graph.ekg.subgraph import PydanticSubgraph
 
 
 class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
@@ -21,7 +22,7 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
     top_class: Type[BaseModel] = ReviewedOpportunity
     kv_store_id: str = "default"
 
-    def build_schema(self) -> Any:
+    def build_schema(self) -> GraphSchema:
         """Build the graph schema configuration for opportunity data.
 
         Returns:
@@ -184,4 +185,12 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
 
 
 # Register this subgraph implementation in the global registry
-register_subgraph("ReviewedOpportunity", ReviewedOpportunitySubgraph())
+
+def register(registry: "GraphRegistry" | None = None) -> None:
+    """Register the ReviewedOpportunity subgraph implementation.
+
+    The optional ``registry`` argument allows the caller (typically
+    :class:`genai_graph.core.graph_registry.GraphRegistry`) to supply the
+    registry instance explicitly.
+    """
+    register_subgraph("ReviewedOpportunity", ReviewedOpportunitySubgraph(), registry=registry)

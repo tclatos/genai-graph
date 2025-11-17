@@ -53,3 +53,6 @@ ekg_local:
       baml_client: genai_graph.ekg.baml_client
     rainbow: 
       baml_client: genai_graph.ekg.baml_client
+
+  subgraphs:
+  - genai_graph.ekg.rainbow_subgraph:register

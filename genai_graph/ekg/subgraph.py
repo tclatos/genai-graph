@@ -9,6 +9,8 @@ from genai_tk.utils.pydantic.kv_store import PydanticStore
 from pydantic import BaseModel
 from rich.console import Console
 
+from genai_graph.core.graph_schema import GraphSchema
+
 console = Console()
 
 
@@ -27,7 +29,7 @@ class Subgraph(ABC):
         ...
 
     @abstractmethod
-    def build_schema(self) -> Any:
+    def build_schema(self) -> GraphSchema:
         """Build and return the graph schema configuration."""
         ...
 
@@ -64,7 +66,7 @@ class PydanticSubgraph(Subgraph, BaseModel):
         """Name of the subgraph."""
         return self.top_class.__name__
 
-    def load_data(self, key: str) -> Any | None:
+    def load_data(self, key: str) -> BaseModel | None:
         """Load graph data from the key-value store.
 
         Args:

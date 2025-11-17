@@ -30,6 +30,9 @@ def generate_schema_markdown(subgraph_name: str) -> str:
         print(markdown)
         ```
     """
+    subgraph_impl = get_subgraph(subgraph_name)
+    subgraph_impl.build_schema()
+
     schema = _load_schema(subgraph_name)
     baml_docs = _parse_baml_descriptions()
     node_sections = _build_node_sections(schema, baml_docs)
@@ -49,15 +52,12 @@ def _load_schema(subgraph_name: str) -> GraphSchema:
 
     Ensures default subgraphs are registered before lookup.
     """
-    # Import concrete subgraphs for their registration side effects.
-    # This keeps call sites simple while centralizing registration logic.
-    import genai_graph.ekg.rainbow_subgraph  # noqa: F401
 
     try:
         subgraph_impl = get_subgraph(subgraph_name)
         return subgraph_impl.build_schema()
     except ValueError as e:
-        raise ValueError(f"Unknown subgraph '{subgraph_name}': {e}")
+        raise ValueError(f"Unknown subgraph '{subgraph_name}': {e}") from e
 
 
 @lru_cache(maxsize=1)

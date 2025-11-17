@@ -46,37 +46,12 @@ from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.table import Table
 
-from genai_graph.core.graph_backend import (
-    GraphBackend,
-    create_backend_from_config,
-    delete_backend_storage_from_config,
-    get_backend_storage_path_from_config,
-)
-from genai_graph.core.graph_registry import GraphRegistry, get_subgraph
-from genai_graph.core.text2cypher import query_kg
-
 # Initialize Rich console
 console = Console()
 
 # Configuration constants
 KV_STORE_ID = "file"
-
-
-def _get_db_connection() -> GraphBackend | None:
-    """Get database connection to the shared EKG database.
-
-    Returns:
-        GraphBackend instance or None if database doesn't exist
-    """
-    try:
-        backend = create_backend_from_config("default")
-        return backend
-    except Exception as e:
-        console.print(f"[red]Error connecting to database: {e}[/red]")
-        return None
-
-
-## subcommands
+GRAPH_DB_CONFIG = "default"
 
 
 class EkgCommands(CliTopCommand):
@@ -88,7 +63,6 @@ class EkgCommands(CliTopCommand):
     def register_sub_commands(self, cli_app: typer.Typer) -> None:
         # Import concrete subgraph modules so they can register themselves.
         # This keeps the CLI generic while still enabling default subgraphs.
-        import genai_graph.ekg.rainbow_subgraph  # noqa: F401
 
         @cli_app.command("add-doc")
         def add_doc(
@@ -120,7 +94,12 @@ class EkgCommands(CliTopCommand):
                 cli kg add --key fake_cnes_1
                 cli kg add --key cnes-venus-tma
             """
+            from genai_graph.core.graph_backend import (
+                create_backend_from_config,
+                get_backend_storage_path_from_config,
+            )
             from genai_graph.core.graph_core import create_graph
+            from genai_graph.core.graph_registry import get_subgraph
 
             # Get subgraph implementation
             try:
@@ -235,9 +214,15 @@ class EkgCommands(CliTopCommand):
             All opportunity data will be lost.
             """
 
+            from genai_graph.core.graph_backend import (
+                create_backend_from_config,
+                delete_backend_storage_from_config,
+                get_backend_storage_path_from_config,
+            )
+
             try:
                 # Try to get some basic stats
-                backend = _get_db_connection()
+                backend = create_backend_from_config(GRAPH_DB_CONFIG)
                 if backend:
                     try:
                         tables_result = backend.execute("CALL show_tables() RETURN *")
@@ -313,6 +298,8 @@ class EkgCommands(CliTopCommand):
             ex:  List the names of all competitors for opportunities created after January 1, 2012."""
             from loguru import logger
 
+            from genai_graph.core.text2cypher import query_kg
+
             try:
                 df = query_kg(query, subgraph=subgraph, llm_id=llm)
 
@@ -348,10 +335,15 @@ class EkgCommands(CliTopCommand):
             ] = "ReviewedOpportunity",
         ) -> None:
             """Execute Cypher queries on the EKG database."""
+
+            from genai_graph.core.graph_backend import (
+                create_backend_from_config,
+            )
+
             console.print(Panel("[bold cyan]Querying EKG Database[/bold cyan]"))
 
             # Get database connection
-            backend = _get_db_connection()
+            backend = create_backend_from_config(GRAPH_DB_CONFIG)
             if not backend:
                 console.print("[red]❌ No EKG database found[/red]")
                 console.print("[yellow]💡 Add data first: [bold]cli kg add --key <data_key>[/bold][/yellow]")
@@ -410,6 +402,13 @@ class EkgCommands(CliTopCommand):
             Shows comprehensive information about the EKG database including
             node/relationship counts, schema details, and semantic mapping.
             """
+
+            from genai_graph.core.graph_backend import (
+                create_backend_from_config,
+                get_backend_storage_path_from_config,
+            )
+            from genai_graph.core.graph_registry import get_subgraph
+
             # Get subgraph implementation
             try:
                 subgraph_impl = get_subgraph(subgraph)
@@ -420,7 +419,7 @@ class EkgCommands(CliTopCommand):
             console.print(Panel(f"[bold cyan]{subgraph.title()} EKG Database Information[/bold cyan]"))
 
             # Get database connection
-            backend = _get_db_connection()
+            backend = create_backend_from_config(GRAPH_DB_CONFIG)
             if not backend:
                 console.print("[red]❌ No EKG database found[/red]")
                 console.print("[yellow]💡 Add data first: [bold]cli kg add --key <data_key>[/bold][/yellow]")
@@ -593,7 +592,7 @@ class EkgCommands(CliTopCommand):
             console.print(Panel("[bold cyan]Exporting EKG HTML Visualization[/bold cyan]"))
 
             # Get database connection
-            backend = _get_db_connection()
+            backend = create_backend_from_config(GRAPH_DB_CONFIG)
             if not backend:
                 console.print("[red]❌ No EKG database found[/red]")
                 console.print("[yellow]💡 Add data first: [bold]cli kg add --key <opportunity_key>[/bold][/yellow]")
@@ -663,6 +662,8 @@ class EkgCommands(CliTopCommand):
         @cli_app.command("list-subgraphs")
         def listsubgraphs() -> None:
             """List all registered knowledge graph subgraphs."""
+            from genai_graph.core.graph_registry import GraphRegistry
+
             registry = GraphRegistry.get_instance()
             names = registry.listsubgraphs()
 

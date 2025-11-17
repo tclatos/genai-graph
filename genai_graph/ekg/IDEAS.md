@@ -59,6 +59,9 @@ https://docs.chonkie.ai/oss/pipelines
 
 - ```cli kg schema```
 
+- ```cli baml run FakeArchitectureJson -i "IT platform for CNES with 3-tier, Java based"  --kvstore-key fake-cnes-1```
+
+
 
 # Misc
 

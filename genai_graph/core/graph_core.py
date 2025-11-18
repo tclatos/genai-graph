@@ -645,51 +645,58 @@ def extract_graph_data(model: BaseModel, nodes: list, relations: list) -> Tuple[
             # Skip if we couldn't find the target data
             continue
 
-        # Get dedup value for from_node to lookup id
-        from_dict = from_data.model_dump() if hasattr(from_data, "model_dump") else from_data
+        # Handle from_data as list (iterate through each item)
+        from_items = from_data if isinstance(from_data, list) else [from_data]
 
-        # Get dedup value for from node
-        if from_node_info.deduplication_key:
-            from_dedup_value = from_dict.get(from_node_info.deduplication_key)
-        else:
-            # Use _name as dedup value (same logic as in node extraction)
-            from_dedup_value = from_node_info.get_name_value(from_dict, from_type)
-
-        from_dedup_str = str(from_dedup_value) if from_dedup_value else None
-        from_id = id_registry[from_type].get(from_dedup_str) if from_dedup_str else None
-
-        if not from_id:
-            continue  # Skip if we can't find the from node id
-
-        to_items = to_data if isinstance(to_data, list) else [to_data]
-        for to_item in to_items:
-            if to_item is None:
+        for from_item in from_items:
+            if from_item is None:
                 continue
-            to_dict = to_item.model_dump() if hasattr(to_item, "model_dump") else to_item
 
-            # Get dedup value for to node
-            if to_node_info.deduplication_key:
-                to_dedup_value = to_dict.get(to_node_info.deduplication_key)
+            # Get dedup value for from_node to lookup id
+            from_dict = from_item.model_dump() if hasattr(from_item, "model_dump") else from_item
+
+            # Get dedup value for from node
+            if from_node_info.deduplication_key:
+                from_dedup_value = from_dict.get(from_node_info.deduplication_key)
             else:
-                # Use _name as dedup value
-                to_dedup_value = to_node_info.get_name_value(to_dict, to_type)
+                # Use _name as dedup value (same logic as in node extraction)
+                from_dedup_value = from_node_info.get_name_value(from_dict, from_type)
 
-            to_dedup_str = str(to_dedup_value) if to_dedup_value else None
-            to_id = id_registry[to_type].get(to_dedup_str) if to_dedup_str else None
+            from_dedup_str = str(from_dedup_value) if from_dedup_value else None
+            from_id = id_registry[from_type].get(from_dedup_str) if from_dedup_str else None
 
-            if to_id:
-                # Extract p_*_ properties from to_item for edge properties
-                edge_properties = {}
-                if hasattr(relation_info.to_node, "model_fields"):
-                    for field_name in relation_info.to_node.model_fields.keys():
-                        if field_name.startswith("p_") and field_name.endswith("_"):
-                            prop_name = field_name[2:-1]  # Remove p_ prefix and _ suffix
-                            prop_value = to_dict.get(field_name)
-                            if prop_value is not None:
-                                edge_properties[prop_name] = prop_value
+            if not from_id:
+                continue  # Skip if we can't find the from node id
 
-                # Use id values for relationships with properties
-                relationships.append((from_type, from_id, to_type, to_id, relation_info.name, edge_properties))
+            to_items = to_data if isinstance(to_data, list) else [to_data]
+            for to_item in to_items:
+                if to_item is None:
+                    continue
+                to_dict = to_item.model_dump() if hasattr(to_item, "model_dump") else to_item
+
+                # Get dedup value for to node
+                if to_node_info.deduplication_key:
+                    to_dedup_value = to_dict.get(to_node_info.deduplication_key)
+                else:
+                    # Use _name as dedup value
+                    to_dedup_value = to_node_info.get_name_value(to_dict, to_type)
+
+                to_dedup_str = str(to_dedup_value) if to_dedup_value else None
+                to_id = id_registry[to_type].get(to_dedup_str) if to_dedup_str else None
+
+                if to_id:
+                    # Extract p_*_ properties from to_item for edge properties
+                    edge_properties = {}
+                    if hasattr(relation_info.to_node, "model_fields"):
+                        for field_name in relation_info.to_node.model_fields.keys():
+                            if field_name.startswith("p_") and field_name.endswith("_"):
+                                prop_name = field_name[2:-1]  # Remove p_ prefix and _ suffix
+                                prop_value = to_dict.get(field_name)
+                                if prop_value is not None:
+                                    edge_properties[prop_name] = prop_value
+
+                    # Use id values for relationships with properties
+                    relationships.append((from_type, from_id, to_type, to_id, relation_info.name, edge_properties))
 
     return nodes_dict, relationships
 

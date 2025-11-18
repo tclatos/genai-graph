@@ -172,7 +172,10 @@ class EkgCommands(CliTopCommand):
                     )
 
                 except Exception as e:
+                    import traceback
+
                     console.print(f"[red]❌ Error processing {key}: {e}[/red]")
+                    console.print("[red]" + traceback.format_exc() + "[/red]")
                     total_docs_failed += 1
                     continue
 
@@ -291,9 +294,14 @@ class EkgCommands(CliTopCommand):
                 str | None,
                 typer.Option(help="Name or tag of the LLM to use by BAML"),
             ] = None,
-            subgraph: Annotated[
-                str, typer.Option("--subgraph", "-g", help="Subgraph type for sample queries")
-            ] = "ReviewedOpportunity",
+            subgraphs: Annotated[
+                list[str],
+                typer.Option(
+                    "--subgraph",
+                    "-g",
+                    help="Subgraph(s) whose combined schema is used for text-to-Cypher (default: all)",
+                ),
+            ] = [],
         ) -> None:
             """Execute queries in natural language (Text-2-Cypher) on the EKG database.
 
@@ -303,7 +311,13 @@ class EkgCommands(CliTopCommand):
             from genai_graph.core.text2cypher import query_kg
 
             try:
-                df = query_kg(query, subgraph=subgraph, llm_id=llm)
+                from genai_graph.core.graph_registry import GraphRegistry
+
+                # If no subgraphs are provided, use all registered ones
+                registry = GraphRegistry.get_instance()
+                selected_subgraphs = subgraphs or registry.listsubgraphs()
+
+                df = query_kg(query, subgraphs=selected_subgraphs, llm_id=llm)
 
                 if df.empty:
                     console.print("[yellow]Query returned no results[/yellow]")
@@ -332,17 +346,38 @@ class EkgCommands(CliTopCommand):
         @cli_app.command("cypher")
         def cypher(
             query: str = typer.Argument(help="Cypher query to execute"),
-            subgraph: Annotated[
-                str, typer.Option("--subgraph", "-g", help="Subgraph type for sample queries")
-            ] = "ReviewedOpportunity",
+            subgraphs: Annotated[
+                list[str],
+                typer.Option(
+                    "--subgraph",
+                    "-g",
+                    help="Subgraph(s) whose combined context is being queried (default: all)",
+                ),
+            ] = [],
         ) -> None:
-            """Execute Cypher queries on the EKG database."""
+            """Execute Cypher queries on the EKG database.
+
+            The selected subgraphs are currently used for informational
+            purposes only (the Cypher query is executed as-is), but the
+            default follows the same semantics as other commands: when
+            ``--subgraph`` is omitted, all registered subgraphs are
+            considered.
+            """
 
             from genai_graph.core.graph_backend import (
                 create_backend_from_config,
             )
+            from genai_graph.core.graph_registry import GraphRegistry
 
-            console.print(Panel("[bold cyan]Querying EKG Database[/bold cyan]"))
+            registry = GraphRegistry.get_instance()
+            selected_subgraphs = subgraphs or registry.listsubgraphs()
+            subgraph_label = ", ".join(selected_subgraphs) if selected_subgraphs else "<none>"
+
+            console.print(
+                Panel(
+                    f"[bold cyan]Querying EKG Database[/bold cyan]\n[dim]Subgraphs: {subgraph_label}[/dim]"
+                )
+            )
 
             # Get database connection
             backend = create_backend_from_config(GRAPH_DB_CONFIG)
@@ -395,9 +430,14 @@ class EkgCommands(CliTopCommand):
 
         @cli_app.command("info")
         def show_info(
-            subgraph: Annotated[
-                str, typer.Option("--subgraph", "-g", help="Subgraph type to display info for")
-            ] = "ReviewedOpportunity",
+            subgraphs: Annotated[
+                list[str],
+                typer.Option(
+                    "--subgraph",
+                    "-g",
+                    help="Subgraph(s) to display info for; default is all registered",
+                ),
+            ] = [],
         ) -> None:
             """Display EKG database information, schema, and entity mapping.
 
@@ -409,16 +449,24 @@ class EkgCommands(CliTopCommand):
                 create_backend_from_config,
                 get_backend_storage_path_from_config,
             )
-            from genai_graph.core.graph_registry import get_subgraph
+            from genai_graph.core.graph_registry import GraphRegistry
 
-            # Get subgraph implementation
+            registry = GraphRegistry.get_instance()
+            selected_subgraphs = subgraphs or registry.listsubgraphs()
+
             try:
-                subgraph_impl = get_subgraph(subgraph)
+                schema = registry.build_combined_schema(selected_subgraphs)
             except ValueError as e:
                 console.print(f"[red]❌ {e}[/red]")
                 raise typer.Exit(1) from e
 
-            console.print(Panel(f"[bold cyan]{subgraph.title()} EKG Database Information[/bold cyan]"))
+            subgraph_title = ", ".join(selected_subgraphs) if selected_subgraphs else "ALL"
+
+            console.print(
+                Panel(
+                    f"[bold cyan]{subgraph_title} EKG Database Information[/bold cyan]",
+                )
+            )
 
             # Get database connection
             backend = create_backend_from_config(GRAPH_DB_CONFIG)
@@ -439,7 +487,9 @@ class EkgCommands(CliTopCommand):
             info_table.add_row("Database Type", "Kuzu Graph Database")
             info_table.add_row("Backend", "Kuzu (via GraphBackend abstraction)")
             info_table.add_row("Storage", "Persistent File Storage")
-            info_table.add_row("Subgraph Type", subgraph_impl.name)
+            info_table.add_row(
+                "Subgraph(s)", ", ".join(selected_subgraphs) if selected_subgraphs else "ALL"
+            )
 
             console.print(info_table)
             console.print()
@@ -457,6 +507,16 @@ class EkgCommands(CliTopCommand):
                         node_tables.append(row["name"])
                     elif row.get("type") == "REL":
                         rel_tables.append(row["name"])
+
+                # When a subset of subgraphs is selected, restrict statistics
+                # to node/relationship labels that appear in the combined
+                # schema. This keeps counts aligned with the logical graph
+                # being inspected.
+                if schema:
+                    allowed_node_labels = {n.baml_class.__name__ for n in schema.nodes}
+                    allowed_rel_types = {r.name for r in schema.relations}
+                    node_tables = [t for t in node_tables if t in allowed_node_labels]
+                    rel_tables = [t for t in rel_tables if t in allowed_rel_types]
 
                 # Schema overview
                 schema_table = Table(title="Schema Overview")
@@ -507,16 +567,16 @@ class EkgCommands(CliTopCommand):
                 console.print(f"[red]Error retrieving schema information: {e}[/red]")
 
             # Node Mapping
-            console.print(Panel(f"[bold cyan]{subgraph.title()} Node Mapping[/bold cyan]"))
+            console.print(Panel(f"[bold cyan]{subgraph_title} Node Mapping[/bold cyan]"))
 
             mapping_table = Table(title="Node Type → Description")
             mapping_table.add_column("Graph Node Type", style="cyan", no_wrap=True)
             mapping_table.add_column("Description", style="yellow")
 
-            # Get node labels from subgraph implementation
-            node_labels = subgraph_impl.get_node_labels()
-
-            for node_type, description in node_labels.items():
+            # Get node labels from the combined schema
+            for node in schema.nodes:
+                node_type = node.baml_class.__name__
+                description = node.description or ""
                 mapping_table.add_row(node_type, description)
 
             console.print(mapping_table)
@@ -528,17 +588,17 @@ class EkgCommands(CliTopCommand):
             rel_mapping_table.add_column("From → To", style="green")
             rel_mapping_table.add_column("Meaning", style="yellow")
 
-            # Get relationship labels from subgraph implementation
-            relationship_meanings = subgraph_impl.get_relationship_labels()
-
-            for rel_type, (direction, meaning) in relationship_meanings.items():
+            # Get relationship labels from the combined schema
+            for relation in schema.relations:
+                rel_type = relation.name
+                direction = f"{relation.from_node.__name__} → {relation.to_node.__name__}"
+                meaning = relation.description or ""
                 rel_mapping_table.add_row(rel_type, direction, meaning)
 
             console.print(rel_mapping_table)
 
             # Indexed fields information
             console.print("\n[bold cyan]Indexed Fields (Vector Store)[/bold cyan]")
-            schema = subgraph_impl.build_schema()
             indexed_fields_table = Table(title="Vector Store Indexed Fields")
             indexed_fields_table.add_column("Node Type", style="cyan", no_wrap=True)
             indexed_fields_table.add_column("Indexed Fields", style="yellow")
@@ -583,6 +643,14 @@ class EkgCommands(CliTopCommand):
         def export_html(
             output_dir: Annotated[str, typer.Option("--output-dir", "-o", help="Output directory")] = "/tmp",
             open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open in browser")] = True,
+            subgraphs: Annotated[
+                list[str],
+                typer.Option(
+                    "--subgraph",
+                    "-g",
+                    help="Subgraph(s) to visualise; default is all registered",
+                ),
+            ] = [],
         ) -> None:
             """Export EKG graph visualization as HTML and display clickable link.
 
@@ -614,8 +682,28 @@ class EkgCommands(CliTopCommand):
             # Generate HTML visualization
             console.print("🎨 Generating interactive visualization...")
             try:
+                from genai_graph.core.graph_registry import GraphRegistry
+
+                registry = GraphRegistry.get_instance()
+                selected_subgraphs = subgraphs or registry.listsubgraphs()
+
                 with console.status("[bold green]Creating HTML visualization..."):
-                    generate_html_visualization(backend, str(html_file_path), title="EKG Database Visualization")
+                    # Build a combined schema to inform which node/relationship
+                    # types should be visualised. The HTML generator will use
+                    # this to filter node tables and relationships.
+                    try:
+                        schema = registry.build_combined_schema(selected_subgraphs)
+                    except ValueError as e:
+                        console.print(f"[red]❌ {e}[/red]")
+                        raise typer.Exit(1) from e
+
+                    generate_html_visualization(
+                        backend,
+                        str(html_file_path),
+                        title="EKG Database Visualization",
+                        node_configs=schema.nodes,
+                        relation_configs=schema.relations,
+                    )
 
                 console.print("[green]✅ HTML visualization created successfully[/green]")
 
@@ -683,9 +771,14 @@ class EkgCommands(CliTopCommand):
 
         @cli_app.command("schema")
         def show_schema(
-            subgraph: Annotated[
-                str, typer.Option("--subgraph", "-g", help="Subgraph type to display schema for")
-            ] = "ReviewedOpportunity",
+            subgraphs: Annotated[
+                list[str],
+                typer.Option(
+                    "--subgraph",
+                    "-g",
+                    help="Subgraph(s) to display schema for; default is all registered",
+                ),
+            ] = [],
         ) -> None:
             """Display knowledge graph schema in Markdown format for LLM context.
 
@@ -695,12 +788,25 @@ class EkgCommands(CliTopCommand):
             """
             from rich.markdown import Markdown
 
-            from genai_graph.core.schema_doc_generator import generate_schema_markdown
+            from genai_graph.core.graph_registry import GraphRegistry
+            from genai_graph.core.schema_doc_generator import (
+                generate_combined_schema_markdown,
+                generate_schema_markdown,
+            )
 
             console.print(Panel("[bold cyan]Knowledge Graph Schema[/bold cyan]"))
 
             try:
-                markdown = generate_schema_markdown(subgraph)
+                registry = GraphRegistry.get_instance()
+                selected_subgraphs = subgraphs or registry.listsubgraphs()
+
+                # Use combined-schema documentation when multiple (or zero)
+                # subgraphs are requested; for exactly one, keep the
+                # single-subgraph format.
+                if not selected_subgraphs or len(selected_subgraphs) > 1:
+                    markdown = generate_combined_schema_markdown(selected_subgraphs)
+                else:
+                    markdown = generate_schema_markdown(selected_subgraphs[0])
                 console.print(Markdown(markdown))
             except ValueError as e:
                 console.print(f"[red]❌ {e}[/red]")

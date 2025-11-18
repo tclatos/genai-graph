@@ -182,6 +182,35 @@ def _fetch_graph_data(
     nodes: list[tuple[str, dict]] = []
     edges: list[tuple[str, str, str, dict]] = []
 
+    # Optional filtering based on provided node / relation configs
+    allowed_node_labels: set[str] | None = None
+    allowed_rel_types: set[str] | None = None
+
+    if node_configs:
+        try:
+            labels: set[str] = set()
+            for cfg in node_configs:
+                baml_class = getattr(cfg, "baml_class", None)
+                if baml_class is not None and hasattr(baml_class, "__name__"):
+                    labels.add(baml_class.__name__)
+            if labels:
+                allowed_node_labels = labels
+        except Exception:
+            # Fail open if configs are not in the expected shape
+            allowed_node_labels = None
+
+    if relation_configs:
+        try:
+            rel_types: set[str] = set()
+            for cfg in relation_configs:
+                name = getattr(cfg, "name", None)
+                if isinstance(name, str):
+                    rel_types.add(name)
+            if rel_types:
+                allowed_rel_types = rel_types
+        except Exception:
+            allowed_rel_types = None
+
     # Get all tables first to understand the schema
     try:
         tables_result = connection.execute("CALL show_tables() RETURN *")
@@ -193,6 +222,8 @@ def _fetch_graph_data(
             table_name = row["name"]
             table_type = row["type"]
             if table_type == "NODE":
+                if allowed_node_labels and table_name not in allowed_node_labels:
+                    continue
                 node_tables.append(table_name)
 
         # Create a mapping to store UUID to node data for relationship matching
@@ -293,6 +324,10 @@ def _fetch_graph_data(
                     rel_type = rel_obj.__class__.__name__.replace("Relationship", "").replace("Record", "")
                     if not rel_type or rel_type == "object":
                         rel_type = "RELATED_TO"
+
+                # Respect relation-type filtering when requested
+                if allowed_rel_types and rel_type not in allowed_rel_types:
+                    continue
 
                 # Extract node types and names from dictionary-based Kuzu results
                 def extract_node_info(node_obj) -> tuple[str, str]:

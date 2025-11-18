@@ -56,3 +56,5 @@ ekg_local:
 
   subgraphs:
   - genai_graph.ekg.rainbow_subgraph:register
+  - genai_graph.ekg.architecture_subgraph:register
+

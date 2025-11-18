@@ -51,7 +51,7 @@ https://docs.chonkie.ai/oss/pipelines
 
 
 # To Test :
-- ```uv run cli kg delete -f ; uv run cli kg add-doc --key cnes-venus-tma ; uv run cli kg export-html```
+- ```uv run cli kg delete -f ; uv run cli kg add-doc --key cnes-venus-tma --subgraph ReviewedOpportunity ; uv run cli kg export-html -g ReviewedOpportunity```
 
 - ```uv run cli baml extract $ONEDRIVE/prj/atos-kg/rainbow-md/cnes-venus-tma.md --function ExtractRainbow --force```
 
@@ -60,8 +60,12 @@ https://docs.chonkie.ai/oss/pipelines
 
 - ```cli baml run FakeArchitectureJson -i "IT platform for CNES with 3-tier, Java based"  --kvstore-key fake-cnes-1```
 
+- ```export GRAPH=ArchitectureDocument;  uv run cli kg delete -f ; uv run cli kg add-doc --key fake-cnes-1 -g $GRAPH ; uv run cli kg export-html -g $GRAPH```
+
 - ```cli kg schema```
 
+
+uv run cli kg delete -f ; uv run cli kg add-doc --key fake-cnes-1 --subgraph ArchitectureDocument
 
 
 # Misc

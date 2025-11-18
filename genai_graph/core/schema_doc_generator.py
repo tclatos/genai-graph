@@ -12,7 +12,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Any, get_args, get_origin
 
-from genai_graph.core.graph_registry import get_subgraph
+from genai_graph.core.graph_registry import GraphRegistry, get_subgraph
 from genai_graph.core.graph_schema import GraphSchema
 
 
@@ -41,6 +41,32 @@ def generate_schema_markdown(subgraph_name: str) -> str:
 
     return _format_markdown(
         subgraph_name=subgraph_name,
+        node_sections=node_sections,
+        rel_sections=rel_sections,
+        indexed_section=indexed_section,
+    )
+
+
+def generate_combined_schema_markdown(subgraph_names: list[str]) -> str:
+    """Generate Markdown describing the *combined* schema of several subgraphs.
+
+    Args:
+        subgraph_names: Names of the subgraphs to combine. If the list is
+            empty, all registered subgraphs are used.
+    """
+    registry = GraphRegistry.get_instance()
+    # ``build_combined_schema`` already defaults to all registered subgraphs
+    # when the argument list is empty.
+    schema = registry.build_combined_schema(subgraph_names)
+    baml_docs = _parse_baml_descriptions()
+    node_sections = _build_node_sections(schema, baml_docs)
+    rel_sections = _build_relationship_sections(schema, baml_docs)
+    indexed_section = _build_indexed_fields_section(schema)
+
+    # Use a compact name for the combined schema in the heading
+    title = "+".join(subgraph_names) if subgraph_names else "ALL"
+    return _format_markdown(
+        subgraph_name=title,
         node_sections=node_sections,
         rel_sections=rel_sections,
         indexed_section=indexed_section,

@@ -24,10 +24,13 @@ console = Console()
 
 
 def _format_value_for_cypher(value: Any) -> str:
-    """Format a Python value for use in Cypher queries.
+    """Format a Python value for use in Cypher-like queries.
 
-    Handles strings (with escaping), lists, None, booleans, and numbers
-    according to Cypher syntax requirements.
+    Handles strings (with escaping), lists, dicts (as MAP/STRUCT), None,
+    booleans, and numbers according to Cypher syntax requirements.
+
+    This representation is compatible with Kuzu (STRUCT fields) and can also
+    be interpreted as nested map properties by future Neo4j backends.
 
     Args:
         value: Python value to format
@@ -47,6 +50,10 @@ def _format_value_for_cypher(value: Any) -> str:
         # Recursively format list elements
         formatted_items = [_format_value_for_cypher(item) for item in value]
         return f"[{', '.join(formatted_items)}]"
+    elif isinstance(value, dict):
+        # Map / struct literal: {key: value, ...}
+        items = [f"{k}: {_format_value_for_cypher(v)}" for k, v in value.items()]
+        return "{" + ", ".join(items) + "}"
     elif isinstance(value, (int, float)):
         return str(value)
     elif hasattr(value, "value"):  # Enum types

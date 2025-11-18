@@ -80,5 +80,4 @@ class PydanticSubgraph(Subgraph, BaseModel):
             opportunity = store.load_object(key)
             return opportunity
         except Exception as e:
-            console.print(f"[red]Error loading opportunity data: {e}[/red]")
-            return None
+            raise ValueError(f"[red]Error loading opportunity data: {e}[/red]") from e

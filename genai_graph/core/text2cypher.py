@@ -6,7 +6,7 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from loguru import logger
 
 from genai_graph.core.graph_backend import create_backend_from_config
-from genai_graph.ekg.schema_doc_generator import generate_schema_markdown
+from genai_graph.core.schema_doc_generator import generate_schema_markdown
 
 # taken from https://kuzudb.github.io/blog/post/improving-text2cypher-for-graphrag-via-schema-pruning/
 

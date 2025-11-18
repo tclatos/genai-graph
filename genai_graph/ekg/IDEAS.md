@@ -51,15 +51,16 @@ https://docs.chonkie.ai/oss/pipelines
 
 
 # To Test :
-- ```uv run cli kg delete -f ; uv run cli kg add --key cnes-venus-tma ; uv run cli kg export-html```
+- ```uv run cli kg delete -f ; uv run cli kg add-doc --key cnes-venus-tma ; uv run cli kg export-html```
 
 - ```uv run cli baml extract $ONEDRIVE/prj/atos-kg/rainbow-md/cnes-venus-tma.md --function ExtractRainbow --force```
 
 - ```uv run cli baml run FakeRainbow -i "Project for CNES; Marc Ferrer as sales lead in Atos team" --kvstore-key fake_cnes_1 --force```
 
-- ```cli kg schema```
 
 - ```cli baml run FakeArchitectureJson -i "IT platform for CNES with 3-tier, Java based"  --kvstore-key fake-cnes-1```
+
+- ```cli kg schema```
 
 
 

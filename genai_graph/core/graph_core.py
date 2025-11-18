@@ -18,6 +18,10 @@ console = Console()
 def _get_kuzu_type(annotation: type) -> str:
     """Map Python type annotation to Kuzu type string.
 
+    This is a low-level helper used by the Kuzu-backed implementation to pick an
+    appropriate scalar type. Structured (MAP/STRUCT) fields for embedded models
+    are handled separately in ``create_schema``.
+
     Args:
         annotation: Python type annotation
 
@@ -31,6 +35,7 @@ def _get_kuzu_type(annotation: type) -> str:
     elif annotation in (int,):
         return "INT64"
     else:
+        # Fallback for strings, enums and complex types that are not marked as embedded
         return "STRING"
 
 
@@ -103,7 +108,8 @@ def _add_embedded_fields(parent_data: dict[str, Any], root_model: BaseModel, all
         all_nodes: All node configurations (GraphNodeConfig objects)
         parent_node: Parent node configuration (GraphNodeConfig object)
     """
-    # New structure: handle embedded fields from parent_node.embedded
+    # New structure: handle embedded fields from parent_node.embedded as MAP/STRUCT
+    # properties on the parent node, not flattened.
     if hasattr(parent_node, "embedded") and parent_node.embedded:
         # Get the parent instance data
         field_path = getattr(
@@ -126,11 +132,8 @@ def _add_embedded_fields(parent_data: dict[str, Any], root_model: BaseModel, all
             else:
                 continue
 
-            # Add embedded fields with prefix
-            prefix = f"{field_name}_"
-            for emb_field_name, field_value in embedded_dict.items():
-                embedded_field_name = f"{prefix}{emb_field_name}"
-                parent_data[embedded_field_name] = field_value
+            # Store as a nested map/struct property on the parent record
+            parent_data[field_name] = embedded_dict
 
     # Legacy: handle embed_in_parent nodes
     for embedded_node in all_nodes:
@@ -219,21 +222,51 @@ def create_schema(backend: GraphBackend, nodes: list, relations: list) -> None:
 
     # Create node tables (skip embedded ones)
     created_tables: set[str] = set()
-    embedded_fields_by_parent: dict[str, list[tuple[str, str]]] = {}
+    # For modern embedded configuration, we represent each embedded class as a
+    # single MAP/STRUCT-typed column on the parent node.
+    embedded_struct_fields_by_parent: dict[str, list[tuple[str, str]]] = {}
 
-    # First, collect embedded fields for each parent (new structure)
+    # First, collect embedded struct definitions for each parent (new structure)
     for node in nodes:
         if hasattr(node, "embedded") and node.embedded:
             parent_name = node.baml_class.__name__
-            if parent_name not in embedded_fields_by_parent:
-                embedded_fields_by_parent[parent_name] = []
+            if parent_name not in embedded_struct_fields_by_parent:
+                embedded_struct_fields_by_parent[parent_name] = []
+
+            parent_model_fields = getattr(node.baml_class, "model_fields", {})
 
             for field_name, embedded_class in node.embedded:
-                prefix = f"{field_name}_"
-                for emb_field_name, emb_field_info in embedded_class.model_fields.items():
-                    embedded_field_name = f"{prefix}{emb_field_name}"
+                # Validate that the embedded field exists on the parent model
+                if field_name not in parent_model_fields:
+                    console.print(
+                        f"[yellow]Warning: embedded field '{field_name}' is not defined on {parent_name}[/yellow]"
+                    )
+                    continue
+
+                # Ensure we can introspect the embedded class
+                embedded_model_fields = getattr(embedded_class, "model_fields", None)
+                if embedded_model_fields is None:
+                    console.print(
+                        f"[yellow]Warning: embedded class {embedded_class!r} for field '{field_name}' "
+                        f"on {parent_name} has no model_fields; skipping STRUCT generation[/yellow]"
+                    )
+                    continue
+
+                # Build STRUCT(field1 TYPE, field2 TYPE, ...) definition
+                struct_parts: list[str] = []
+                for emb_field_name, emb_field_info in embedded_model_fields.items():
                     kuzu_type = _get_kuzu_type(emb_field_info.annotation)
-                    embedded_fields_by_parent[parent_name].append((embedded_field_name, kuzu_type))
+                    struct_parts.append(f"{emb_field_name} {kuzu_type}")
+
+                if not struct_parts:
+                    console.print(
+                        f"[yellow]Warning: embedded class {embedded_class.__name__} for field "
+                        f"'{field_name}' on {parent_name} has no fields; skipping[/yellow]"
+                    )
+                    continue
+
+                struct_type = f"STRUCT({', '.join(struct_parts)})"
+                embedded_struct_fields_by_parent[parent_name].append((field_name, struct_type))
 
     # Legacy: handle embed_in_parent nodes
     for node in nodes:
@@ -274,16 +307,21 @@ def create_schema(backend: GraphBackend, nodes: list, relations: list) -> None:
         fields.append("_created_at STRING")  # ISO timestamp
         fields.append("_updated_at STRING")  # ISO timestamp
 
-        # Add regular fields (excluding any specified excluded_fields)
+        # Resolve embedded struct field types for this table, if any
+        embedded_struct_fields = {
+            name: struct_type for name, struct_type in embedded_struct_fields_by_parent.get(table_name, [])
+        }
+
+        # Add regular fields (excluding any specified excluded_fields).
+        # If a field is declared as embedded, we override its scalar type with
+        # a STRUCT(...) definition so it becomes a MAP/STRUCT column.
         for field_name, field_info in model_fields.items():
             if field_name not in node.excluded_fields:
-                kuzu_type = _get_kuzu_type(field_info.annotation)
+                if field_name in embedded_struct_fields:
+                    kuzu_type = embedded_struct_fields[field_name]
+                else:
+                    kuzu_type = _get_kuzu_type(field_info.annotation)
                 fields.append(f"{field_name} {kuzu_type}")
-
-        # Add embedded fields if this is a parent table
-        if table_name in embedded_fields_by_parent:
-            for embedded_field_name, kuzu_type in embedded_fields_by_parent[table_name]:
-                fields.append(f"{embedded_field_name} {kuzu_type}")
 
         fields_str = ", ".join(fields)
         create_sql = f"CREATE NODE TABLE IF NOT EXISTS {table_name}({fields_str}, PRIMARY KEY({key_field}))"

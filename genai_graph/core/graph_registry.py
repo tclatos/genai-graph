@@ -14,7 +14,7 @@ from genai_tk.utils.singleton import once
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from genai_graph.ekg.subgraph import Subgraph
+from genai_graph.core.subgraph import Subgraph
 
 
 class GraphRegistry(BaseModel):

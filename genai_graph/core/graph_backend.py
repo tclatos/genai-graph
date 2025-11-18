@@ -405,9 +405,7 @@ def create_backend_from_config(config_key: str = "default") -> GraphBackend:
     graph_db_config = config.get("graph_db", {})
 
     if config_key not in graph_db_config:
-        raise ValueError(
-            f"Graph database config '{config_key}' not found. Available: {list(graph_db_config.keys())}"
-        )
+        raise ValueError(f"Graph database config '{config_key}' not found. Available: {list(graph_db_config.keys())}")
 
     db_config = graph_db_config[config_key]
     backend_type = db_config.get("type")
@@ -458,9 +456,7 @@ def get_backend_storage_path_from_config(config_key: str = "default") -> Path:
     graph_db_config = config.get("graph_db", {})
 
     if config_key not in graph_db_config:
-        raise ValueError(
-            f"Graph database config '{config_key}' not found. Available: {list(graph_db_config.keys())}"
-        )
+        raise ValueError(f"Graph database config '{config_key}' not found. Available: {list(graph_db_config.keys())}")
 
     db_config = graph_db_config[config_key]
     connection_path = db_config.get("path")

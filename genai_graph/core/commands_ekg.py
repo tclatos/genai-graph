@@ -46,6 +46,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.table import Table
 
+from genai_graph.core.graph_backend import create_backend_from_config
+
 # Initialize Rich console
 console = Console()
 
@@ -693,7 +695,7 @@ class EkgCommands(CliTopCommand):
             """
             from rich.markdown import Markdown
 
-            from genai_graph.ekg.schema_doc_generator import generate_schema_markdown
+            from genai_graph.core.schema_doc_generator import generate_schema_markdown
 
             console.print(Panel("[bold cyan]Knowledge Graph Schema[/bold cyan]"))
 

@@ -364,7 +364,13 @@ class GraphSchema(BaseModel):
         return common_len > 0
 
     def _compute_excluded_fields(self) -> None:
-        """Compute which fields should be excluded from each node based on relationships."""
+        """Compute which fields should be excluded from each node based on relationships.
+
+        Notes:
+            Embedded fields defined via ``GraphNodeConfig.embedded`` are *not* excluded
+            here anymore. They are represented as structured properties (MAP/STRUCT)
+            on the parent node rather than being flattened or removed.
+        """
         for node_config in self.nodes:
             excluded_fields = set()
 
@@ -396,11 +402,7 @@ class GraphSchema(BaseModel):
                             if from_path == "":
                                 excluded_fields.add(to_path)
 
-            # Also exclude embedded fields (new structure)
-            for field_name, embedded_class in node_config.embedded:
-                excluded_fields.add(field_name)
-
-            # Legacy: handle embed_in_parent nodes
+            # Legacy: handle embed_in_parent nodes (these are still flattened)
             for other_node in self.nodes:
                 if other_node.embed_in_parent and other_node.baml_class != node_config.baml_class:
                     # Find if this other node is embedded in our node
@@ -464,6 +466,45 @@ class GraphSchema(BaseModel):
                     f"No valid field paths found for relationship {relation.name} "
                     f"between {relation.from_node.__name__} and {relation.to_node.__name__}"
                 )
+
+        # Validate embedded field configurations (MAP/STRUCT support)
+        from typing import get_args, get_origin
+
+        for node in self.nodes:
+            if not node.embedded:
+                continue
+
+            model_fields = getattr(node.baml_class, "model_fields", {})
+            for field_name, embedded_class in node.embedded:
+                # Check that the field exists on the parent class
+                if field_name not in model_fields:
+                    warnings_list.append(
+                        f"Embedded field '{field_name}' is not defined on class {node.baml_class.__name__}"
+                    )
+                    continue
+
+                annotation = model_fields[field_name].annotation
+                origin = get_origin(annotation)
+                args = get_args(annotation)
+
+                # Unwrap Optional/Union
+                candidate_types = []
+                if origin is None:
+                    candidate_types = [annotation]
+                elif origin is list:
+                    # Embedded should be a single object, not a list
+                    inner = args[0] if args else None
+                    if inner is not None:
+                        candidate_types = [inner]
+                elif origin is Union:
+                    candidate_types = [t for t in args if t is not type(None)]  # noqa: E721
+
+                if embedded_class not in candidate_types:
+                    warnings_list.append(
+                        "Embedded field '"
+                        f"{field_name}' on class {node.baml_class.__name__} has incompatible type "
+                        f"{annotation!r}; expected {embedded_class.__name__} or Optional[{embedded_class.__name__}]"
+                    )
 
         # Store warnings
         self._warnings = warnings_list

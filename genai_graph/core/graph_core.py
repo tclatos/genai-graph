@@ -904,7 +904,7 @@ class KnowledgeGraphExtractor:
         """
         try:
             # Import the HTML visualization function
-            from genai_graph.ekg.kuzu_graph_html import _fetch_graph_data
+            from genai_graph.core.graph_html import _fetch_graph_data
 
             # Use the existing data fetching logic with the backend
             nodes_data, edges_data = _fetch_graph_data(self.backend)

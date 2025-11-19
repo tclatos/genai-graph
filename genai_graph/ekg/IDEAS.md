@@ -40,6 +40,19 @@ CREATE (existingNode)-[:RELATED_TO]->(newNode)
     - doc_search()  (from Chonkie)
     - node_search()
 
+Create a CLI commmand 'agent' in genai_graph/core/commands_ekg.py that launch an LangChain agent, possibly interactive (chat mode).  
+Get inpiration from command 'react'  in /home/tcl/prj/genai-tk/genai_tk/extra/agents/commands_agents.py, but simpler: 
+- tools, MCP servers and system prompt are harcoded
+- create a langchain tool that execute a Cypher query (Take it from genai_graph/core/commands_ekg.py). Add that tools to the Agent 
+
+For the system prompt, explain that the role of the agent is (for now) to answer questions on enterprise data, and that it can use the provided tool to query a Cypher graph database.  
+Explain how to use the tool, and give it, as in function query_kg in genai_graph/core/text2cypher.py, the schema of the database and the the same SYSTEM_PROMPT.
+Take into account that, later, the agent will have other tools (notably to query a vector store and the web).
+Use best practices to write that system prompt.
+
+You can put some support core (such as system prompt) in another file.  Try to mutualize code and avoid duplication (you can modify genai_graph/core/text2cypher.py and other commands ).
+
+You can test using for ex: 'uv run cli kg agent -i "List the names of all competitors"
 
 
 ## Better 'rag' commands

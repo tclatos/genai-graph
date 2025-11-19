@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Interactive EKG (Enhanced Knowledge Graph) CLI.
 
-A comprehensive Typer-based CLI for managing a single Kuzu knowledge graph
+A comprehensive Typer-based CLI for managing a single Cypher knowledge graph
 created from BAML-structured data. Provides commands for adding opportunity data,
 querying with Cypher, and exporting visualizations.
 
@@ -45,8 +45,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.table import Table
-
-from genai_graph.core.graph_backend import create_backend_from_config
 
 # Initialize Rich console
 console = Console()
@@ -222,7 +220,6 @@ class EkgCommands(CliTopCommand):
             from genai_graph.core.graph_backend import (
                 create_backend_from_config,
                 delete_backend_storage_from_config,
-                get_backend_storage_path_from_config,
             )
 
             try:
@@ -270,7 +267,6 @@ class EkgCommands(CliTopCommand):
             # Delete the database
             console.print("🗑️  Deleting EKG database...")
             try:
-                db_path = get_backend_storage_path_from_config("default")
                 delete_backend_storage_from_config("default")
                 console.print("[green]✅ EKG database deleted successfully[/green]")
                 console.print(
@@ -343,6 +339,135 @@ class EkgCommands(CliTopCommand):
                 console.print(f"[red]❌ Query error: {e}[/red]")
                 return
 
+        @cli_app.command("agent")
+        def agent(
+            question: Annotated[
+                str | None,
+                typer.Option(
+                    "--input",
+                    "-i",
+                    help=("Initial user question or '-' to read from stdin; ignored when --chat is enabled"),
+                ),
+            ] = None,
+            chat: Annotated[
+                bool,
+                typer.Option(
+                    "--chat",
+                    "-s",
+                    help="Start an interactive chat session with the EKG agent",
+                ),
+            ] = False,
+            llm: Annotated[
+                str | None,
+                typer.Option(
+                    "--llm",
+                    "-m",
+                    help="LLM identifier (ID or tag) to use; default comes from configuration",
+                ),
+            ] = None,
+            mcp: Annotated[
+                list[str],
+                typer.Option(
+                    "--mcp",
+                    help="MCP server names to connect to (e.g. playwright, filesystem, ..)",
+                ),
+            ] = [],
+            subgraphs: Annotated[
+                list[str],
+                typer.Option(
+                    "--subgraph",
+                    "-g",
+                    help="Subgraph(s) whose combined schema is used to instruct the agent (default: all)",
+                ),
+            ] = [],
+            debug: Annotated[
+                bool,
+                typer.Option(
+                    "--debug",
+                    "-d",
+                    help="Display generated Cypher queries before execution",
+                ),
+            ] = False,
+        ) -> None:
+            """Run an EKG-aware LangChain agent over the knowledge graph.
+
+            The agent answers questions about enterprise data and can call a
+            Cypher execution tool to query the graph when needed.
+
+            Examples:
+                uv run cli kg agent -i "List the names of all competitors"
+                uv run cli kg agent --chat
+                uv run cli kg agent --mcp filesystem -i "List recent EKG exports on disk"
+            """
+            import asyncio
+            import sys
+
+            from genai_tk.core.llm_factory import LlmFactory
+            from genai_tk.core.mcp_client import call_react_agent
+            from genai_tk.extra.agents.langchain_setup import setup_langchain
+            from genai_tk.extra.agents.langgraph_agent_shell import run_langgraph_agent_shell
+
+            from genai_graph.core.ekg_agent import (
+                build_ekg_agent_system_prompt,
+                create_ekg_cypher_tool,
+            )
+            from genai_graph.core.graph_registry import GraphRegistry
+
+            registry = GraphRegistry.get_instance()
+            selected_subgraphs = subgraphs or registry.listsubgraphs()
+
+            if not selected_subgraphs:
+                console.print("[red]❌ No subgraphs are currently registered.[/red]")
+                raise typer.Exit(1)
+
+            # Resolve LLM identifier (ID or tag) and configure LangChain
+            final_llm_id: str | None = None
+            if llm:
+                resolved_id, error_msg = LlmFactory.resolve_llm_identifier_safe(llm)
+                if error_msg:
+                    console.print(error_msg)
+                    raise typer.Exit(1)
+                final_llm_id = resolved_id
+
+            if not setup_langchain(final_llm_id):
+                raise typer.Exit(1)
+
+            system_prompt = build_ekg_agent_system_prompt(selected_subgraphs)
+            ekg_tool = create_ekg_cypher_tool(
+                backend_config=GRAPH_DB_CONFIG,
+                console=console,
+                debug=debug,
+            )
+
+            if not chat:
+                if not question and not sys.stdin.isatty():
+                    question = sys.stdin.read()
+                if not question or len(question.strip()) < 3:
+                    console.print("[red]❌ Input parameter or something in stdin is required[/red]")
+                    raise typer.Exit(1)
+
+                # Reuse the common ReAct helper from genai-tk
+                asyncio.run(
+                    call_react_agent(
+                        question.strip(),
+                        llm_id=final_llm_id,
+                        mcp_server_filter=mcp,
+                        additional_tools=[ekg_tool],
+                        pre_prompt=system_prompt,
+                    )
+                )
+                return
+
+            # Interactive chat mode using the shared LangGraph shell
+            asyncio.run(
+                run_langgraph_agent_shell(
+                    final_llm_id,
+                    tools=[ekg_tool],
+                    mcp_server_names=mcp,
+                    system_prompt=system_prompt,
+                )
+            )
+
         @cli_app.command("cypher")
         def cypher(
             query: str = typer.Argument(help="Cypher query to execute"),
@@ -374,9 +499,7 @@ class EkgCommands(CliTopCommand):
             subgraph_label = ", ".join(selected_subgraphs) if selected_subgraphs else "<none>"
 
             console.print(
-                Panel(
-                    f"[bold cyan]Querying EKG Database[/bold cyan]\n[dim]Subgraphs: {subgraph_label}[/dim]"
-                )
+                Panel(f"[bold cyan]Querying EKG Database[/bold cyan]\n[dim]Subgraphs: {subgraph_label}[/dim]")
             )
 
             # Get database connection
@@ -484,12 +607,10 @@ class EkgCommands(CliTopCommand):
             info_table.add_column("Value", style="green")
 
             info_table.add_row("Database Path", str(db_path))
-            info_table.add_row("Database Type", "Kuzu Graph Database")
-            info_table.add_row("Backend", "Kuzu (via GraphBackend abstraction)")
+            info_table.add_row("Database Type", "Cypher Graph Database")
+            info_table.add_row("Backend", "Cypher (via GraphBackend abstraction)")
             info_table.add_row("Storage", "Persistent File Storage")
-            info_table.add_row(
-                "Subgraph(s)", ", ".join(selected_subgraphs) if selected_subgraphs else "ALL"
-            )
+            info_table.add_row("Subgraph(s)", ", ".join(selected_subgraphs) if selected_subgraphs else "ALL")
 
             console.print(info_table)
             console.print()
@@ -657,7 +778,8 @@ class EkgCommands(CliTopCommand):
             Creates an interactive D3.js visualization of the EKG database
             and saves it to the specified output directory.
             """
-            from genai_graph.core.kuzu_graph_html import generate_html_visualization
+            from genai_graph.core.graph_backend import create_backend_from_config
+            from genai_graph.core.graph_html import generate_html_visualization
 
             console.print(Panel("[bold cyan]Exporting EKG HTML Visualization[/bold cyan]"))
 
@@ -779,6 +901,7 @@ class EkgCommands(CliTopCommand):
                     help="Subgraph(s) to display schema for; default is all registered",
                 ),
             ] = [],
+            raw: bool = False,
         ) -> None:
             """Display knowledge graph schema in Markdown format for LLM context.
 
@@ -807,7 +930,10 @@ class EkgCommands(CliTopCommand):
                     markdown = generate_combined_schema_markdown(selected_subgraphs)
                 else:
                     markdown = generate_schema_markdown(selected_subgraphs[0])
-                console.print(Markdown(markdown))
+                if raw:
+                    console.print(markdown)
+                else:
+                    console.print(Markdown(markdown))
             except ValueError as e:
                 console.print(f"[red]❌ {e}[/red]")
                 raise typer.Exit(1) from e

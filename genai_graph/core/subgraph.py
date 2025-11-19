@@ -56,6 +56,17 @@ class Subgraph(ABC):
         """Extract a human-readable entity name from loaded data."""
         return "Unknown Entity"
 
+    def register(self, registry: "GraphRegistry | None" = None) -> None:  # noqa: F821
+        """Register this subgraph implementation.
+
+        If ``registry`` is not provided, the global :class:`GraphRegistry`
+        instance is used.
+        """
+        # Local import to avoid circular dependency at module import time.
+        from genai_graph.core.graph_registry import register_subgraph
+
+        register_subgraph(self.name, self, registry=registry)
+
 
 class PydanticSubgraph(Subgraph, BaseModel):
     top_class: Type[BaseModel]

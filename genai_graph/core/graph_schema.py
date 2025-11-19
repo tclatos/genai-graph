@@ -455,17 +455,17 @@ class GraphSchema(BaseModel):
                 )
 
         # Check that field paths were found for all nodes
-        for node in self.nodes:
-            if not node.field_paths and node.baml_class != self.root_model_class:
-                warnings_list.append(f"No field paths found for {node.baml_class.__name__} in the model structure")
+        # for node in self.nodes:
+        #     if not node.field_paths and node.baml_class != self.root_model_class:
+        #         warnings_list.append(f"No field paths found for {node.baml_class.__name__} in the model structure")
 
-        # Check that field paths were found for relationships
-        for relation in self.relations:
-            if not relation.field_paths:
-                warnings_list.append(
-                    f"No valid field paths found for relationship {relation.name} "
-                    f"between {relation.from_node.__name__} and {relation.to_node.__name__}"
-                )
+        # # Check that field paths were found for relationships
+        # for relation in self.relations:
+        #     if not relation.field_paths:
+        #         warnings_list.append(
+        #             f"No valid field paths found for relationship {relation.name} "
+        #             f"between {relation.from_node.__name__} and {relation.to_node.__name__}"
+        #         )
 
         # Validate embedded field configurations (MAP/STRUCT support)
         from typing import get_args, get_origin
@@ -646,19 +646,3 @@ class GraphSchema(BaseModel):
             console.print("\n[bold red]Warnings:[/bold red]")
             for warning in self._warnings:
                 console.print(f"⚠️  {warning}")
-
-
-def create_schema(
-    root_model_class: Type[BaseModel], nodes: List[GraphNodeConfig], relations: List[GraphRelationConfig]
-) -> GraphSchema:
-    """Create and validate a simplified graph schema.
-
-    Args:
-        root_model_class: The root Pydantic model class
-        nodes: List of node configurations
-        relations: List of relationship configurations
-
-    Returns:
-        Validated GraphSchema with auto-deduced field paths and excluded fields
-    """
-    return GraphSchema(root_model_class=root_model_class, nodes=nodes, relations=relations)

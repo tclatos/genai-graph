@@ -11,7 +11,6 @@ from typing import Any, Type
 
 from pydantic import BaseModel
 
-from genai_graph.core.graph_registry import register_subgraph
 from genai_graph.core.graph_schema import GraphSchema
 from genai_graph.core.subgraph import PydanticSubgraph
 from genai_graph.ekg.baml_client.types import Customer, SWArchitectureDocument
@@ -23,6 +22,11 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
     top_class: Type[BaseModel] = SWArchitectureDocument
     kv_store_id: str = "default"
 
+    @property
+    def name(self) -> str:
+        """Name of the subgraph in the registry."""
+        return "ArchitectureDocument"
+
     def build_schema(self) -> GraphSchema:
         """Build the graph schema configuration for architecture document data.
 
@@ -32,7 +36,6 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
         from genai_graph.core.graph_schema import (
             GraphNodeConfig,
             GraphRelationConfig,
-            create_schema,
         )
         from genai_graph.ekg.baml_client.types import (
             Opportunity,
@@ -117,10 +120,7 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
             # Component to component relationships (dependencies/integration)
         ]
 
-        # Create and validate the schema - this will auto-deduce all field paths
-        schema = create_schema(root_model_class=self.top_class, nodes=nodes, relations=relations)
-
-        return schema
+        return GraphSchema(root_model_class=self.top_class, nodes=nodes, relations=relations)
 
     def get_sample_queries(self) -> list[str]:
         """Get list of sample Cypher queries for architecture data."""
@@ -128,12 +128,15 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
             # Node type summary
             "MATCH (n) RETURN labels(n)[0] as NodeType, count(n) as Count",
             # List all technologies in the stack
-            "MATCH (doc:SWArchitectureDocument)-[r:USES_TECHNOLOGY]->(tech:TechnicalComponent) "
-            "RETURN tech.name, tech.type, r.p_purpose_ LIMIT 10",
-            # List all solutions used
-            "MATCH (doc:SWArchitectureDocument)-[r:USES_SOLUTION]->(sol:Solution) "
-            "RETURN sol.name, sol.vendor, sol.type, r.p_purpose_ LIMIT 10",
-            # Find technology integrations
+            (
+                "MATCH (doc:SWArchitectureDocument)-[r:USED_TECHNOLOGY]->(tech:TechnicalComponent) "
+                "RETURN tech.name, tech.type, r.p_purpose_ LIMIT 10"
+            ),
+            # List all solutions in the architecture
+            (
+                "MATCH (doc:SWArchitectureDocument)-[r:USED_SOLUTION]->(sol:Solution) "
+                "RETURN sol.name, sol.vendor, sol.type, r.p_purpose_ LIMIT 10"
+            ),
         ]
 
     def get_entity_name_from_data(self, data: Any) -> str:
@@ -143,16 +146,3 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
         if hasattr(data, "document_date"):
             return f"Architecture: {data.document_date}"
         return "Architecture Document"
-
-
-# Register this subgraph implementation in the global registry
-
-
-def register(registry: "GraphRegistry | None " = None) -> None:  # noqa: F821
-    """Register the ArchitectureDocument subgraph implementation.
-
-    The optional ``registry`` argument allows the caller (typically
-    :class:`genai_graph.core.graph_registry.GraphRegistry`) to supply the
-    registry instance explicitly.
-    """
-    register_subgraph("ArchitectureDocument", ArchitectureDocumentSubgraph(), registry=registry)

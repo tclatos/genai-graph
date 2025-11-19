@@ -10,7 +10,6 @@ from typing import Any, Type
 
 from pydantic import BaseModel
 
-from genai_graph.core.graph_registry import register_subgraph
 from genai_graph.core.graph_schema import GraphSchema
 from genai_graph.core.subgraph import PydanticSubgraph
 from genai_graph.ekg.baml_client.types import ReviewedOpportunity
@@ -33,7 +32,6 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
         from genai_graph.core.graph_schema import (
             GraphNodeConfig,
             GraphRelationConfig,
-            create_schema,
         )
         from genai_graph.ekg.baml_client.types import (
             CompetitiveLandscape,
@@ -161,12 +159,7 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
                 description="Known competitors",
             ),
         ]
-
-        # Create and validate the schema - this will auto-deduce all field paths
-        schema = create_schema(root_model_class=self.top_class, nodes=nodes, relations=relations)
-
-        #        debug(schema)
-        return schema
+        return GraphSchema(root_model_class=self.top_class, nodes=nodes, relations=relations)
 
     def get_sample_queries(self) -> list[str]:
         """Get list of sample Cypher queries for opportunity data."""
@@ -184,16 +177,3 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
         if hasattr(data, "ReviewedOpportunity") and hasattr(data.opportunity, "name"):
             return data.opportunity.name
         return "Unknown Entity"
-
-
-# Register this subgraph implementation in the global registry
-
-
-def register(registry: "GraphRegistry | None " = None) -> None:  # noqa: F821
-    """Register the ReviewedOpportunity subgraph implementation.
-
-    The optional ``registry`` argument allows the caller (typically
-    :class:`genai_graph.core.graph_registry.GraphRegistry`) to supply the
-    registry instance explicitly.
-    """
-    register_subgraph("ReviewedOpportunity", ReviewedOpportunitySubgraph(), registry=registry)

@@ -14,10 +14,8 @@ from genai_tk.utils.singleton import once
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from genai_graph.core.subgraph import Subgraph
-
-
 from genai_graph.core.graph_schema import GraphSchema
+from genai_graph.core.subgraph import Subgraph
 
 
 class GraphRegistry(BaseModel):
@@ -38,24 +36,51 @@ class GraphRegistry(BaseModel):
     def model_post_init(self, _context: Any) -> None:
         """Load and register configured subgraph providers.
 
-        Subgraph registration functions can optionally accept a
-        :class:`GraphRegistry` instance as their single argument. If they
-        don't, they will be called with no arguments for backward
-        compatibility.
+        Each entry in the ``subgraphs`` configuration should resolve to one of
+        the following:
+
+        * A :class:`Subgraph` subclass (preferred) – it will be instantiated
+          with default arguments and registered.
+        * A callable returning a :class:`Subgraph` instance – the instance
+          will be registered.
+        * A legacy ``register`` function that accepts an optional
+          :class:`GraphRegistry` instance; this path is kept for backward
+          compatibility and is responsible for calling
+          :func:`register_subgraph` manually.
         """
-        modules = global_config().get_list("subgraphs", value_type=str)
-        for module in modules:
+        providers = global_config().get_list("subgraphs", value_type=str)
+        for provider in providers:
             try:
-                logger.info(f"import {module}")
-                imported = import_from_qualified(module)
-                try:
-                    # Preferred signature: register(registry: GraphRegistry) -> None
-                    imported(self)
-                except TypeError:
-                    # Backward-compatible signature: register() -> None
-                    imported()
+                logger.info(f"import {provider}")
+                imported = import_from_qualified(provider)
+
+                subgraph: Subgraph | None = None
+
+                # Already-instantiated Subgraph instance
+                if isinstance(imported, Subgraph):
+                    subgraph = imported
+                # Subgraph subclass – instantiate with defaults
+                elif isinstance(imported, type) and issubclass(imported, Subgraph):
+                    subgraph = imported()
+                else:
+                    # Callable provider – may be a factory returning a Subgraph
+                    # or a legacy register(registry) function.
+                    try:
+                        candidate = imported(self)
+                    except TypeError:
+                        candidate = imported()
+
+                    if isinstance(candidate, Subgraph):
+                        subgraph = candidate
+                    else:
+                        # Legacy path: callable handled registration itself.
+                        continue
+
+                if subgraph is not None:
+                    subgraph.register(self)
+
             except Exception as ex:
-                logger.warning(f"Cannot load module {module}: {ex}")
+                logger.warning(f"Cannot load subgraph provider {provider}: {ex}")
 
     @once
     def get_instance() -> "GraphRegistry":

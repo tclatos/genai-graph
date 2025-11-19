@@ -14,26 +14,45 @@ from genai_graph.core.schema_doc_generator import (
 # taken from https://kuzudb.github.io/blog/post/improving-text2cypher-for-graphrag-via-schema-pruning/
 
 SYSTEM_PROMPT = """  
-    Translate the given question into a valid Cypher query that respects the given graph schema.
-    <SYNTAX>
-    - Relationship directions are VERY important to the success of a query. Here's an example: If
-    the relationship `HAS_CREATOR` is marked as `from` A `to` B, it means that B created A.
-    - Use short, concise alphanumeric strings as names of variable bindings (e.g., `a1`, `r1`, etc.)    
-    - When comparing string properties, ALWAYS do the following:
-      - Lowercase the property values before comparison
-      - Use the WHERE clause
-      - Use the CONTAINS operator to check for presence of one substring in the other
-    - DO NOT use APOC as the database does not support it.
-    - For datetime queries, use the TIMESTAMP type, which combines the date and time.
-    - Ensure all nodes, relationships and properties are conform to the given schema.
-    </SYNTAX>
+Translate the given question into a single, valid Cypher statement that respects the provided graph schema.
 
-    <RETURN_RESULTS>
-    - If the result is an integer, return it as an integer (not a string).
-    - When returning results, return property values rather than the entire node or relationship.
-    - Do not attempt to coerce data types to number formats (e.g., integer, float) in your results.
-    - NO Cypher keywords should be returned by your query.
-    </RETURN_RESULTS> """
+<SYNTAX>
+- Reply with the raw Cypher statement only; do not wrap it in ```cypher … ``` or any markdown.  
+- Start EVERY query with MATCH (or OPTIONAL MATCH) and finish with RETURN; no leading/trailing text.  
+
+- Relationship directions are VERY important. If the relationship HAS_CREATOR is documented “from A to B”, it means B created A.  
+  For clarity: (a)-[:R]->(b) always reads “a → b”, so (ro)-[:HAS_COMPETITOR]->(comp) means “the ReviewedOpportunity lists comp as a competitor”.
+
+- Use short, concise, alphanumeric variable names (e.g.  a1, r1, hc).  
+
+- When comparing string properties ALWAYS:  
+  – lower-case both sides with toLower()  
+  – use the WHERE clause  
+  – use CONTAINS (not =)  
+
+- DO NOT use APOC; the database does not support it.  
+
+- For datetime queries use the DATE or TIMESTAMP type.  
+  When the user asks for “after <date>”, translate to  
+  date(o.start_date) > date('YYYY-MM-DD’)  
+  (or ro.document_date, whichever field is present).  
+  Never compare an opportunity_id string to a date literal.
+
+- Ensure all node labels, relationship types and properties exist in the schema.
+</SYNTAX>
+
+<RETURN_RESULTS>
+- If the result is an integer, return it as an integer (not a string).
+- When returning results, return property values rather than the entire node or relationship.
+- Do not attempt to coerce data types to number formats (e.g., integer, float) in your results.
+- NO Cypher keywords should be returned by your query.
+- Reply with the raw Cypher statement only; do not wrap it in ```cypher … ``` or any markdown.
+- When you need a field that lives inside an embedded object (e.g. `financials.tcv`, `competition.comment`)  
+  or on a relationship property, return it with dot-notation **without back-ticks**:  
+  `ro.financials.tcv` or `hc.comment` if the relationship is bound as `hc`.
+- Append `LIMIT 30` to every query unless the user explicitly asks for a different number.
+
+"""
 
 USER_PROMPT = """
 

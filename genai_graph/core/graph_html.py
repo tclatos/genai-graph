@@ -1,22 +1,13 @@
-"""Generate an interactive HTML visualization of a Kuzu graph from a given connection.
+"""Generate an interactive HTML visualization of a Cypher graph
 
-This module is standalone (no Cognee dependencies). It queries nodes and edges
-from the connected Kuzu database, builds a simple JSON model, and embeds it in
+This module  builds a simple JSON model, and embeds it in
 an HTML page rendered with D3 force-directed layout.
+
+It's inspired from code in Cognee.
 
 Usage example:
 ```
-from kuzu import Database, Connection
-from kuzu_graph_html import generate_kuzu_graph_html
-from graph_schema import GraphSchema
 
-db = Database("/path/to/graph.db")
-conn = Connection(db)
-# Option 1: Use with GraphSchema
-html = generate_kuzu_graph_html(conn, "/tmp/graph_visualization.html")
-# Option 2: Pass legacy format configs (auto-detected)
-html = generate_kuzu_graph_html(conn, "/tmp/graph_visualization.html", legacy_nodes, legacy_relations)
-print("Wrote:", "/tmp/graph_visualization.html")
 ```
 """
 
@@ -411,7 +402,7 @@ def _fetch_graph_data(
     return nodes, edges
 
 
-def generate_kuzu_graph_html(
+def generate_html(
     connection: GraphBackend,
     destination_file_path: str | None = None,
     node_configs: list | None = None,
@@ -514,7 +505,7 @@ def generate_kuzu_graph_html(
                 position: absolute;
                 text-align: left;
                 padding: 8px;
-                font-size: 10px;
+                font-size: 8px;
                 background: rgba(0, 0, 0, 0.9);
                 color: white;
                 border: 1px solid rgba(255, 255, 255, 0.3);
@@ -792,7 +783,7 @@ def generate_html_visualization(
     Returns:
         The HTML content as a string.
     """
-    return generate_kuzu_graph_html(
+    return generate_html(
         connection=connection,
         destination_file_path=destination_file_path,
         node_configs=node_configs,
@@ -895,14 +886,14 @@ class KnowledgeGraphHTMLVisualizer:
         .links line.weighted { stroke: rgba(255, 215, 0, 0.7); }
         .links line.multi-weighted { stroke: rgba(0, 255, 127, 0.8); }
         .nodes circle { stroke: white; stroke-width: 0.5px; filter: drop-shadow(0 0 5px rgba(255,255,255,0.3)); }
-        .node-label { font-size: 8px; font-weight: bold; fill: white; text-anchor: middle; dominant-baseline: middle; font-family: 'Inter', sans-serif; pointer-events: none; }
-        .edge-label { font-size: 3px; fill: rgba(255, 255, 255, 0.7); text-anchor: middle; dominant-baseline: middle; font-family: 'Inter', sans-serif; pointer-events: none; }
+        .node-label { font-size: 7px; font-weight: bold; fill: white; text-anchor: middle; dominant-baseline: middle; font-family: 'Inter', sans-serif; pointer-events: none; }
+        .edge-label { font-size: 4px; fill: rgba(255, 255, 255, 0.7); text-anchor: middle; dominant-baseline: middle; font-family: 'Inter', sans-serif; pointer-events: none; }
         
         .tooltip {
             position: absolute;
             text-align: left;
             padding: 8px;
-            font-size: 8px;
+            font-size: 7px;
             background: rgba(0, 0, 0, 0.9);
             color: white;
             border: 1px solid rgba(255, 255, 255, 0.3);

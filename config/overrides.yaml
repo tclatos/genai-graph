@@ -55,6 +55,6 @@ ekg_local:
       baml_client: genai_graph.ekg.baml_client
 
   subgraphs:
-  - genai_graph.ekg.rainbow_subgraph:register
-  - genai_graph.ekg.architecture_subgraph:register
+  - genai_graph.ekg.rainbow_subgraph:ReviewedOpportunitySubgraph
+  - genai_graph.ekg.architecture_subgraph:ArchitectureDocumentSubgraph
 

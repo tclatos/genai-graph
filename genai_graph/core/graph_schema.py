@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union,
 from pydantic import BaseModel, model_validator
 
 
-class GraphNodeConfig(BaseModel):
+class GraphNode(BaseModel):
     """Simplified node configuration for graph creation.
 
     Only requires the essential information that cannot be auto-deduced:
@@ -120,7 +120,7 @@ class GraphNodeConfig(BaseModel):
         return f"{field_name}_"
 
 
-class GraphRelationConfig(BaseModel):
+class GraphRelation(BaseModel):
     """Simplified relationship configuration.
 
     Only requires the essential relationship information:
@@ -143,8 +143,8 @@ class GraphSchema(BaseModel):
     """Complete graph schema with validation and auto-deduction capabilities."""
 
     root_model_class: Type[BaseModel]
-    nodes: List[GraphNodeConfig]
-    relations: List[GraphRelationConfig]
+    nodes: List[GraphNode]
+    relations: List[GraphRelation]
 
     # Validation results
     _model_field_map: Dict[Type[BaseModel], Dict[str, Any]] = {}
@@ -363,7 +363,7 @@ class GraphSchema(BaseModel):
         node_config = next((n for n in self.nodes if n.baml_class == node_class), None)
         return node_config.field_paths if node_config else []
 
-    def _is_valid_relationship_path(self, from_path: str, to_path: str, relation_config: GraphRelationConfig) -> bool:
+    def _is_valid_relationship_path(self, from_path: str, to_path: str, relation_config: GraphRelation) -> bool:
         """Check if a relationship path makes logical sense."""
         # Root to anything is valid
         if from_path == "":

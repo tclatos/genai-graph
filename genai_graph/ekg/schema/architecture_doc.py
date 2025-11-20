@@ -35,8 +35,8 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
             GraphSchema with all node and relationship configurations
         """
         from genai_graph.core.graph_schema import (
-            GraphNodeConfig,
-            GraphRelationConfig,
+            GraphNode,
+            GraphRelation,
         )
         from genai_graph.ekg.baml_client.types import (
             Opportunity,
@@ -50,13 +50,13 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
         # Define nodes with descriptions
         nodes = get_common_nodes() + [
             # Root node - the architecture document itself
-            GraphNodeConfig(
+            GraphNode(
                 baml_class=SWArchitectureDocument,
                 name_from=lambda data, base: f"Architecture:{data.get('document_date', 'unknown')}",
                 description="Root node containing the complete architecture document with technical stack and solutions",
             ),
             # Technical Component nodes - individual technologies and tools
-            GraphNodeConfig(
+            GraphNode(
                 baml_class=TechnicalComponent,
                 name_from="name",
                 description="Individual technology, framework, platform, tool, or infrastructure component",
@@ -64,7 +64,7 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
                 deduplication_key="name",
             ),
             # Solution nodes - managed services, products, and OSS solutions
-            GraphNodeConfig(
+            GraphNode(
                 baml_class=Solution,
                 name_from="name",
                 description="Specific product, managed service, or OSS solution used in the architecture",
@@ -78,27 +78,27 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
         # converted to edge properties
         relations = [
             # Document to project
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=SWArchitectureDocument,
                 to_node=Opportunity,
                 name="SOFWARE_ARCHITECURE",
                 description="Architecture document for the opportunity/project",
             ),
             # Document to technical components in the stack
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=SWArchitectureDocument,
                 to_node=TechnicalComponent,
                 name="USED_TECHNOLOGY",
                 description="Architecture includes this technology component.",
             ),
             # Document to solutions
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=SWArchitectureDocument,
                 to_node=Solution,
                 name="USED_SOLUTION",
                 description="Architecture leverages this solution. ",
             ),
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=Opportunity,
                 to_node=Customer,
                 name="HAS_CUSTOMER",

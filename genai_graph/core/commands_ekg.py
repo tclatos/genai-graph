@@ -710,8 +710,13 @@ class EkgCommands(CliTopCommand):
                     # Callable – we do not introspect further to keep output stable
                     dedup_label = "callable"
 
-                # All node tables expose the unified alternate_names column
-                alt_label = "alternate_names"
+                # Only highlight alternate_names when a custom deduplication strategy
+                # is configured. For nodes using the default _name-based dedup, the
+                # alternate name feature is typically not relevant in practice.
+                if node.deduplication_key is None:
+                    alt_label = ""
+                else:
+                    alt_label = "alternate_names"
 
                 mapping_table.add_row(node_type, description, dedup_label, alt_label)
 

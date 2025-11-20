@@ -23,7 +23,7 @@ from rich.text import Text
 
 from genai_graph.core.graph_backend import GraphBackend
 from genai_graph.core.graph_core import create_graph, restart_database
-from genai_graph.core.graph_schema import GraphNodeConfig, GraphRelationConfig, create_schema
+from genai_graph.core.graph_schema import GraphNode, GraphRelation, create_schema
 from genai_graph.ekg.baml_client.types import (
     CompetitiveLandscape,
     Customer,
@@ -59,38 +59,36 @@ def create_configuration():
     # Define nodes - just specify the class and name_from field
     nodes = [
         # Root node
-        GraphNodeConfig(baml_class=ReviewedOpportunity, name_from="start_date"),
+        GraphNode(baml_class=ReviewedOpportunity, name_from="start_date"),
         # Regular nodes - field paths auto-deduced
-        GraphNodeConfig(baml_class=Opportunity, name_from="name"),
-        GraphNodeConfig(baml_class=Customer, name_from="name"),
-        GraphNodeConfig(
-            baml_class=Person, name_from="name", deduplication_key="name"
-        ),  # Handles both contacts and team
-        GraphNodeConfig(baml_class=Partner, name_from="name"),
-        GraphNodeConfig(baml_class=RiskAnalysis, name_from="risk_description"),
-        GraphNodeConfig(
+        GraphNode(baml_class=Opportunity, name_from="name"),
+        GraphNode(baml_class=Customer, name_from="name"),
+        GraphNode(baml_class=Person, name_from="name", deduplication_key="name"),  # Handles both contacts and team
+        GraphNode(baml_class=Partner, name_from="name"),
+        GraphNode(baml_class=RiskAnalysis, name_from="risk_description"),
+        GraphNode(
             baml_class=TechnicalApproach,
             name_from=lambda data, base: data.get("technical_stack") or data.get("architecture") or f"{base}_default",
         ),
-        GraphNodeConfig(
+        GraphNode(
             baml_class=CompetitiveLandscape,
             name_from=lambda data, base: data.get("competitive_position") or f"{base}_competitive_position",
         ),
         # Embedded node - financials will be embedded in Opportunity table
-        GraphNodeConfig(baml_class=FinancialMetrics, name_from="tcv", embed_in_parent=True, embed_prefix="financial_"),
+        GraphNode(baml_class=FinancialMetrics, name_from="tcv", embed_in_parent=True, embed_prefix="financial_"),
     ]
 
     # Define relationships - just specify from/to classes and relationship name
     # Field paths are automatically deduced from the model structure
     relations = [
-        GraphRelationConfig(from_node=ReviewedOpportunity, to_node=Opportunity, name="REVIEWS"),
-        GraphRelationConfig(from_node=Opportunity, to_node=Customer, name="HAS_CUSTOMER"),
-        GraphRelationConfig(from_node=Customer, to_node=Person, name="HAS_CONTACT"),
-        GraphRelationConfig(from_node=ReviewedOpportunity, to_node=Person, name="HAS_TEAM_MEMBER"),
-        GraphRelationConfig(from_node=ReviewedOpportunity, to_node=Partner, name="HAS_PARTNER"),
-        GraphRelationConfig(from_node=ReviewedOpportunity, to_node=RiskAnalysis, name="HAS_RISK"),
-        GraphRelationConfig(from_node=ReviewedOpportunity, to_node=TechnicalApproach, name="HAS_TECH_STACK"),
-        GraphRelationConfig(from_node=ReviewedOpportunity, to_node=CompetitiveLandscape, name="HAS_COMPETITION"),
+        GraphRelation(from_node=ReviewedOpportunity, to_node=Opportunity, name="REVIEWS"),
+        GraphRelation(from_node=Opportunity, to_node=Customer, name="HAS_CUSTOMER"),
+        GraphRelation(from_node=Customer, to_node=Person, name="HAS_CONTACT"),
+        GraphRelation(from_node=ReviewedOpportunity, to_node=Person, name="HAS_TEAM_MEMBER"),
+        GraphRelation(from_node=ReviewedOpportunity, to_node=Partner, name="HAS_PARTNER"),
+        GraphRelation(from_node=ReviewedOpportunity, to_node=RiskAnalysis, name="HAS_RISK"),
+        GraphRelation(from_node=ReviewedOpportunity, to_node=TechnicalApproach, name="HAS_TECH_STACK"),
+        GraphRelation(from_node=ReviewedOpportunity, to_node=CompetitiveLandscape, name="HAS_COMPETITION"),
         # Note: No relationship to FinancialMetrics because it's embedded in Opportunity
     ]
 

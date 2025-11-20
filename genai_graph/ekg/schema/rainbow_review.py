@@ -31,8 +31,8 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
         # Define entity type nodes (for IS_A relationships)
 
         from genai_graph.core.graph_schema import (
-            GraphNodeConfig,
-            GraphRelationConfig,
+            GraphNode,
+            GraphRelation,
         )
         from genai_graph.ekg.baml_client.types import (
             CompetitiveLandscape,
@@ -50,7 +50,7 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
         # Define nodes with descriptions
         nodes = get_common_nodes() + [
             # Root node
-            GraphNodeConfig(
+            GraphNode(
                 baml_class=self.top_class,
                 name_from=lambda data, base: "Rainbow:" + str(data.get("start_date")),
                 description="Root node containing the complete reviewed opportunity",
@@ -59,13 +59,13 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
                 embedded=[("financials", FinancialMetrics), ("competition", CompetitiveLandscape)],
             ),
             # Regular nodes - field paths auto-deduced
-            GraphNodeConfig(
+            GraphNode(
                 baml_class=RiskAnalysis,
                 name_from=lambda data, _: data.get("risk_category") or data.get("p_risk_description_") or "other_risk",
                 description="Risk assessment and mitigation details",
                 index_fields=["risk_description"],
             ),
-            GraphNodeConfig(
+            GraphNode(
                 baml_class=TechnicalApproach,
                 name_from=lambda data, base: data.get("technical_stack")
                 or data.get("architecture")
@@ -78,13 +78,13 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
             #     name_from=lambda data, base: data.get("competitive_position") or f"{base}_competitive_position",
             #     description="Competitive positioning and analysis",
             # ),
-            GraphNodeConfig(
+            GraphNode(
                 baml_class=Competitor,
                 name_from=lambda data, base: data.get("known_as") or data.get("name") or f"{base}_competitor",
                 # name_from="known_as",
                 description="Competitor",
             ),
-            GraphNodeConfig(
+            GraphNode(
                 baml_class=Partner,
                 name_from="name",
                 # deduplication_key="name",
@@ -95,40 +95,40 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
         # Define relationships with descriptions
         # Field paths are automatically deduced from the model structure
         relations = [
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=ReviewedOpportunity,
                 to_node=Opportunity,
                 name="REVIEWS",
                 description="Review relationship to core opportunity",
             ),
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=Opportunity,
                 to_node=Customer,
                 name="HAS_CUSTOMER",
                 description="Opportunity belongs to customer",
             ),
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=Customer, to_node=Person, name="HAS_CONTACT", description="Customer contact persons"
             ),
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=ReviewedOpportunity,
                 to_node=Person,
                 name="HAS_TEAM_MEMBER",
                 description="Internal team members",
             ),
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=ReviewedOpportunity,
                 to_node=Partner,
                 name="HAS_PARTNER",
                 description="Partner organizations involved",
             ),
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=ReviewedOpportunity,
                 to_node=RiskAnalysis,
                 name="HAS_RISK",
                 description="Identified risks and mitigations",
             ),
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=ReviewedOpportunity,
                 to_node=TechnicalApproach,
                 name="HAS_TECH_STACK",
@@ -140,7 +140,7 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
             #     name="COMPETIIVE_LANDSCAPE",
             #     description="Competitive analysis",
             # ),
-            GraphRelationConfig(
+            GraphRelation(
                 from_node=ReviewedOpportunity,
                 to_node=Competitor,
                 name="HAS_COMPETITOR",

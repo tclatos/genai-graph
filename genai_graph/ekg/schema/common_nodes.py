@@ -1,5 +1,5 @@
 from genai_graph.core.graph_schema import (
-    GraphNodeConfig,
+    GraphNode,
 )
 from genai_graph.ekg.baml_client.types import (
     Customer,
@@ -8,22 +8,22 @@ from genai_graph.ekg.baml_client.types import (
 )
 
 
-def get_common_nodes() -> list[GraphNodeConfig]:
+def get_common_nodes() -> list[GraphNode]:
     return [
-        GraphNodeConfig(
+        GraphNode(
             baml_class=Opportunity,
             name_from="name",
             description="Core opportunity information with financial metrics embedded",
             deduplication_key="opportunity_id",
             index_fields=["name", "status"],
         ),
-        GraphNodeConfig(
+        GraphNode(
             baml_class=Customer,
             name_from="name",
             description="Customer organization details",
             index_fields=["name"],
         ),
-        GraphNodeConfig(
+        GraphNode(
             baml_class=Person,
             name_from="name",
             deduplication_key="name",

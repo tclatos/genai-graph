@@ -690,15 +690,30 @@ class EkgCommands(CliTopCommand):
             # Node Mapping
             console.print(Panel(f"[bold cyan]{subgraph_title} Node Mapping[/bold cyan]"))
 
-            mapping_table = Table(title="Node Type → Description")
+            mapping_table = Table(title="Node Type → Description and Deduplication")
             mapping_table.add_column("Graph Node Type", style="cyan", no_wrap=True)
             mapping_table.add_column("Description", style="yellow")
+            mapping_table.add_column("Dedup Key", style="magenta")
+            mapping_table.add_column("Alt Names Field", style="green")
 
-            # Get node labels from the combined schema
+            # Get node labels and deduplication strategy from the combined schema
             for node in schema.nodes:
                 node_type = node.baml_class.__name__
                 description = node.description or ""
-                mapping_table.add_row(node_type, description)
+
+                # Human-readable dedup key description
+                if node.deduplication_key is None:
+                    dedup_label = "_name (default)"
+                elif isinstance(node.deduplication_key, str):
+                    dedup_label = node.deduplication_key
+                else:
+                    # Callable – we do not introspect further to keep output stable
+                    dedup_label = "callable"
+
+                # All node tables expose the unified alternate_names column
+                alt_label = "alternate_names"
+
+                mapping_table.add_row(node_type, description, dedup_label, alt_label)
 
             console.print(mapping_table)
             console.print()

@@ -40,19 +40,7 @@ CREATE (existingNode)-[:RELATED_TO]->(newNode)
     - doc_search()  (from Chonkie)
     - node_search()
 
-Create a CLI commmand 'agent' in genai_graph/core/commands_ekg.py that launch an LangChain agent, possibly interactive (chat mode).  
-Get inpiration from command 'react'  in /home/tcl/prj/genai-tk/genai_tk/extra/agents/commands_agents.py, but simpler: 
-- tools, MCP servers and system prompt are harcoded
-- create a langchain tool that execute a Cypher query (Take it from genai_graph/core/commands_ekg.py). Add that tools to the Agent 
-
-For the system prompt, explain that the role of the agent is (for now) to answer questions on enterprise data, and that it can use the provided tool to query a Cypher graph database.  
-Explain how to use the tool, and give it, as in function query_kg in genai_graph/core/text2cypher.py, the schema of the database and the the same SYSTEM_PROMPT.
-Take into account that, later, the agent will have other tools (notably to query a vector store and the web).
-Use best practices to write that system prompt.
-
-You can put some support core (such as system prompt) in another file.  Try to mutualize code and avoid duplication (you can modify genai_graph/core/text2cypher.py and other commands ).
-
-You can test using for ex: 'uv run cli kg agent -i "List the names of all competitors"
+## better llm / embeddings naming
 
 
 ## Better 'rag' commands
@@ -61,7 +49,8 @@ https://docs.chonkie.ai/oss/pipelines
 
 ##  Better KG
 
-
+## Better deduplication
+Correct and possibly improve node deduplication for merging.  The current key 'deduplication_key' does not seems to work: in the given example, the Opportunity nodes named 'CNES IT Platform – 3‑Tier Java Solution' and 'CNES Satellite Data Platform Modernisation' should be merged because thet have the same deduplication_key ("opportunity_id"). Fix that, and improve it: 1/ IF possible, put the name of the merged node in a field 'alternate names' (of type list) IF its different of the nominal one  2/ allow to have a lambda to define the deduplication criteria (similar to the one to generate names).  To test, you can use: ``` uv run cli kg delete -f ; uv run cli kg add-doc --key cnes-venus-tma --key fake_cnes_1 -g ReviewedOpportunity ; uv run cli kg add-doc --key fake-cnes-1 -g ArchitectureDocument; uv run cli kg export-html``` 
 
 # To Test :
 - ```uv run cli kg delete -f ; uv run cli kg add-doc --key cnes-venus-tma --subgraph ReviewedOpportunity ; uv run cli kg export-html -g ReviewedOpportunity```
@@ -80,6 +69,8 @@ https://docs.chonkie.ai/oss/pipelines
 
 uv run cli kg delete -f ; uv run cli kg add-doc --key fake-cnes-1 --subgraph ArchitectureDocument
 
+
+uv run cli kg delete -f ; uv run cli kg add-doc --key cnes-venus-tma --g ReviewedOpportunity ; uv run cli kg add-doc --key fake-cnes-1 -g ArchitectureDocument; uv run cli kg export-html``
 
 # Misc
 

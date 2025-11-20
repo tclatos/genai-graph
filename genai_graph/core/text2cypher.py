@@ -23,7 +23,7 @@ Translate the given question into a single, valid Cypher statement that respects
 - Relationship directions are VERY important. If the relationship HAS_CREATOR is documented “from A to B”, it means B created A.  
   For clarity: (a)-[:R]->(b) always reads “a → b”, so (ro)-[:HAS_COMPETITOR]->(comp) means “the ReviewedOpportunity lists comp as a competitor”.
 
-- Use short, concise, alphanumeric variable names (e.g.  a1, r1, hc).  
+- Use short, meaningful, alphanumeric variable names (2-4 chars) that hint at the entity.  
 
 - When comparing string properties ALWAYS:  
   – lower-case both sides with toLower()  

@@ -306,6 +306,11 @@ def create_schema(backend: GraphBackend, nodes: list, relations: list) -> None:
         fields.append("_name STRING")  # Human-readable name from name_from
         fields.append("_created_at STRING")  # ISO timestamp
         fields.append("_updated_at STRING")  # ISO timestamp
+        # Unified deduplication key used for MERGE semantics
+        fields.append("_dedup_key STRING")
+        # Optional list of alternate names captured when merging nodes that
+        # share the same dedup key but have different human-readable names
+        fields.append("alternate_names STRING[]")
 
         # Resolve embedded struct field types for this table, if any
         embedded_struct_fields = {
@@ -598,26 +603,25 @@ def extract_graph_data(model: BaseModel, nodes: list, relations: list) -> Tuple[
                 item_data["_created_at"] = now
                 item_data["_updated_at"] = now
 
-                # Deduplication - use _name for deduplication if deduplication_key not specified
-                if node_info.deduplication_key:
-                    dedup_value = item_data.get(node_info.deduplication_key)
-                else:
-                    # Use _name for deduplication by default
-                    dedup_value = item_data.get("_name")
+                # Deduplication: use unified helper so that extraction, relationship
+                # wiring, and DB merges all agree on a single canonical key.
+                dedup_value = node_info.get_dedup_value(item_data, node_type)
+                dedup_str: str | None = str(dedup_value) if dedup_value is not None else None
 
-                if dedup_value:
-                    # Convert to string to handle unhashable types like dicts
-                    dedup_str = str(dedup_value)
-                    if dedup_str not in node_registry[node_type]:
-                        nodes_dict[node_type].append(item_data)
-                        node_registry[node_type].add(dedup_str)
-                        # Register id for relationship lookups
-                        id_registry[node_type][dedup_str] = item_data["id"]
+                # Always populate a _dedup_key field so downstream loaders can rely on it.
+                if dedup_str:
+                    item_data["_dedup_key"] = dedup_str
                 else:
-                    # No dedup value, always add (but still register id)
+                    # Fallback: use _name, or the generated id as a last resort
+                    fallback = item_data.get("_name") or item_data["id"]
+                    dedup_str = str(fallback)
+                    item_data["_dedup_key"] = dedup_str
+
+                if dedup_str not in node_registry[node_type]:
                     nodes_dict[node_type].append(item_data)
-                    # Use id itself as the registry key if no other dedup available
-                    id_registry[node_type][item_data["id"]] = item_data["id"]
+                    node_registry[node_type].add(dedup_str)
+                    # Register id for relationship lookups
+                    id_registry[node_type][dedup_str] = item_data["id"]
 
     # Relationships
     for relation_info in relations:
@@ -655,13 +659,8 @@ def extract_graph_data(model: BaseModel, nodes: list, relations: list) -> Tuple[
             # Get dedup value for from_node to lookup id
             from_dict = from_item.model_dump() if hasattr(from_item, "model_dump") else from_item
 
-            # Get dedup value for from node
-            if from_node_info.deduplication_key:
-                from_dedup_value = from_dict.get(from_node_info.deduplication_key)
-            else:
-                # Use _name as dedup value (same logic as in node extraction)
-                from_dedup_value = from_node_info.get_name_value(from_dict, from_type)
-
+            # Get dedup value for from node using the same helper as extraction
+            from_dedup_value = from_node_info.get_dedup_value(from_dict, from_type)
             from_dedup_str = str(from_dedup_value) if from_dedup_value else None
             from_id = id_registry[from_type].get(from_dedup_str) if from_dedup_str else None
 
@@ -674,13 +673,8 @@ def extract_graph_data(model: BaseModel, nodes: list, relations: list) -> Tuple[
                     continue
                 to_dict = to_item.model_dump() if hasattr(to_item, "model_dump") else to_item
 
-                # Get dedup value for to node
-                if to_node_info.deduplication_key:
-                    to_dedup_value = to_dict.get(to_node_info.deduplication_key)
-                else:
-                    # Use _name as dedup value
-                    to_dedup_value = to_node_info.get_name_value(to_dict, to_type)
-
+                # Get dedup value for to node using the same helper as extraction
+                to_dedup_value = to_node_info.get_dedup_value(to_dict, to_type)
                 to_dedup_str = str(to_dedup_value) if to_dedup_value else None
                 to_id = id_registry[to_type].get(to_dedup_str) if to_dedup_str else None
 
@@ -720,13 +714,16 @@ def load_graph_data(
     """
     from genai_graph.core.graph_merge import merge_nodes_batch
 
-    # Merge nodes using MERGE statements (creates new or updates existing)
+    # Merge nodes using MERGE statements (creates new or updates existing).
+    # We now merge on the unified _dedup_key field so that deduplication
+    # semantics are driven entirely by GraphNodeConfig.deduplication_key
+    # (or name_from when that is not set).
     console.print("[bold]Merging nodes into graph...[/bold]")
     merge_stats, id_mapping = merge_nodes_batch(
         conn=backend,
         nodes_dict=nodes_dict,
         schema_config=None,
-        merge_on_field="_name",
+        merge_on_field="_dedup_key",
     )
 
     # Relationships - use merged IDs for all node references

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from genai_graph.core.graph_schema import GraphSchema
 from genai_graph.core.subgraph import PydanticSubgraph
 from genai_graph.ekg.baml_client.types import ReviewedOpportunity
+from genai_graph.ekg.schema.common_nodes import get_common_nodes
 
 
 class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
@@ -47,7 +48,7 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
         )
 
         # Define nodes with descriptions
-        nodes = [
+        nodes = get_common_nodes() + [
             # Root node
             GraphNodeConfig(
                 baml_class=self.top_class,
@@ -58,25 +59,6 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
                 embedded=[("financials", FinancialMetrics), ("competition", CompetitiveLandscape)],
             ),
             # Regular nodes - field paths auto-deduced
-            GraphNodeConfig(
-                baml_class=Opportunity,
-                name_from="name",
-                description="Core opportunity information with financial metrics embedded",
-                index_fields=["name", "status"],
-            ),
-            GraphNodeConfig(
-                baml_class=Customer,
-                name_from="name",
-                description="Customer organization details",
-                index_fields=["name"],
-            ),
-            GraphNodeConfig(
-                baml_class=Person,
-                name_from="name",
-                deduplication_key="name",
-                description="Individual contacts and team members",
-            ),
-            GraphNodeConfig(baml_class=Partner, name_from="name", description="Partner organization information"),
             GraphNodeConfig(
                 baml_class=RiskAnalysis,
                 name_from=lambda data, _: data.get("risk_category") or data.get("p_risk_description_") or "other_risk",
@@ -101,6 +83,12 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
                 name_from=lambda data, base: data.get("known_as") or data.get("name") or f"{base}_competitor",
                 # name_from="known_as",
                 description="Competitor",
+            ),
+            GraphNodeConfig(
+                baml_class=Partner,
+                name_from="name",
+                # deduplication_key="name",
+                description="Atos partner organization information",
             ),
         ]
 

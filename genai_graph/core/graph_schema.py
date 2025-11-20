@@ -30,7 +30,8 @@ class GraphNodeConfig(BaseModel):
     name_from: str | Callable[[Dict[str, Any], str], str]
     description: str = ""
     embedded: List[Tuple[str, Type[BaseModel]]] = []
-    deduplication_key: Optional[str] = None
+    # Can be a field name or a callable similar to ``name_from``
+    deduplication_key: str | Callable[[Dict[str, Any], str], Any] | None = None
     index_fields: List[str] = []
 
     # Auto-deduced attributes (populated during schema validation)
@@ -85,6 +86,30 @@ class GraphNodeConfig(BaseModel):
             return value.name
         else:
             return str(value)
+
+    def get_dedup_value(self, data: Dict[str, Any], node_type: str) -> str | None:
+        """Get the value used for deduplication for a node instance.
+
+        When ``deduplication_key`` is not set, this falls back to the
+        computed ``_name`` so that all downstream components can always
+        rely on a single canonical dedup value.
+        """
+
+        # Default: use the name as dedup key
+        if not self.deduplication_key:
+            return self.get_name_value(data, node_type)
+
+        if isinstance(self.deduplication_key, str):
+            value = data.get(self.deduplication_key)
+        else:
+            # deduplication_key is a callable
+            value = self.deduplication_key(data, node_type)
+
+        if value is None or value == "":
+            return None
+        if isinstance(value, Enum):
+            return value.name
+        return str(value)
 
     def has_embedded_fields(self) -> bool:
         """Check if this node has embedded fields."""

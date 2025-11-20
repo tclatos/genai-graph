@@ -97,10 +97,10 @@ def build_merge_query(
     # Format merge value
     merge_value_formatted = _format_value_for_cypher(merge_value)
 
-    # Query 1: Check if node exists and get its id
+    # Query 1: Check if node exists and get its id plus current naming info
     check_query = dedent_ws(f"""
         MATCH (n:{node_type} {{{merge_on_field}: {merge_value_formatted}}})
-        RETURN n.{key_field} as id, n._created_at as created_at
+        RETURN n.{key_field} as id, n._created_at as created_at, n._name as name, n.alternate_names as alternate_names
         LIMIT 1
         """)
 
@@ -165,15 +165,41 @@ def merge_node_in_graph(
         df = result.get_as_df()
 
         if not df.empty:
-            # Node exists - update timestamp only
+            # Node exists - update timestamp and optionally maintain alternate names
             row = df.iloc[0]
             existing_id = str(row["id"])
+            existing_name = row.get("name")
+            existing_alternates = row.get("alternate_names")
 
-            # Update _updated_at timestamp
+            new_name = node_data.get("_name")
+            updated_alternates = None
+
+            # Only track alternate names when the new name is different from the
+            # canonical one and not already present in the alternates list.
+            if new_name and new_name != existing_name:
+                current_list: list[str] = []
+                if isinstance(existing_alternates, list):
+                    current_list = [str(v) for v in existing_alternates if v is not None]
+                elif isinstance(existing_alternates, str) and existing_alternates:
+                    # If the backend already stored a single string value, normalise
+                    # it into a one-element list. Ignore non-string NaN/None values.
+                    current_list = [existing_alternates]
+
+                if new_name not in current_list:
+                    current_list.append(new_name)
+                    updated_alternates = current_list
+
+            # Build SET clause dynamically
+            set_clauses = [f"n._updated_at = '{timestamp}'"]
+            if updated_alternates is not None:
+                alternates_formatted = _format_value_for_cypher(updated_alternates)
+                set_clauses.append(f"n.alternate_names = {alternates_formatted}")
+
+            set_sql = ", ".join(set_clauses)
             update_query = dedent_ws(f"""
                 MATCH (n:{node_type})
                 WHERE n.id = '{existing_id.replace("'", "\\'")}'
-                SET n._updated_at = '{timestamp}'
+                SET {set_sql}
                 RETURN n.id as id
                 """)
             conn.execute(update_query)

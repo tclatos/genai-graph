@@ -6,22 +6,28 @@ from langchain_core.runnables import Runnable, RunnableLambda
 from loguru import logger
 
 from genai_graph.core.graph_backend import create_backend_from_config
-from genai_graph.core.schema_doc_generator import (
-    generate_combined_schema_markdown,
-    generate_schema_markdown,
-)
+from genai_graph.core.schema_doc_generator import generate_schema_description
 
 # taken from https://kuzudb.github.io/blog/post/improving-text2cypher-for-graphrag-via-schema-pruning/
 
 SYSTEM_PROMPT = """  
 Translate the given question into a single, valid Cypher statement that respects the provided graph schema.
 
-<SYNTAX>
-- Reply with the raw Cypher statement only; do not wrap it in ```cypher … ``` or any markdown.  
+- You MUST use ONLY the node labels, relationship types and properties that are literally listed in the schema above; inventing new ones is forbidden.  
+
+- For every keyword in the question map it to the **real** labels that contain that keyword, then build the **shortest valid path(s)** (≤ 4 hops) from the anchor node that owns the filter property; if several paths exist return them with `UNION`.
+
 - Start EVERY query with MATCH (or OPTIONAL MATCH) and finish with RETURN; no leading/trailing text.  
 
 - Relationship directions are VERY important. If the relationship HAS_CREATOR is documented “from A to B”, it means B created A.  
   For clarity: (a)-[:R]->(b) always reads “a → b”, so (ro)-[:HAS_COMPETITOR]->(comp) means “the ReviewedOpportunity lists comp as a competitor”.
+
+- Relationship syntax is **always**  
+  `(a)-[:TYPE]->(b)` or `(a)<-[:TYPE]-(b)`;  
+  the arrow is **outside** the brackets.  
+  Illegal forms: `[:TYPE<]` `[:TYPE>]` `[:TYPE<>]`.  
+  Memorise this cheat-sheet fragment:  
+  MATCH (c:Customer)<-[:HAS_CUSTOMER]-(o:Opportunity)
 
 - Use short, meaningful, alphanumeric variable names (2-4 chars) that hint at the entity.  
 
@@ -51,7 +57,7 @@ Translate the given question into a single, valid Cypher statement that respects
   or on a relationship property, return it with dot-notation **without back-ticks**:  
   `ro.financials.tcv` or `hc.comment` if the relationship is bound as `hc`.
 - Append `LIMIT 30` to every query unless the user explicitly asks for a different number.
-
+- Return only distinct rows: start the RETURN clause with `RETURN DISTINCT` unless the user explicitly asks for duplicates.
 """
 
 USER_PROMPT = """
@@ -78,8 +84,8 @@ def _schema_markdown_for_subgraphs(subgraphs: list[str]) -> str:
     """
     if not subgraphs or len(subgraphs) > 1:
         # Empty list means "all registered" for the combined generator
-        return generate_combined_schema_markdown(subgraphs)
-    return generate_schema_markdown(subgraphs[0])
+        return generate_schema_description(subgraphs)
+    return generate_schema_description(subgraphs[0])
 
 
 def text2cypher_chain(question: str, subgraphs: list[str], llm_id: str | None = None) -> Runnable:

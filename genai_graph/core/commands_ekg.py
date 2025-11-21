@@ -921,7 +921,6 @@ class EkgCommands(CliTopCommand):
                     help="Subgraph(s) to display schema for; default is all registered",
                 ),
             ] = [],
-            raw: bool = False,
         ) -> None:
             """Display knowledge graph schema in Markdown format for LLM context.
 
@@ -929,13 +928,9 @@ class EkgCommands(CliTopCommand):
             node types, relationships, properties, and indexed fields. This output is
             designed to provide context to LLMs for generating correct Cypher queries.
             """
-            from rich.markdown import Markdown
 
             from genai_graph.core.graph_registry import GraphRegistry
-            from genai_graph.core.schema_doc_generator import (
-                generate_combined_schema_markdown,
-                generate_schema_markdown,
-            )
+            from genai_graph.core.schema_doc_generator import generate_schema_description
 
             console.print(Panel("[bold cyan]Knowledge Graph Schema[/bold cyan]"))
 
@@ -947,13 +942,11 @@ class EkgCommands(CliTopCommand):
                 # subgraphs are requested; for exactly one, keep the
                 # single-subgraph format.
                 if not selected_subgraphs or len(selected_subgraphs) > 1:
-                    markdown = generate_combined_schema_markdown(selected_subgraphs)
+                    desc = generate_schema_description(selected_subgraphs)
                 else:
-                    markdown = generate_schema_markdown(selected_subgraphs[0])
-                if raw:
-                    console.print(markdown)
-                else:
-                    console.print(Markdown(markdown))
+                    desc = generate_schema_description(selected_subgraphs[0])
+                console.print(desc)
+
             except ValueError as e:
                 console.print(f"[red]❌ {e}[/red]")
                 raise typer.Exit(1) from e

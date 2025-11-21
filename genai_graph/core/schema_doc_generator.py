@@ -16,61 +16,38 @@ from genai_graph.core.graph_registry import GraphRegistry, get_subgraph
 from genai_graph.core.graph_schema import GraphSchema
 
 
-def generate_schema_markdown(subgraph_name: str) -> str:
-    """Generate an LLM-friendly Markdown string describing the graph schema.
+def generate_schema_description(subgraphs: str | list[str]) -> str:
+    """Generate a compact, token-efficient LLM description of the graph schema.
 
-    Includes node types with their fields and descriptions, relationships
-    with properties, and indexed fields for vector search.
+    This unified function accepts either a single subgraph name (string)
+    or a list of subgraph names. Passing an empty list means "all registered"
+    subgraphs (delegated to `GraphRegistry.build_combined_schema`).
 
-    Example:
+    Examples:
         ```python
-        from genai_graph.demos.ekg.schema_markdown_generator import generate_schema_markdown
+        # Single subgraph
+        description = generate_schema_description("ReviewedOpportunity")
 
-        markdown = generate_schema_markdown("ReviewedOpportunity")
-        print(markdown)
+        # Combined (multiple or empty list = all)
+        description = generate_schema_description(["ReviewedOpportunity", "ArchitectureDocument"])
         ```
     """
-    subgraph_impl = get_subgraph(subgraph_name)
-    subgraph_impl.build_schema()
-
-    schema = _load_schema(subgraph_name)
     baml_docs = _parse_baml_descriptions()
-    node_sections = _build_node_sections(schema, baml_docs)
-    rel_sections = _build_relationship_sections(schema, baml_docs)
-    indexed_section = _build_indexed_fields_section(schema)
 
-    return _format_markdown(
-        subgraph_name=subgraph_name,
-        node_sections=node_sections,
-        rel_sections=rel_sections,
-        indexed_section=indexed_section,
-    )
+    # Single subgraph name provided
+    if isinstance(subgraphs, str):
+        subgraph_impl = get_subgraph(subgraphs)
+        subgraph_impl.build_schema()
+        schema = _load_schema(subgraphs)
+        return _format_schema_description(schema=schema, baml_docs=baml_docs)
 
-
-def generate_combined_schema_markdown(subgraph_names: list[str]) -> str:
-    """Generate Markdown describing the *combined* schema of several subgraphs.
-
-    Args:
-        subgraph_names: Names of the subgraphs to combine. If the list is
-            empty, all registered subgraphs are used.
-    """
+    # Otherwise, treat as list of subgraph names (possibly empty => all)
     registry = GraphRegistry.get_instance()
-    # ``build_combined_schema`` already defaults to all registered subgraphs
-    # when the argument list is empty.
-    schema = registry.build_combined_schema(subgraph_names)
-    baml_docs = _parse_baml_descriptions()
-    node_sections = _build_node_sections(schema, baml_docs)
-    rel_sections = _build_relationship_sections(schema, baml_docs)
-    indexed_section = _build_indexed_fields_section(schema)
+    schema = registry.build_combined_schema(subgraphs)
+    return _format_schema_description(schema=schema, baml_docs=baml_docs)
 
-    # Use a compact name for the combined schema in the heading
-    title = "+".join(subgraph_names) if subgraph_names else "ALL"
-    return _format_markdown(
-        subgraph_name=title,
-        node_sections=node_sections,
-        rel_sections=rel_sections,
-        indexed_section=indexed_section,
-    )
+
+# NOTE: Combined-generator removed — use `generate_schema_description(list_or_name)`
 
 
 def _load_schema(subgraph_name: str) -> GraphSchema:
@@ -103,7 +80,6 @@ def _parse_baml_descriptions() -> dict[str, Any]:
 
     # Exclude client and generator files
     excluded_files = {"clients.baml", "generators.baml"}
-
     for filename, content in _file_map.items():
         if filename in excluded_files:
             continue
@@ -125,7 +101,7 @@ def _parse_baml_content(
     current_block_type: str | None = None  # 'class' or 'enum'
     pending_description: str | None = None
 
-    for i, line in enumerate(lines):
+    for _, line in enumerate(lines):
         stripped = line.strip()
 
         # Check for standalone @@description before class/enum
@@ -195,15 +171,50 @@ def _parse_baml_content(
                         enums[current_block][enum_val] = enum_desc
 
 
-def _build_node_sections(schema: GraphSchema, baml_docs: dict[str, Any]) -> list[dict[str, Any]]:
-    """Build structured node section data for formatting."""
-    sections = []
+def _get_relation_properties(node_class: Any, baml_docs: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Extract relationship properties from a node class.
+
+    Relationship properties are fields that match the p_*_ pattern (prefix p_, suffix _).
+    Returns list of (name, type, description) tuples.
+    """
+    properties = []
+    node_name = node_class.__name__
+
+    if not hasattr(node_class, "model_fields"):
+        return properties
+
+    for field_name, field_info in node_class.model_fields.items():
+        # Check if this is a relationship property (p_*_ pattern)
+        if field_name.startswith("p_") and field_name.endswith("_"):
+            # Remove the p_ prefix and _ suffix to get the display name
+            display_name = field_name[2:-1]
+            field_type = _humanize_type_compact(field_info.annotation)
+            field_desc = baml_docs["fields"].get(node_name, {}).get(field_name, "")
+            properties.append((display_name, field_type, field_desc))
+
+    return properties
+
+
+def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -> str:
+    """Format schema as a compact, token-efficient description.
+
+    Output format:
+    - Nodes grouped by type with fields in format: name: type? // description
+    - Relationships as: Source → [RELATION] → Dest with properties and description
+    - Enumeration types with their values
+    - Excludes embeddings and subgraph names
+    """
+    lines = ["## Graph Schema Description", ""]
+
     # Track embedded classes to exclude from main type listing
     embedded_classes = set()
-
     for node in schema.nodes:
         for _, embedded_class in node.embedded:
             embedded_classes.add(embedded_class.__name__)
+
+    # Group nodes by type
+    lines.append("### Node Types")
+    lines.append("")
 
     for node in schema.nodes:
         node_name = node.baml_class.__name__
@@ -215,94 +226,101 @@ def _build_node_sections(schema: GraphSchema, baml_docs: dict[str, Any]) -> list
         # Prefer schema description, fallback to BAML
         description = node.description or baml_docs["classes"].get(node_name, "")
 
-        # Build field information
-        field_list = []
+        # Start with node type header
+        if description:
+            lines.append(f"{node_name}  // {description}")
+        else:
+            lines.append(f"{node_name}")
+
+        # Build field list with compact format
         for field_name, field_info in node.baml_class.model_fields.items():
             if field_name not in node.excluded_fields:
-                field_type = _humanize_type(field_info.annotation)
+                field_type = _humanize_type_compact(field_info.annotation)
                 field_desc = baml_docs["fields"].get(node_name, {}).get(field_name, "")
-                field_list.append({"name": field_name, "type": field_type, "description": field_desc})
 
-        # Build embedded fields with their nested structure
-        embedded_list = []
-        for field_name, embedded_class in node.embedded:
-            # Get fields of the embedded class
-            embedded_fields = []
-            for emb_field_name, emb_field_info in embedded_class.model_fields.items():
-                emb_field_type = _humanize_type(emb_field_info.annotation)
-                emb_field_desc = baml_docs["fields"].get(embedded_class.__name__, {}).get(emb_field_name, "")
-                embedded_fields.append(
-                    {"name": f"{field_name}.{emb_field_name}", "type": emb_field_type, "description": emb_field_desc}
-                )
-            embedded_list.extend(embedded_fields)
+                # Format: name: type  // description
+                line = f"  {field_name}: {field_type}"
+                if field_desc:
+                    line += f"  // {field_desc}"
+                lines.append(line)
 
-        sections.append(
-            {
-                "name": node_name,
-                "description": description,
-                "fields": field_list,
-                "embedded": embedded_list,
-                "index_fields": node.index_fields,
-            }
-        )
+        lines.append("")
 
-    return sections
+    # Group relationships
+    lines.extend(["### Relationships", ""])
 
-
-def _build_relationship_sections(schema: GraphSchema, baml_docs: dict[str, Any]) -> list[dict[str, Any]]:
-    """Build structured relationship section data for formatting."""
-    sections = []
-
+    # Group by source node for clarity
+    rels_by_source = {}
     for relation in schema.relations:
         source = relation.from_node.__name__
-        dest = relation.to_node.__name__
-        description = relation.description
+        if source not in rels_by_source:
+            rels_by_source[source] = []
+        rels_by_source[source].append(relation)
 
-        # Extract properties from p_*_ pattern in to_node
-        properties = []
-        if hasattr(relation.to_node, "model_fields"):
-            for field_name, field_info in relation.to_node.model_fields.items():
-                if field_name.startswith("p_") and field_name.endswith("_"):
-                    # Extract property name without p_ prefix and _ suffix
-                    prop_name = field_name[2:-1]
-                    prop_type = _humanize_type(field_info.annotation)
-                    prop_desc = baml_docs["fields"].get(dest, {}).get(field_name, "")
-                    properties.append({"name": prop_name, "type": prop_type, "description": prop_desc})
+    for source in sorted(rels_by_source.keys()):
+        for relation in rels_by_source[source]:
+            dest = relation.to_node.__name__
+            rel_name = relation.name
+            description = relation.description
 
-        sections.append(
-            {
-                "name": relation.name,
-                "source": source,
-                "dest": dest,
-                "description": description,
-                "properties": properties,
-            }
-        )
+            # Format: Source → [RELATION] → Dest  # description
+            line = f"{source} → [{rel_name}] → {dest}"
+            if description:
+                line += f"  // {description}"
+            lines.append(line)
 
-    return sections
+            # Add relationship properties from destination node (fields with p_*_ pattern)
+            rel_properties = _get_relation_properties(relation.to_node, baml_docs)
+            for prop_name, prop_type, prop_desc in rel_properties:
+                prop_line = f"  {prop_name}: {prop_type}"
+                if prop_desc:
+                    prop_line += f"  // {prop_desc}"
+                lines.append(prop_line)
+
+        lines.append("")
+
+    # Add enumerations section
+    if baml_docs["enums"]:
+        lines.extend(["### Enumerations", ""])
+
+        for enum_name in sorted(baml_docs["enums"].keys()):
+            enum_values = baml_docs["enums"][enum_name]
+            enum_desc = baml_docs["classes"].get(enum_name, "")
+
+            if enum_desc:
+                lines.append(f"{enum_name}  // {enum_desc}")
+            else:
+                lines.append(f"{enum_name}")
+
+            # List enum values
+            for value_name in sorted(enum_values.keys()):
+                value_desc = enum_values[value_name]
+                if value_desc:
+                    lines.append(f"  {value_name}  // {value_desc}")
+                else:
+                    lines.append(f"  {value_name}")
+
+            lines.append("")
+
+    return "\n".join(lines)
 
 
-def _build_indexed_fields_section(schema: GraphSchema) -> list[str]:
-    """Build list of indexed fields in NodeType.field_name format."""
-    indexed = []
-    for node in schema.nodes:
-        node_name = node.baml_class.__name__
-        for field in node.index_fields:
-            indexed.append(f"{node_name}.{field}")
-    return indexed
+def _humanize_type_compact(annotation: Any, is_optional: bool = False) -> str:
+    """Convert Python type annotation to compact LLM-friendly format.
 
-
-def _humanize_type(annotation: Any) -> str:
-    """Convert Python type annotation to LLM-friendly string.
-
-    Converts Pydantic and typing annotations to simplified, readable strings.
+    Examples:
+        - string, int, float, boolean
+        - string[], int[] (for lists)
+        - string? (for optional)
+        - string[]? (for optional list)
     """
     # Handle None/NoneType
     if annotation is type(None):
         return "null"
 
     # Unwrap Optional
-    base_type, is_optional = _unwrap_optional(annotation)
+    base_type, is_opt = _unwrap_optional(annotation)
+    is_optional = is_optional or is_opt
 
     # Get the actual type to process
     origin = get_origin(base_type)
@@ -310,17 +328,17 @@ def _humanize_type(annotation: Any) -> str:
 
     # Handle generic types
     if origin is list:
-        inner = _humanize_type(args[0]) if args else "any"
+        inner = _humanize_type_compact(args[0]) if args else "any"
         # Remove optional marker from inner type for list display
-        inner_clean = inner.replace(" (optional)", "").rstrip("?")
+        inner_clean = inner.rstrip("?")
         result = f"{inner_clean}[]"
     elif origin is set:
-        inner = _humanize_type(args[0]) if args else "any"
-        inner_clean = inner.replace(" (optional)", "").rstrip("?")
+        inner = _humanize_type_compact(args[0]) if args else "any"
+        inner_clean = inner.rstrip("?")
         result = f"{inner_clean}[]"
     elif origin is tuple:
-        inner = _humanize_type(args[0]) if args else "any"
-        inner_clean = inner.replace(" (optional)", "").rstrip("?")
+        inner = _humanize_type_compact(args[0]) if args else "any"
+        inner_clean = inner.rstrip("?")
         result = f"{inner_clean}[]"
     elif origin is dict:
         result = "object"
@@ -335,16 +353,16 @@ def _humanize_type(annotation: Any) -> str:
         result = "boolean"
     # Handle Enums
     elif isinstance(base_type, type) and issubclass(base_type, Enum):
-        result = f"enum {base_type.__name__}"
+        result = f"enum({base_type.__name__})"
     # Default to class name
     elif hasattr(base_type, "__name__"):
         result = base_type.__name__
     else:
         result = str(base_type)
 
-    # Add optional marker in parentheses format
+    # Add optional marker with ? suffix
     if is_optional:
-        result = f"{result} (optional)"
+        result = f"{result}?"
 
     return result
 

@@ -1,9 +1,26 @@
 # Ideas around evolution of the Tk and Bleuprint
 
 
+## Agents 
+
+
+
 ## Better React
+
+Refactor Langchain agent creation and run code to use the new Agent Midleware feature
+to simplify code. 
+Typically refactor genai_tk/extra/agents/langgraph_agent_shell.py, genai_tk/utils/langgraph.py and genai_tk/extra/agents/commands_agents.py to simplify the trace of agents and tools execution.
+To to so, create custom langchain middlewares (AgentMiddleware) to print (usinf Rich) the tool call and the agent execution output, and add them to the  agent.
+You might change the user experience.
+
+See https://docs.langchain.com/oss/python/langchain/middleware/custom and https://github.com/langchain-ai/langchain/blob/master/libs/langchain_v1/langchain/agents/middleware/types.py for the doc.
+And/or call MCP tools "langchain-doc" or "Context7" for details.
+
+To test, you can use "uv run cli agents react --chat" and enter a simple prompt.
+
+
 - Use LangChain Midlewares to print tool calls, either in CLI or Streamlit
-https://docs.langchain.com/oss/python/langchain/middleware/custom
+
 
 
 
@@ -18,9 +35,7 @@ https://docs.langchain.com/oss/python/langchain/middleware/custom
 - call it RAG store ? 
 
 ## Optimize Markdown chunking
-- use https://docs.chonkie.ai/oss/chefs/markdownchef ,  https://pypi.org/project/chonkie/
-- custom Loader ? 
-- "write a Markdown file chunker, inheriting LangChain Loader.  It takes a list of Markdown file as input, and chunk them using the Chonkie package https://docs.chonkie.ai/oss/chefs/markdownchef ,  https://pypi.org/project/chonkie/, https://docs.chonkie.ai/oss/chunkers/table-chunker (use it for tables), ... .  Set filename as source in metadata.  Use Context7 to get Chonkie usage. Makes parameters such as chunk size configurable, but provide common default values for that kind of file" 
+- A tester
 
 
 # Import tables
@@ -37,8 +52,6 @@ CREATE (existingNode)-[:RELATED_TO]->(newNode)
 
 
 # Text2Cypher
-- Add enum descriptions in schema
-
 - possibly Prune the schema with https://kuzudb.github.io/blog/post/improving-text2cypher-for-graphrag-via-schema-pruning/#pruned-graph-schema-results
 
 ## ReAct agents

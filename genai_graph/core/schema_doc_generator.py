@@ -1,7 +1,7 @@
-"""Generate Markdown schema documentation for knowledge graphs.
+"""Generate schema documentation for knowledge graphs.
 
 This module provides functionality to generate comprehensive, LLM-friendly
-Markdown documentation of graph schemas, including node types, relationships,
+documentation of graph schemas, including node types, relationships,
 properties, descriptions from BAML files, and indexed fields.
 """
 
@@ -95,19 +95,27 @@ def _parse_baml_content(
     fields: dict[str, dict[str, str]],
     enums: dict[str, dict[str, str]],
 ) -> None:
-    """Parse a single BAML file content for descriptions."""
+    """Parse a single BAML file content for descriptions.
+
+    Handles single-line and multi-line @description annotations:
+    - Single-line: @description("text")
+    - Multi-line: @description(#"text\nmore text"#)
+    """
     lines = content.split("\n")
     current_block: str | None = None
     current_block_type: str | None = None  # 'class' or 'enum'
     pending_description: str | None = None
+    i = 0
 
-    for _, line in enumerate(lines):
+    while i < len(lines):
+        line = lines[i]
         stripped = line.strip()
 
         # Check for standalone @@description before class/enum
-        desc_match = re.match(r'@@description\s*\(\s*["\'](.+?)["\']\s*\)', stripped)
-        if desc_match:
-            pending_description = desc_match.group(1)
+        desc = _extract_description_from_line(line, lines, i)
+        if desc and stripped.startswith("@@description"):
+            pending_description = desc[0]
+            i = desc[1]
             continue
 
         # Check for class/enum declaration
@@ -117,22 +125,25 @@ def _parse_baml_content(
             current_block = block_match.group(2)
 
             # Check if @@description is on the same line or was pending
-            inline_desc = re.search(r'@@description\s*\(\s*["\'](.+?)["\']\s*\)', line)
-            if inline_desc:
+            inline_desc = _extract_description_from_line(line, lines, i)
+            if inline_desc and "@@description" in line:
                 if current_block_type == "class":
-                    classes[current_block] = inline_desc.group(1)
+                    classes[current_block] = inline_desc[0]
                 elif current_block_type == "enum":
                     enums[current_block] = {}
+                i = inline_desc[1]
             elif pending_description:
                 if current_block_type == "class":
                     classes[current_block] = pending_description
                 elif current_block_type == "enum":
                     enums[current_block] = {}
                 pending_description = None
+                i += 1
             else:
                 # Initialize without description
                 if current_block_type == "enum":
                     enums[current_block] = {}
+                i += 1
 
             continue
 
@@ -140,35 +151,115 @@ def _parse_baml_content(
         if stripped == "}" and current_block:
             current_block = None
             current_block_type = None
+            i += 1
             continue
 
         # Inside a block - parse fields or enum values
         if current_block:
             if current_block_type == "class":
                 # Parse field with optional @description
-                # Match field_name type_annotation and capture @description if present
                 field_match = re.match(r"([A-Za-z_]\w*)\s+([^@\n]+)", stripped)
                 if field_match:
                     field_name = field_match.group(1)
-                    # Look for @description in the line
-                    desc_match = re.search(r'@description\s*\(\s*["\'](.+?)["\']\s*\)', line)
-                    if desc_match:
-                        field_desc = desc_match.group(1)
+                    # Look for @description in the line or following lines
+                    desc = _extract_description_from_line(line, lines, i)
+                    if desc and "@description" in line:
+                        field_desc = desc[0]
                         if current_block not in fields:
                             fields[current_block] = {}
                         fields[current_block][field_name] = field_desc
+                        i = desc[1]
+                    else:
+                        i += 1
+                else:
+                    i += 1
 
             elif current_block_type == "enum":
                 # Parse enum value with optional @description
-                enum_val_match = re.match(
-                    r'([A-Za-z_]\w*)(?:\s+@alias\([^)]+\))?(?:\s+@description\s*\(\s*["\'](.+?)["\']\s*\))?',
-                    stripped,
-                )
+                enum_val_match = re.match(r"([A-Za-z_]\w*)", stripped)
                 if enum_val_match:
                     enum_val = enum_val_match.group(1)
-                    enum_desc = enum_val_match.group(2)
-                    if enum_desc and current_block in enums:
-                        enums[current_block][enum_val] = enum_desc
+
+                    # Look for @description in the line or following lines
+                    desc = _extract_description_from_line(line, lines, i)
+                    if desc and "@description" in line:
+                        enum_desc = desc[0]
+                        if current_block in enums:
+                            enums[current_block][enum_val] = enum_desc
+                        i = desc[1]
+                    else:
+                        # No description found, just record the value
+                        if current_block in enums:
+                            if enum_val not in enums[current_block]:
+                                enums[current_block][enum_val] = ""
+                        i += 1
+                else:
+                    i += 1
+        else:
+            i += 1
+
+
+def _extract_description_from_line(line: str, all_lines: list[str], start_idx: int) -> tuple[str, int] | None:
+    """Extract @description or @@description content from a line or across multiple lines.
+
+    Supports:
+    - Single-line: @description("text")
+    - Multi-line: @description(#"text\nmore text"#)
+
+    Returns: (description_text, next_line_index) or None
+    """
+    if "@description" not in line:
+        return None
+
+    # Try to find the start of @description or @@description
+    desc_match = re.search(r"@{1,2}description\s*\(\s*", line)
+    if not desc_match:
+        return None
+
+    # Start position after the opening parenthesis
+    start_pos = desc_match.end()
+    current_line_idx = start_idx
+    current_text = line[start_pos:]
+
+    # Check if it's a multi-line description (#"..."#)
+    if current_text.startswith('#"'):
+        # Multi-line description
+        current_text = current_text[2:]  # Remove #"
+        buffer = []
+        found_end = False
+
+        while current_line_idx < len(all_lines):
+            if '"#' in current_text:
+                # Found the end
+                end_pos = current_text.index('"#')
+                buffer.append(current_text[:end_pos])
+                found_end = True
+                break
+            else:
+                buffer.append(current_text)
+                current_line_idx += 1
+                if current_line_idx < len(all_lines):
+                    current_text = all_lines[current_line_idx]
+                else:
+                    break
+
+        if found_end:
+            # Clean up multi-line description: remove extra whitespace/newlines
+            result = "\n".join(buffer).strip()
+            # Normalize whitespace: collapse multiple spaces and newlines
+            result = re.sub(r"\s+", " ", result)
+            return (result, current_line_idx + 1)
+        else:
+            return None
+
+    # Single-line description ("..." or '...')
+    else:
+        # Find the closing quote
+        quote_match = re.search(r'(["\'])(.+?)\1', current_text)
+        if quote_match:
+            return (quote_match.group(2), start_idx + 1)
+
+    return None
 
 
 def _get_relation_properties(node_class: Any, baml_docs: dict[str, Any]) -> list[tuple[str, str, str]]:
@@ -213,7 +304,7 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
             embedded_classes.add(embedded_class.__name__)
 
     # Group nodes by type
-    lines.append("### Node Types")
+    lines.append("### Node Types and their fields (labels)")
     lines.append("")
 
     for node in schema.nodes:
@@ -228,26 +319,53 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
 
         # Start with node type header
         if description:
-            lines.append(f"{node_name}  // {description}")
+            lines.append(f"{node_name} // {description}")
         else:
             lines.append(f"{node_name}")
 
         # Build field list with compact format
         for field_name, field_info in node.baml_class.model_fields.items():
             if field_name not in node.excluded_fields:
-                field_type = _humanize_type_compact(field_info.annotation)
+                field_type_str = _humanize_type_compact(field_info.annotation)
+
+                # Skip ForwardRef fields (they're covered by relationships)
+                if "ForwardRef" in field_type_str:
+                    continue
+
                 field_desc = baml_docs["fields"].get(node_name, {}).get(field_name, "")
 
-                # Format: name: type  // description
-                line = f"  {field_name}: {field_type}"
-                if field_desc:
-                    line += f"  // {field_desc}"
-                lines.append(line)
+                # Check if this field is an embedded class and flatten it
+                embedded_class = None
+                for emb_field_name, emb_class in node.embedded:
+                    if emb_field_name == field_name:
+                        embedded_class = emb_class
+                        break
+
+                if embedded_class:
+                    # Flatten embedded fields with dot notation
+                    if hasattr(embedded_class, "model_fields"):
+                        for sub_field_name, sub_field_info in embedded_class.model_fields.items():
+                            sub_field_type = _humanize_type_compact(sub_field_info.annotation)
+                            sub_field_desc = (
+                                baml_docs["fields"].get(embedded_class.__name__, {}).get(sub_field_name, "")
+                            )
+
+                            # Format: parent.child: type // description
+                            line = f"  {field_name}.{sub_field_name}: {sub_field_type}"
+                            if sub_field_desc:
+                                line += f" // {sub_field_desc}"
+                            lines.append(line)
+                else:
+                    # Regular field
+                    line = f"  {field_name}: {field_type_str}"
+                    if field_desc:
+                        line += f" // {field_desc}"
+                    lines.append(line)
 
         lines.append("")
 
     # Group relationships
-    lines.extend(["### Relationships", ""])
+    lines.extend(["### Relationships and their properties", ""])
 
     # Group by source node for clarity
     rels_by_source = {}
@@ -264,9 +382,10 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
             description = relation.description
 
             # Format: Source → [RELATION] → Dest  # description
-            line = f"{source} → [{rel_name}] → {dest}"
+            # line = f"{source} → [{rel_name}] → {dest}"
+            line = f"{source} → {rel_name} → {dest}"
             if description:
-                line += f"  // {description}"
+                line += f" // {description}"
             lines.append(line)
 
             # Add relationship properties from destination node (fields with p_*_ pattern)
@@ -274,7 +393,7 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
             for prop_name, prop_type, prop_desc in rel_properties:
                 prop_line = f"  {prop_name}: {prop_type}"
                 if prop_desc:
-                    prop_line += f"  // {prop_desc}"
+                    prop_line += f" // {prop_desc}"
                 lines.append(prop_line)
 
         lines.append("")
@@ -288,7 +407,7 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
             enum_desc = baml_docs["classes"].get(enum_name, "")
 
             if enum_desc:
-                lines.append(f"{enum_name}  // {enum_desc}")
+                lines.append(f"{enum_name} // {enum_desc}")
             else:
                 lines.append(f"{enum_name}")
 
@@ -296,7 +415,7 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
             for value_name in sorted(enum_values.keys()):
                 value_desc = enum_values[value_name]
                 if value_desc:
-                    lines.append(f"  {value_name}  // {value_desc}")
+                    lines.append(f"  {value_name} // {value_desc}")
                 else:
                     lines.append(f"  {value_name}")
 
@@ -386,76 +505,3 @@ def _unwrap_optional(annotation: Any) -> tuple[Any, bool]:
         return non_none_args[0] if non_none_args else annotation, True
 
     return annotation, False
-
-
-def _format_markdown(
-    subgraph_name: str,
-    node_sections: list[dict[str, Any]],
-    rel_sections: list[dict[str, Any]],
-    indexed_section: list[str],
-) -> str:
-    """Format all sections into final Markdown document."""
-    lines = [
-        f"# Knowledge Graph Schema — Subgraph: {subgraph_name}",
-        "",
-        "## Node Types",
-        "",
-    ]
-
-    # Format nodes
-    for node in node_sections:
-        lines.append(f"### {node['name']}")
-        if node["description"]:
-            lines.append(f"**Description:** {node['description']}")
-            lines.append("")
-
-        if node["fields"]:
-            lines.append("**Fields:**")
-            for field in node["fields"]:
-                field_line = f"- `{field['name']}`: {field['type']}"
-                if field["description"]:
-                    field_line += f" — {field['description']}"
-                lines.append(field_line)
-            lines.append("")
-
-        if node["embedded"]:
-            lines.append("**Embedded Fields:**")
-            for emb in node["embedded"]:
-                field_line = f"- `{emb['name']}`: {emb['type']}"
-                if emb["description"]:
-                    field_line += f" — {emb['description']}"
-                lines.append(field_line)
-            lines.append("")
-
-    # Format relationships
-    lines.extend(["", "## Relationships (Edges)", ""])
-
-    for rel in rel_sections:
-        lines.append(f"### {rel['name']}")
-        lines.append(f"**Direction:** {rel['source']} → {rel['dest']}")
-        if rel["description"]:
-            lines.append(f"**Description:** {rel['description']}")
-        lines.append("")
-
-        if rel["properties"]:
-            lines.append("**Properties:**")
-            for prop in rel["properties"]:
-                prop_line = f"- `{prop['name']}`: {prop['type']}"
-                if prop["description"]:
-                    prop_line += f" — {prop['description']}"
-                lines.append(prop_line)
-            lines.append("")
-
-    # Format indexed fields
-    lines.extend(["", "## Indexed Fields", ""])
-    if indexed_section:
-        lines.append("The following fields are indexed for vector search:")
-        lines.append("")
-        for field in indexed_section:
-            lines.append(f"- `{field}`")
-        lines.append("")
-    else:
-        lines.append("No fields are indexed for vector search.")
-        lines.append("")
-
-    return "\n".join(lines)

@@ -69,7 +69,7 @@ def ensure_source_relationship_table(backend: Any, root_type: str) -> None:
         Exception: If relationship table creation fails
     """
     backend.create_relationship_table(
-        rel_name=get_document_relationship_name,
+        rel_name=get_document_relationship_name(),
         from_table=root_type,
         to_table="Document",
         properties=None,

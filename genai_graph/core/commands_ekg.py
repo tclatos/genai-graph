@@ -46,6 +46,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.table import Table
 
+from genai_graph.core.graph_documents import get_document_relationship_name
+
 # Initialize Rich console
 console = Console()
 
@@ -96,7 +98,7 @@ class EkgCommands(CliTopCommand):
                 create_backend_from_config,
                 get_backend_storage_path_from_config,
             )
-            from genai_graph.core.graph_core import create_graph
+            from genai_graph.core.graph_documents import add_documents_to_graph
             from genai_graph.core.graph_registry import get_subgraph
 
             # Get subgraph implementation
@@ -124,86 +126,83 @@ class EkgCommands(CliTopCommand):
             console.print("🔧 Connecting to EKG database...")
             backend = create_backend_from_config("default")
 
-            # Track aggregate statistics across all documents
-            total_docs_processed = 0
-            total_docs_failed = 0
-            aggregate_stats = {"nodes_created": 0, "nodes_matched": 0, "relationships_created": 0}
-
+            # Process documents with enhanced error handling and per-document status
             db_path = get_backend_storage_path_from_config("default")
 
-            # Process each key sequentially
-            for idx, key in enumerate(keys, 1):
-                console.print(f"\n[bold cyan]═══ Processing document {idx}/{len(keys)}: {key} ═══[/bold cyan]")
+            try:
+                # Process each key sequentially with UI feedback
+                total_docs_processed = 0
+                total_docs_failed = 0
 
-                try:
-                    # Load data
-                    console.print("📁 Loading data...")
-                    data = subgraph_impl.load_data(key)
-                    if not data:
-                        console.print(f"[red]❌ No {subgraph} data found for key: {key}[/red]")
+                for idx, key in enumerate(keys, 1):
+                    console.print(f"\n[bold cyan]═══ Processing document {idx}/{len(keys)}: {key} ═══[/bold cyan]")
+
+                    try:
+                        # Load data
+                        console.print("📁 Loading data...")
+                        data = subgraph_impl.load_data(key)
+                        if not data:
+                            console.print(f"[red]❌ No {subgraph} data found for key: {key}[/red]")
+                            total_docs_failed += 1
+                            continue
+
+                        entity_name = subgraph_impl.get_entity_name_from_data(data)
+                        console.print(f"[green]✓[/green] Loaded: [bold]{entity_name}[/bold]")
+
+                        # Add data to the knowledge graph
+                        console.print("🚀 Merging into graph...")
+                        stats = add_documents_to_graph([key], subgraph_impl, backend, schema)
+
+                        if stats.total_processed > 0:
+                            doc_nodes = stats.nodes_created
+                            doc_rels = stats.relationships_created
+                            total_docs_processed += 1
+                            console.print(
+                                f"[green]✓[/green] Document {idx} processed: {doc_nodes} nodes, {doc_rels} relationships"
+                            )
+                        else:
+                            total_docs_failed += 1
+                            console.print(f"[red]❌ Failed to process document: {key}[/red]")
+
+                    except Exception as e:
+                        import traceback
+
+                        console.print(f"[red]❌ Error processing {key}: {e}[/red]")
+                        console.print("[red]" + traceback.format_exc() + "[/red]")
                         total_docs_failed += 1
                         continue
 
-                    entity_name = subgraph_impl.get_entity_name_from_data(data)
-                    console.print(f"[green]✓[/green] Loaded: [bold]{entity_name}[/bold]")
-
-                    # Add data to the knowledge graph
-                    console.print("🚀 Merging into graph...")
-                    nodes_dict, relationships = create_graph(backend, data, schema)
-
-                    # Accumulate statistics
-                    # Note: create_graph now uses merge_nodes_batch internally which tracks created vs matched
-                    # For now, we'll estimate from the nodes_dict and relationships returned
-                    doc_nodes = sum(len(node_list) for node_list in nodes_dict.values())
-                    doc_rels = len(relationships)
-
-                    aggregate_stats["relationships_created"] += doc_rels
-                    # Note: We'd need to refactor create_graph to return merge stats for accurate counts
-                    # For now, count all nodes as "created" (the merge happens internally)
-                    aggregate_stats["nodes_created"] += doc_nodes
-
-                    total_docs_processed += 1
+                # Display final summary
+                console.print(f"\n{'═' * 60}")
+                if total_docs_processed > 0:
                     console.print(
-                        f"[green]✓[/green] Document {idx} processed: {doc_nodes} nodes, {doc_rels} relationships"
+                        Panel(
+                            f"[bold green]✅ Successfully processed {total_docs_processed}/{len(keys)} documents![/bold green]"
+                        )
                     )
+                else:
+                    console.print(Panel("[bold red]❌ Failed to process any documents[/bold red]"))
+                    raise typer.Exit(1)
 
-                except Exception as e:
-                    import traceback
+                summary_table = Table(title="Final Summary")
+                summary_table.add_column("Metric", style="cyan", no_wrap=True)
+                summary_table.add_column("Value", justify="right", style="magenta")
 
-                    console.print(f"[red]❌ Error processing {key}: {e}[/red]")
-                    console.print("[red]" + traceback.format_exc() + "[/red]")
-                    total_docs_failed += 1
-                    continue
+                summary_table.add_row("Documents Processed", f"{total_docs_processed}/{len(keys)}")
+                if total_docs_failed > 0:
+                    summary_table.add_row("Documents Failed", str(total_docs_failed))
+                summary_table.add_row("Database Path", str(db_path))
 
-            # Display final summary
-            console.print(f"\n{'═' * 60}")
-            if total_docs_processed > 0:
-                console.print(
-                    Panel(
-                        f"[bold green]✅ Successfully processed {total_docs_processed}/{len(keys)} documents![/bold green]"
-                    )
-                )
-            else:
-                console.print(Panel("[bold red]❌ Failed to process any documents[/bold red]"))
-                raise typer.Exit(1)
+                console.print(summary_table)
 
-            summary_table = Table(title="Final Summary")
-            summary_table.add_column("Metric", style="cyan", no_wrap=True)
-            summary_table.add_column("Value", justify="right", style="magenta")
+                console.print("\n[green]💡 Next steps:[/green]")
+                console.print("   • Query: [bold]cli kg query[/bold]")
+                console.print("   • Info:  [bold]cli kg info[/bold]")
+                console.print("   • Export: [bold]cli kg export-html[/bold]")
 
-            summary_table.add_row("Documents Processed", f"{total_docs_processed}/{len(keys)}")
-            if total_docs_failed > 0:
-                summary_table.add_row("Documents Failed", str(total_docs_failed))
-            summary_table.add_row("Total Nodes Processed", str(aggregate_stats["nodes_created"]))
-            summary_table.add_row("Total Relationships Created", str(aggregate_stats["relationships_created"]))
-            summary_table.add_row("Database Path", str(db_path))
-
-            console.print(summary_table)
-
-            console.print("\n[green]💡 Next steps:[/green]")
-            console.print("   • Query: [bold]cli kg query[/bold]")
-            console.print("   • Info:  [bold]cli kg info[/bold]")
-            console.print("   • Export: [bold]cli kg export-html[/bold]")
+            except Exception as e:
+                console.print(f"[red]❌ Unexpected error during document ingestion: {e}[/red]")
+                raise typer.Exit(1) from e
 
         @cli_app.command("delete")
         def delete_ekg(
@@ -631,9 +630,19 @@ class EkgCommands(CliTopCommand):
                 # to node/relationship labels that appear in the combined
                 # schema. This keeps counts aligned with the logical graph
                 # being inspected.
+                #
+                # In addition, always surface the generic Document node and its
+                # SOURCE relationship so callers can see which documents were
+                # ingested, even though they are not part of any specific
+                # subgraph schema.
                 if schema:
                     allowed_node_labels = {n.baml_class.__name__ for n in schema.nodes}
                     allowed_rel_types = {r.name for r in schema.relations}
+
+                    # Ensure system-level Document/SOURCE are never filtered out
+                    allowed_node_labels.add("Document")
+                    allowed_rel_types.add(get_document_relationship_name())
+
                     node_tables = [t for t in node_tables if t in allowed_node_labels]
                     rel_tables = [t for t in rel_tables if t in allowed_rel_types]
 

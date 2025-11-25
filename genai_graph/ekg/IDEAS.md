@@ -5,7 +5,7 @@
 
 Modify (deeply) add-doc commmand in /home/tcl/prj/genai-graph/genai_graph/core/commands_ekg.py. For each doc added
 - create a node (if not exists) in the Knowledge Graph (of type Document) with properties 'uuid' (set to the key name) and 'metadata' (an empty map). 
-- Create a relationship "SOURCE" between the node associated to the top class (such as 'ReviewedOpportunity') and the new node.
+- Create a relationship "SOURCE" between the node associated to the top class (such as 'ReviewedOpportunity' - but keep code independant of the schema) and the new node.
 
 Modify create_graph accordingly
 Ensure these nodes are displayed when calling 'uv run cli kg info' and uv run cli kg schema .

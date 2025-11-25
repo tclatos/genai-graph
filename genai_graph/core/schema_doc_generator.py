@@ -364,6 +364,14 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
 
         lines.append("")
 
+    # System-level Document node capturing ingested sources
+    # This node is not part of any particular subgraph but is always
+    # present when documents are added via the EKG CLI.
+    lines.append("Document // Represents a source document ingested into the EKG")
+    lines.append("  uuid: string // Ingestion key used with `kg add-doc --key` (unique per document)")
+    lines.append("  metadata: object // Arbitrary key/value metadata for the document (initially empty)")
+    lines.append("")
+
     # Group relationships
     lines.extend(["### Relationships and their properties", ""])
 
@@ -381,8 +389,7 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
             rel_name = relation.name
             description = relation.description
 
-            # Format: Source → [RELATION] → Dest  # description
-            # line = f"{source} → [{rel_name}] → {dest}"
+            # Format: Source → RELATION → Dest  # description
             line = f"{source} → {rel_name} → {dest}"
             if description:
                 line += f" // {description}"
@@ -397,6 +404,13 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
                 lines.append(prop_line)
 
         lines.append("")
+
+    # High-level linkage between the logical root entity and source documents.
+    # We do not rely on any particular domain class here; instead, we describe
+    # the generic SOURCE edge that connects the top-level entity class of the
+    # subgraph (for example ReviewedOpportunity) to the Document node.
+    root_name = schema.root_model_class.__name__
+    lines.append(f"{root_name} → SOURCE → Document // The root entity originates from this ingested document")
 
     # Add enumerations section
     if baml_docs["enums"]:

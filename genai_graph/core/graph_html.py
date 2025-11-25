@@ -19,6 +19,7 @@ import uuid
 from typing import Any
 
 from genai_graph.core.graph_backend import GraphBackend
+from genai_graph.core.graph_documents import get_document_relationship_name
 
 # Import new schema types
 
@@ -201,6 +202,14 @@ def _fetch_graph_data(
                 allowed_rel_types = rel_types
         except Exception:
             allowed_rel_types = None
+
+    # Always surface system-level Document/SOURCE elements so that
+    # provenance nodes and edges are visible in visualizations, even
+    # though they are not part of any particular subgraph schema.
+    if allowed_node_labels is not None:
+        allowed_node_labels.add("Document")
+    if allowed_rel_types is not None:
+        allowed_rel_types.add(get_document_relationship_name())
 
     # Get all tables first to understand the schema
     try:

@@ -72,9 +72,7 @@ class EkgCommands(CliTopCommand):
                     "--key", "-k", help="Data key(s) to add to the EKG database (can be specified multiple times)"
                 ),
             ],
-            subgraph: Annotated[
-                str, typer.Option("--subgraph", "-g", help="Subgraph type to use")
-            ] = "ReviewedOpportunity",
+            subgraph: Annotated[str, typer.Option("--subgraph", "-g", help="Subgraph type to use")],
         ) -> None:
             """Add one or more documents to the shared EKG database.
 

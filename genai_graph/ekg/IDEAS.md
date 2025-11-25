@@ -1,25 +1,59 @@
 # Ideas around evolution of the Tk and Bleuprint
 
 
-## Agents 
+## Documents nodes
+
+Modify (deeply) add-doc commmand in /home/tcl/prj/genai-graph/genai_graph/core/commands_ekg.py. For each doc added
+- create a node (if not exists) in the Knowledge Graph (of type Document) with properties 'uuid' (set to the key name) and 'metadata' (an empty map). 
+- Create a relationship "SOURCE" between the node associated to the top class (such as 'ReviewedOpportunity') and the new node.
+
+Modify create_graph accordingly
+Ensure these nodes are displayed when calling 'uv run cli kg info' and uv run cli kg schema .
 
 
 
-## Better React
 
-Refactor Langchain agent creation and run code to use the new Agent Midleware feature
-to simplify code. 
-Typically refactor genai_tk/extra/agents/langgraph_agent_shell.py, genai_tk/utils/langgraph.py and genai_tk/extra/agents/commands_agents.py to simplify the trace of agents and tools execution.
-To to so, create custom langchain middlewares (AgentMiddleware) to print (usinf Rich) the tool call and the agent execution output, and add them to the  agent.
-You might change the user experience.
 
-See https://docs.langchain.com/oss/python/langchain/middleware/custom and https://github.com/langchain-ai/langchain/blob/master/libs/langchain_v1/langchain/agents/middleware/types.py for the doc.
-And/or call MCP tools "langchain-doc" or "Context7" for details.
 
-To test, you can use "uv run cli agents react --chat" and enter a simple prompt.
+## Better React with Agent Midleware
 
 
 - Use LangChain Midlewares to print tool calls, either in CLI or Streamlit
+
+
+# UI for Graph Query
+Create a Streamlit page to  visualize the KG, and run queries on it (either in natural language, or in Cypher)
+Look at CLI commmands in /home/tcl/prj/genai-graph/genai_graph/core/commands_ekg.py (query_ekg, cypher, export_html).
+Vizualize HTML as in /home/tcl/prj/genai-blueprint/genai_blueprint/webapp/pages/demos/cognee_KG.py
+
+# Doc  Manager
+Create a repository "doc_manager" with files to manage docs (import, export, index, ...).
+The backend is a relational database, handled by SQLAlchemy .
+There are 2 tables: 
+   - One for documents, with title, path, hash-code of the document, language (english by default), date, the content itself (in Markdown), metadata (JSON) 
+   - One for Chunks; with fields for the chunk, the embeddings (a vector)
+ and metadata. The table name encore the name of the embeddings (as the size of vector depends of it). 
+ Use the pg_vectorstore langchain library, and possibly code from /home/tcl/prj/genai-tk/genai_tk/extra/pgvector_factory.py
+Commands to load ....
+
+
+ ...
+
+
+ ## better LLM support
+
+ Allow LiteLLM defined LLM to be created in genai_tk.core.llm_factory  by LlmFactory.
+ If the pattern contains / and is the form azure_ai/mistral-document-ai-2505, or openrouter/google/palm-2-chat-bison, then return a langchain object of class 'ChatLiteLLM' (from package langchain-litellm).
+ Call get_llm_provider to check that the model is correct (or better API if you know). Try to hace a nice code
+ structure for maintainability. 
+ Check with : uv run cli core llm -i 'tell me a jole' -m openrouter/google/openai/gpt-4.1-mini
+
+LiteLLM
+
+
+
+
+
 
 
 

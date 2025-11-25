@@ -95,6 +95,12 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
         # Define relationships with descriptions
         # Field paths are automatically deduced from the model structure
         relations = [
+            # GraphRelation(
+            #     from_node=ReviewedOpportunity,
+            #     to_node=Document,
+            #     name="PRESENTED_DOCUMENTS",
+            #     description="Document reviewed",
+            # ),
             GraphRelation(
                 from_node=ReviewedOpportunity,
                 to_node=Opportunity,

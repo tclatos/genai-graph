@@ -26,13 +26,15 @@ enum KnownCompetitor {
    // Other @description("Other Competitors are mentionned")
 }
 
-class Document {
-  name string @description("Name of the document")
-  date string? @description("Date of the document (in ISO format)")
-  version string? @description("Version ot the document")
-  path string? @description("Path or UUID to the document")
+// class Document {
+//   name string @description("Name of the document")
+//   uuid string @description("Unique identifier for the document")
+//   date string? @description("Date of the document (in ISO format)")
+//   version string? @description("Version ot the document")
+//   path string? @description("Path to the document")
+//   metadata map<string, string> @description("Additional metadata")
 
-}
+// }
 class Opportunity {
   name string @description("Official name of the project/opportunity")
   opportunity_id string @description("Unique identifier from Salesforce or similar CRM")

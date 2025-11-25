@@ -26,6 +26,7 @@ dependencies = [
     # "gpt-researcher>=0.13.3",
     "baml-cli>=0.1.0",
     "pandas>=2.3.3",
+    "langchain-litellm>=0.3.2",
 ]
 
 [project.urls]

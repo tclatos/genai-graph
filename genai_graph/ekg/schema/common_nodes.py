@@ -1,15 +1,17 @@
 from genai_graph.core.graph_schema import (
     GraphNode,
 )
-from genai_graph.ekg.baml_client.types import (
-    Customer,
-    Opportunity,
-    Person,
-)
+from genai_graph.ekg.baml_client.types import Customer, Opportunity, Person
 
 
 def get_common_nodes() -> list[GraphNode]:
     return [
+        # GraphNode(
+        #     baml_class=Document,
+        #     name_from="name",
+        #     description="Information on the document",
+        #     deduplication_key="uuid",
+        # ),
         GraphNode(
             baml_class=Opportunity,
             name_from="name",

@@ -41,6 +41,7 @@ from typing import Annotated
 
 import typer
 from genai_tk.main.cli import CliTopCommand
+from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
@@ -299,7 +300,6 @@ class EkgCommands(CliTopCommand):
             """Execute queries in natural language (Text-2-Cypher) on the EKG database.
 
             ex:  List the names of all competitors for opportunities created after January 1, 2012."""
-            from loguru import logger
 
             from genai_graph.core.text2cypher import query_kg
 

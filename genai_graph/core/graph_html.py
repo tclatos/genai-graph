@@ -329,49 +329,6 @@ def _fetch_graph_data(
                 if allowed_rel_types and rel_type not in allowed_rel_types:
                     continue
 
-                # Extract node types and names from dictionary-based Kuzu results
-                def extract_node_info(node_obj) -> tuple[str, str]:
-                    """Extract node type and name from a Kuzu node object (dictionary)."""
-                    node_type = "Unknown"
-                    node_name = "unknown"
-
-                    # Handle dictionary-based Kuzu results
-                    if isinstance(node_obj, dict):
-                        # Get node type from _label
-                        if "_label" in node_obj:
-                            node_type = node_obj["_label"]
-
-                        # Create a clean dictionary for name extraction (exclude internal Kuzu fields)
-                        node_dict = {}
-                        for key, value in node_obj.items():
-                            if not key.startswith("_") and value is not None:
-                                node_dict[key] = value
-
-                        if node_dict:
-                            node_name = _get_node_raw_name(node_dict, node_type)
-                    else:
-                        # Fallback for object-based results (if any)
-                        if hasattr(node_obj, "__class__"):
-                            class_name = node_obj.__class__.__name__
-                            if class_name != "object":
-                                node_type = class_name
-
-                        # Extract name using attribute access
-                        node_dict = {}
-                        for attr in dir(node_obj):
-                            if not attr.startswith("_") and hasattr(node_obj, attr):
-                                try:
-                                    value = getattr(node_obj, attr)
-                                    if value is not None and not callable(value):
-                                        node_dict[attr] = value
-                                except Exception:
-                                    continue
-
-                        if node_dict:
-                            node_name = _get_node_raw_name(node_dict, node_type)
-
-                    return node_type, node_name
-
                 # Extract Kuzu internal IDs for perfect matching
                 src_kuzu_id = None
                 dst_kuzu_id = None

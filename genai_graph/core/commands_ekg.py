@@ -338,12 +338,12 @@ class EkgCommands(CliTopCommand):
 
         @cli_app.command("agent")
         def agent(
-            question: Annotated[
+            input: Annotated[
                 str | None,
                 typer.Option(
                     "--input",
                     "-i",
-                    help=("Initial user question or '-' to read from stdin; ignored when --chat is enabled"),
+                    help="Input query or '-' to read from stdin",
                 ),
             ] = None,
             chat: Annotated[
@@ -385,8 +385,23 @@ class EkgCommands(CliTopCommand):
                     help="Display generated Cypher queries before execution",
                 ),
             ] = False,
+            lc_verbose: Annotated[
+                bool,
+                typer.Option(
+                    "--verbose",
+                    "-v",
+                    help="Enable LangChain verbose mode",
+                ),
+            ] = False,
+            lc_debug: Annotated[
+                bool,
+                typer.Option(
+                    "--debug-lc",
+                    help="Enable LangChain debug mode",
+                ),
+            ] = False,
         ) -> None:
-            """Run an EKG-aware LangChain agent over the knowledge graph.
+            """Run an EKG-aware LangChain ReAct agent over the knowledge graph.
 
             The agent answers questions about enterprise data and can call a
             Cypher execution tool to query the graph when needed.
@@ -399,10 +414,11 @@ class EkgCommands(CliTopCommand):
             import asyncio
             import sys
 
-            from genai_tk.core.llm_factory import LlmFactory
-            from genai_tk.core.mcp_client import call_react_agent
+            from genai_tk.cli.langchain_agent import (
+                run_langchain_agent_direct,
+                run_langchain_agent_shell,
+            )
             from genai_tk.extra.agents.langchain_setup import setup_langchain
-            from genai_tk.extra.agents.langgraph_agent_shell import run_langgraph_agent_shell
 
             from genai_graph.core.ekg_agent import (
                 build_ekg_agent_system_prompt,
@@ -417,17 +433,7 @@ class EkgCommands(CliTopCommand):
                 console.print("[red]❌ No subgraphs are currently registered.[/red]")
                 raise typer.Exit(1)
 
-            # Resolve LLM identifier (ID or tag) and configure LangChain
-            final_llm_id: str | None = None
-            if llm:
-                resolved_id, error_msg = LlmFactory.resolve_llm_identifier_safe(llm)
-                if error_msg:
-                    console.print(error_msg)
-                    raise typer.Exit(1)
-                final_llm_id = resolved_id
-
-            if not setup_langchain(final_llm_id):
-                raise typer.Exit(1)
+            setup_langchain(llm, lc_debug, lc_verbose)
 
             system_prompt = build_ekg_agent_system_prompt(selected_subgraphs)
             ekg_tool = create_ekg_cypher_tool(
@@ -436,34 +442,34 @@ class EkgCommands(CliTopCommand):
                 debug=debug,
             )
 
-            if not chat:
-                if not question and not sys.stdin.isatty():
-                    question = sys.stdin.read()
-                if not question or len(question.strip()) < 3:
+            if chat:
+                # Interactive chat mode using the shared LangChain shell
+                asyncio.run(
+                    run_langchain_agent_shell(
+                        llm,
+                        tools=[ekg_tool],
+                        mcp_server_names=mcp,
+                        system_prompt=system_prompt,
+                    )
+                )
+            else:
+                # Handle input from --input parameter or stdin
+                if not input and not sys.stdin.isatty():
+                    input = sys.stdin.read()
+                if not input or len(input.strip()) < 3:
                     console.print("[red]❌ Input parameter or something in stdin is required[/red]")
                     raise typer.Exit(1)
 
                 # Reuse the common ReAct helper from genai-tk
                 asyncio.run(
-                    call_react_agent(
-                        question.strip(),
-                        llm_id=final_llm_id,
-                        mcp_server_filter=mcp,
+                    run_langchain_agent_direct(
+                        input.strip(),
+                        llm_id=llm,
+                        mcp_server_names=mcp,
                         additional_tools=[ekg_tool],
                         pre_prompt=system_prompt,
                     )
                 )
-                return
-
-            # Interactive chat mode using the shared LangGraph shell
-            asyncio.run(
-                run_langgraph_agent_shell(
-                    final_llm_id,
-                    tools=[ekg_tool],
-                    mcp_server_names=mcp,
-                    system_prompt=system_prompt,
-                )
-            )
 
         @cli_app.command("cypher")
         def cypher(

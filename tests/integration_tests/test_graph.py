@@ -14,7 +14,6 @@ Features the simplified GraphSchema API that:
 
 # Add the src directory to Python path for imports
 
-from genai_graph.ekg.kuzu_graph_html import generate_html_visualization
 from genai_tk.utils.pydantic.kv_store import PydanticStore
 from rich.console import Console
 from rich.panel import Panel
@@ -23,7 +22,8 @@ from rich.text import Text
 
 from genai_graph.core.graph_backend import GraphBackend
 from genai_graph.core.graph_core import create_graph, restart_database
-from genai_graph.core.graph_schema import GraphNode, GraphRelation, create_schema
+from genai_graph.core.graph_html import generate_html_visualization
+from genai_graph.core.graph_schema import GraphNode, GraphRelation, GraphSchema
 from genai_graph.ekg.baml_client.types import (
     CompetitiveLandscape,
     Customer,
@@ -94,7 +94,7 @@ def create_configuration():
 
     # Create and validate the schema - this will auto-deduce all field paths
     # and validate consistency with the Pydantic model structure
-    schema = create_schema(root_model_class=ReviewedOpportunity, nodes=nodes, relations=relations)
+    schema = GraphSchema(root_model_class=ReviewedOpportunity, nodes=nodes, relations=relations)
 
     return schema
 

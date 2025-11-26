@@ -114,7 +114,7 @@ https://docs.chonkie.ai/oss/pipelines
 
 - ```cli baml run FakeArchitectureJson -i "IT platform for CNES with 3-tier, Java based"  --kvstore-key fake-cnes-1```
 
-- ```uv run cli kg delete -f ; uv run cli kg add-doc --key cnes-venus-tma --key fake_cnes_1 -g ReviewedOpportunity ; uv run cli kg add-doc --key fake-cnes-1 -g ArchitectureDocument; uv run cli kg export-html```
+- ```uv run cli kg delete -f ; uv run cli kg add-doc --key rainbow-cnes-venus-tma --key rainbow-fake-cnes-1 -g ReviewedOpportunity ; uv run cli kg add-doc --key add-fake-cnes-1 -g ArchitectureDocument; uv run cli kg export-html```
 
 - ```cli kg schema```
 

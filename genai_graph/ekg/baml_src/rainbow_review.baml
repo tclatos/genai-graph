@@ -50,6 +50,7 @@ class ReviewedOpportunity {
   // bidding BiddingStrategy @description("Bidding strategy")
   partners Partner[]? @description("Third-party partners/subcontractors")
 
+  metadata map<string, string>? @description("Additional metadata")
   //competitor_map map<string, Competitor> @description("Identified competitors for that opportunity")
 
 } 

@@ -63,3 +63,6 @@ class Partner {
   p_role_ string? @description("role in the project")
 }
 
+class MetaData {
+  metadata map<string, string> @description("Additional metadata")
+}

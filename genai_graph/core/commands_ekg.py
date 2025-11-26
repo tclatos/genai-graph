@@ -47,8 +47,6 @@ from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.table import Table
 
-from genai_graph.core.graph_documents import get_document_relationship_name
-
 # Initialize Rich console
 console = Console()
 
@@ -150,16 +148,19 @@ class EkgCommands(CliTopCommand):
                         entity_name = subgraph_impl.get_entity_name_from_data(data)
                         console.print(f"[green]✓[/green] Loaded: [bold]{entity_name}[/bold]")
 
-                        # Add data to the knowledge graph
+                        # Delegate complete document ingestion logic to graph_documents
                         console.print("🚀 Merging into graph...")
-                        stats = add_documents_to_graph([key], subgraph_impl, backend, schema)
+                        try:
+                            stats = add_documents_to_graph([key], subgraph_impl, backend, schema)
+                        except Exception as e:
+                            console.print(f"[red]❌ {e}[/red]")
+                            total_docs_failed += 1
+                            continue
 
                         if stats.total_processed > 0:
-                            doc_nodes = stats.nodes_created
-                            doc_rels = stats.relationships_created
                             total_docs_processed += 1
                             console.print(
-                                f"[green]✓[/green] Document {idx} processed: {doc_nodes} nodes, {doc_rels} relationships"
+                                f"[green]✓[/green] Document {idx} processed: {stats.nodes_created} nodes, {stats.relationships_created} relationships"
                             )
                         else:
                             total_docs_failed += 1
@@ -623,8 +624,8 @@ class EkgCommands(CliTopCommand):
                 tables_result = backend.execute("CALL show_tables() RETURN *")
                 tables_df = tables_result.get_as_df()
 
-                node_tables = []
-                rel_tables = []
+                node_tables: list[str] = []
+                rel_tables: list[str] = []
 
                 for _, row in tables_df.iterrows():
                     if row.get("type") == "NODE":
@@ -637,20 +638,22 @@ class EkgCommands(CliTopCommand):
                 # schema. This keeps counts aligned with the logical graph
                 # being inspected.
                 #
-                # In addition, always surface the generic Document node and its
-                # SOURCE relationship so callers can see which documents were
-                # ingested, even though they are not part of any specific
-                # subgraph schema.
+                # In addition, always surface the system-level Document node
+                # and all of its SOURCE* relationships so callers can see
+                # which documents were ingested, even when multiple subgraphs
+                # are present and Kuzu requires type-specific relationship
+                # tables such as SOURCE_ReviewedOpportunity or
+                # SOURCE_SWArchitectureDocument.
                 if schema:
                     allowed_node_labels = {n.baml_class.__name__ for n in schema.nodes}
                     allowed_rel_types = {r.name for r in schema.relations}
 
-                    # Ensure system-level Document/SOURCE are never filtered out
-                    allowed_node_labels.add("Document")
-                    allowed_rel_types.add(get_document_relationship_name())
+                    # Filter node and relationship tables to the configured schema
+                    filtered_node_tables: list[str] = [t for t in node_tables if t in allowed_node_labels]
+                    node_tables = filtered_node_tables
 
-                    node_tables = [t for t in node_tables if t in allowed_node_labels]
-                    rel_tables = [t for t in rel_tables if t in allowed_rel_types]
+                    filtered_rel_tables: list[str] = [t for t in rel_tables if t in allowed_rel_types]
+                    rel_tables = filtered_rel_tables
 
                 # Schema overview
                 schema_table = Table(title="Schema Overview")

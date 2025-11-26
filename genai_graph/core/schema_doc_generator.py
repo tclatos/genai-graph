@@ -325,6 +325,10 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
 
         # Build field list with compact format
         for field_name, field_info in node.baml_class.model_fields.items():
+            # Do not print the raw `metadata` map field – we surface
+            # provenance via `metadata.source` for the root model below.
+            if field_name == "metadata":
+                continue
             if field_name not in node.excluded_fields:
                 field_type_str = _humanize_type_compact(field_info.annotation)
 
@@ -362,15 +366,17 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
                         line += f" // {field_desc}"
                     lines.append(line)
 
+        # If this node exposes a metadata map, add the provenance field.
+        # All nodes that can be root entities of ingestion get this field.
+        try:
+            if hasattr(node.baml_class, "model_fields") and "metadata" in node.baml_class.model_fields:
+                lines.append(f"  metadata.source: string ? // source of the document")
+        except Exception:
+            pass
+
         lines.append("")
 
-    # System-level Document node capturing ingested sources
-    # This node is not part of any particular subgraph but is always
-    # present when documents are added via the EKG CLI.
-    lines.append("Document // Represents a source document ingested into the EKG")
-    lines.append("  uuid: string // Ingestion key used with `kg add-doc --key` (unique per document)")
-    lines.append("  metadata: object // Arbitrary key/value metadata for the document (initially empty)")
-    lines.append("")
+    # (Provenance `metadata.source` is documented inline under the root node above.)
 
     # Group relationships
     lines.extend(["### Relationships and their properties", ""])
@@ -405,12 +411,9 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
 
         lines.append("")
 
-    # High-level linkage between the logical root entity and source documents.
-    # We do not rely on any particular domain class here; instead, we describe
-    # the generic SOURCE edge that connects the top-level entity class of the
-    # subgraph (for example ReviewedOpportunity) to the Document node.
+    # High-level linkage between the logical root entity and its relationships.
     root_name = schema.root_model_class.__name__
-    lines.append(f"{root_name} → SOURCE → Document // The root entity originates from this ingested document")
+    lines.append(f"{root_name} → [relation] → [Target] // Relationships originating from the root entity")
 
     # Add enumerations section
     if baml_docs["enums"]:

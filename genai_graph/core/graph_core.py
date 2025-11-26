@@ -796,6 +796,7 @@ def create_graph(
     model: BaseModel,
     schema_config,
     relations=None,
+    source_key: str | None = None,
 ) -> tuple[Dict[str, List[Dict]], List[Tuple]]:
     """Create a knowledge graph from a Pydantic model in the configured graph database.
 
@@ -870,6 +871,28 @@ def create_graph(
 
     console.print("[cyan]Extracting and loading data...[/cyan]")
     nodes_dict, relationships = extract_graph_data(model, schema.nodes, schema.relations)
+
+    # If a source key was provided, and the root node has a metadata map field,
+    # attach the source information into the metadata map for the root entity.
+    if source_key is not None:
+        try:
+            root_type = schema.root_model_class.__name__
+            root_nodes = nodes_dict.get(root_type, [])
+            # Only attach to primary/root nodes created for this model
+            for item in root_nodes:
+                # If the model defined a metadata map field, it will be present
+                # in the extracted item as a dict (or as a JSON/string). Prefer
+                # a dict to attach nested keys.
+                meta_val = item.get("metadata")
+                if isinstance(meta_val, dict):
+                    meta_val["source"] = source_key
+                else:
+                    # If metadata is missing or serialized as a string, create dict
+                    item["metadata"] = {"source": source_key}
+        except Exception:
+            # Defensive: do not fail graph creation if attaching source metadata fails
+            pass
+
     load_graph_data(backend, nodes_dict, relationships, schema.nodes)
 
     console.print("\n[bold green]Graph creation complete![/bold green]")

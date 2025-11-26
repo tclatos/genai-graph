@@ -41,6 +41,8 @@ class SWArchitectureDocument {
     used_solutions Solution[]? @description("Named products, managed services, or OSS solutions used and their roles.")
    // architecture ArchitectureOverview? @description("High-level structure, views, patterns, and style of the system.")
     keywords string[]? @description("Keywords/tags extracted for search and similarity (e.g., 'microservices', 'Kafka').")
+    
+    metadata map<string, string>? @description("Additional metadata")
 }
 
 

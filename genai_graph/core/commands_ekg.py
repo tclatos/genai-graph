@@ -104,7 +104,9 @@ class EkgCommands(CliTopCommand):
             try:
                 subgraph_impl = get_subgraph(subgraph)
             except ValueError as e:
+                import traceback as tb
                 console.print(f"[red]❌ {e}[/red]")
+                console.print("[red]" + tb.format_exc() + "[/red]")
                 raise typer.Exit(1) from e
 
             # Validate that we have at least one key
@@ -153,7 +155,9 @@ class EkgCommands(CliTopCommand):
                         try:
                             stats = add_documents_to_graph([key], subgraph_impl, backend, schema)
                         except Exception as e:
+                            import traceback as tb
                             console.print(f"[red]❌ {e}[/red]")
+                            console.print("[red]" + tb.format_exc() + "[/red]")
                             total_docs_failed += 1
                             continue
 
@@ -167,10 +171,10 @@ class EkgCommands(CliTopCommand):
                             console.print(f"[red]❌ Failed to process document: {key}[/red]")
 
                     except Exception as e:
-                        import traceback
+                        import traceback as tb
 
                         console.print(f"[red]❌ Error processing {key}: {e}[/red]")
-                        console.print("[red]" + traceback.format_exc() + "[/red]")
+                        console.print("[red]" + tb.format_exc() + "[/red]")
                         total_docs_failed += 1
                         continue
 
@@ -203,7 +207,9 @@ class EkgCommands(CliTopCommand):
                 console.print("   • Export: [bold]cli kg export-html[/bold]")
 
             except Exception as e:
+                import traceback as tb
                 console.print(f"[red]❌ Unexpected error during document ingestion: {e}[/red]")
+                console.print("[red]" + tb.format_exc() + "[/red]")
                 raise typer.Exit(1) from e
 
         @cli_app.command("delete")
@@ -272,7 +278,9 @@ class EkgCommands(CliTopCommand):
                     "[green]You can now start fresh with [bold]cli kg add --key <opportunity_key>[/bold][/green]"
                 )
             except Exception as e:
+                import traceback as tb
                 console.print(f"[red]❌ Error deleting database: {e}[/red]")
+                console.print("[red]" + tb.format_exc() + "[/red]")
                 raise typer.Exit(1) from e
 
         @cli_app.command("query")
@@ -333,8 +341,10 @@ class EkgCommands(CliTopCommand):
                     console.print(f"[dim]Showing first {MAX_ROWS} of {len(df)} results[/dim]")
 
             except Exception as e:
+                import traceback as tb
                 logger.error(f"Failed to process query: {e}")
                 console.print(f"[red]❌ Query error: {e}[/red]")
+                console.print("[red]" + tb.format_exc() + "[/red]")
                 return
 
         @cli_app.command("agent")
@@ -548,7 +558,9 @@ class EkgCommands(CliTopCommand):
                         console.print(f"[dim]Showing first {max_rows} of {len(df)} results[/dim]")
 
                 except Exception as e:
+                    import traceback as tb
                     console.print(f"[red]❌ Query error: {e}[/red]")
+                    console.print("[red]" + tb.format_exc() + "[/red]")
 
             # Execute single query if provided
             if query:
@@ -584,7 +596,9 @@ class EkgCommands(CliTopCommand):
             try:
                 schema = registry.build_combined_schema(selected_subgraphs)
             except ValueError as e:
+                import traceback as tb
                 console.print(f"[red]❌ {e}[/red]")
+                console.print("[red]" + tb.format_exc() + "[/red]")
                 raise typer.Exit(1) from e
 
             subgraph_title = ", ".join(selected_subgraphs) if selected_subgraphs else "ALL"
@@ -678,7 +692,9 @@ class EkgCommands(CliTopCommand):
                             count = result.get_as_df().iloc[0]["count"]
                             node_stats_table.add_row(node_type, str(count))
                         except Exception as e:
+                            import traceback as tb
                             node_stats_table.add_row(node_type, f"[red]Error: {e}[/red]")
+                            logger.debug(f"Failed to get count for {node_type}: {tb.format_exc()}")
 
                     console.print(node_stats_table)
                     console.print()
@@ -695,13 +711,17 @@ class EkgCommands(CliTopCommand):
                             count = result.get_as_df().iloc[0]["count"]
                             rel_stats_table.add_row(rel_type, str(count))
                         except Exception as e:
+                            import traceback as tb
                             rel_stats_table.add_row(rel_type, f"[red]Error: {e}[/red]")
+                            logger.debug(f"Failed to get count for {rel_type}: {tb.format_exc()}")
 
                     console.print(rel_stats_table)
                     console.print()
 
             except Exception as e:
+                import traceback as tb
                 console.print(f"[red]Error retrieving schema information: {e}[/red]")
+                console.print("[red]" + tb.format_exc() + "[/red]")
 
             # Node Mapping
             console.print(Panel(f"[bold cyan]{subgraph_title} Node Mapping[/bold cyan]"))
@@ -852,7 +872,9 @@ class EkgCommands(CliTopCommand):
                     try:
                         schema = registry.build_combined_schema(selected_subgraphs)
                     except ValueError as e:
+                        import traceback as tb
                         console.print(f"[red]❌ {e}[/red]")
+                        console.print("[red]" + tb.format_exc() + "[/red]")
                         raise typer.Exit(1) from e
 
                     generate_html_visualization(
@@ -900,11 +922,15 @@ class EkgCommands(CliTopCommand):
                         webbrowser.open(file_url)
                         console.print("[green]✅ Opened in browser[/green]")
                     except Exception as e:
+                        import traceback as tb
                         console.print(f"[yellow]⚠️  Could not open browser automatically: {e}[/yellow]")
+                        logger.debug(f"Browser open failed: {tb.format_exc()}")
                         console.print("[yellow]Please open the file manually using the link above[/yellow]")
 
             except Exception as e:
+                import traceback as tb
                 console.print(f"[red]❌ Error generating visualization: {e}[/red]")
+                console.print("[red]" + tb.format_exc() + "[/red]")
                 raise typer.Exit(1) from e
 
         @cli_app.command("list-subgraphs")
@@ -964,5 +990,7 @@ class EkgCommands(CliTopCommand):
                 console.print(desc)
 
             except ValueError as e:
+                import traceback as tb
                 console.print(f"[red]❌ {e}[/red]")
+                console.print("[red]" + tb.format_exc() + "[/red]")
                 raise typer.Exit(1) from e

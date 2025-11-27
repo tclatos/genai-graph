@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Tuple
 
 from pydantic import BaseModel
@@ -324,6 +325,9 @@ def create_schema(backend: GraphBackend, nodes: list, relations: list) -> None:
             if field_name not in node.excluded_fields:
                 if field_name in embedded_struct_fields:
                     kuzu_type = embedded_struct_fields[field_name]
+                elif field_name == "metadata":
+                    # Create metadata as a STRUCT type to allow nested field access with dot notation
+                    kuzu_type = "STRUCT(source STRING)"
                 else:
                     kuzu_type = _get_kuzu_type(field_info.annotation)
                 fields.append(f"{field_name} {kuzu_type}")
@@ -598,6 +602,25 @@ def extract_graph_data(model: BaseModel, nodes: list, relations: list) -> Tuple[
                 # Add embedded fields to this parent record
                 _add_embedded_fields(item_data, model, nodes, node_info)
 
+                # Ensure metadata is a dict (map type) - convert if needed
+                # Only add metadata if the node class actually has a metadata field
+                if hasattr(node_info.baml_class, "model_fields") and "metadata" in node_info.baml_class.model_fields:
+                    if "metadata" in item_data:
+                        metadata = item_data["metadata"]
+                        if not isinstance(metadata, dict):
+                            # If metadata is not a dict, convert it or create empty dict
+                            if isinstance(metadata, str):
+                                # Try to parse as JSON or just create new dict
+                                try:
+                                    item_data["metadata"] = json.loads(metadata)
+                                except (json.JSONDecodeError, TypeError):
+                                    item_data["metadata"] = {}
+                            else:
+                                item_data["metadata"] = {}
+                    else:
+                        # Ensure metadata field exists even if not in original data
+                        item_data["metadata"] = {}
+
                 # Add timestamps
                 now = datetime.utcnow().isoformat() + "Z"
                 item_data["_created_at"] = now
@@ -849,7 +872,7 @@ def create_graph(
                     field_info = current_model.model_fields[parts[-1]]
                     if hasattr(field_info.annotation, "__origin__") and field_info.annotation.__origin__ is list:
                         is_list = True
-            except:
+            except Exception:
                 pass
 
         # Store is_list as a dynamic attribute

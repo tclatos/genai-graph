@@ -370,7 +370,7 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
         # All nodes that can be root entities of ingestion get this field.
         try:
             if hasattr(node.baml_class, "model_fields") and "metadata" in node.baml_class.model_fields:
-                lines.append(f"  metadata.source: string ? // source of the document")
+                lines.append("  metadata.source: string // source of the document")
         except Exception:
             pass
 

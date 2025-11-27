@@ -52,6 +52,9 @@ def _format_value_for_cypher(value: Any) -> str:
         return f"[{', '.join(formatted_items)}]"
     elif isinstance(value, dict):
         # Map / struct literal: {key: value, ...}
+        # Empty dicts cannot be represented in Cypher, use NULL instead
+        if not value:
+            return "NULL"
         items = [f"{k}: {_format_value_for_cypher(v)}" for k, v in value.items()]
         return "{" + ", ".join(items) + "}"
     elif isinstance(value, (int, float)):
@@ -111,7 +114,16 @@ def build_merge_query(
     # Build properties for CREATE
     create_props = []
     for key, value in node_data.items():
-        formatted_value = _format_value_for_cypher(value)
+        # Special handling for metadata field which is STRUCT type
+        if key == "metadata" and isinstance(value, dict):
+            if value:  # Non-empty metadata dict
+                # Use STRUCT syntax for STRUCT types in Kuzu
+                items = [f"{k}: {_format_value_for_cypher(v)}" for k, v in value.items()]
+                formatted_value = "{" + ", ".join(items) + "}"
+            else:
+                formatted_value = "NULL"
+        else:
+            formatted_value = _format_value_for_cypher(value)
         create_props.append(f"{key}: {formatted_value}")
 
     # Add timestamps

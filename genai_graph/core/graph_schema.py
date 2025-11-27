@@ -14,6 +14,14 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union,
 from pydantic import BaseModel, model_validator
 
 
+class ExtraFields(BaseModel):
+    pass
+
+
+class Provenance(ExtraFields):
+    source: str
+
+
 class GraphNode(BaseModel):
     """Simplified node configuration for graph creation.
 
@@ -27,6 +35,7 @@ class GraphNode(BaseModel):
     """
 
     baml_class: Type[BaseModel]
+    extra_classes: list[Type[ExtraFields]] = []  # to be implemented
     name_from: str | Callable[[Dict[str, Any], str], str]
     description: str = ""
     embedded: List[Tuple[str, Type[BaseModel]]] = []

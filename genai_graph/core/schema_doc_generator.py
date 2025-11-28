@@ -102,101 +102,80 @@ def _parse_baml_content(
     - Multi-line: @description(#"text\nmore text"#)
     """
     lines = content.split("\n")
-    current_block: str | None = None
-    current_block_type: str | None = None  # 'class' or 'enum'
-    pending_description: str | None = None
     i = 0
-
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
 
-        # Check for standalone @@description before class/enum
-        desc = _extract_description_from_line(line, lines, i)
-        if desc and stripped.startswith("@@description"):
-            pending_description = desc[0]
-            i = desc[1]
-            continue
-
-        # Check for class/enum declaration
-        block_match = re.match(r"(class|enum)\s+([A-Za-z_]\w*)\s*\{", stripped)
+        # Look for class or enum block start
+        block_match = re.match(r"^(class|enum)\s+([A-Za-z_]\w*)", stripped)
         if block_match:
-            current_block_type = block_match.group(1)
-            current_block = block_match.group(2)
+            block_type = block_match.group(1)
+            block_name = block_match.group(2)
 
-            # Check if @@description is on the same line or was pending
+            # Try to extract an inline or preceding description
             inline_desc = _extract_description_from_line(line, lines, i)
-            if inline_desc and "@@description" in line:
-                if current_block_type == "class":
-                    classes[current_block] = inline_desc[0]
-                elif current_block_type == "enum":
-                    enums[current_block] = {}
+            if inline_desc and "@description" in line:
+                if block_type == "class":
+                    classes[block_name] = inline_desc[0]
+                elif block_type == "enum":
+                    enums[block_name] = {}
                 i = inline_desc[1]
-            elif pending_description:
-                if current_block_type == "class":
-                    classes[current_block] = pending_description
-                elif current_block_type == "enum":
-                    enums[current_block] = {}
-                pending_description = None
-                i += 1
             else:
-                # Initialize without description
-                if current_block_type == "enum":
-                    enums[current_block] = {}
+                # Look backwards up to 3 lines for a preceding @description
+                found = False
+                for back in range(max(0, i - 3), i):
+                    prev = lines[back]
+                    prev_desc = _extract_description_from_line(prev, lines, back)
+                    if prev_desc:
+                        if block_type == "class":
+                            classes[block_name] = prev_desc[0]
+                        else:
+                            enums[block_name] = {}
+                        found = True
+                        break
+                if not found and block_type == "enum":
+                    enums[block_name] = {}
+
+            # Enter block and parse until closing brace
+            i += 1
+            while i < len(lines):
+                inner = lines[i].strip()
+                if inner == "}":
+                    i += 1
+                    break
+
+                if block_type == "class":
+                    # Parse field lines like: name type ... [@description(...)]
+                    m = re.match(r"([A-Za-z_]\w*)\s+([^@\n]+)", inner)
+                    if m:
+                        fld = m.group(1)
+                        desc = _extract_description_from_line(lines[i], lines, i)
+                        if desc and "@description" in lines[i]:
+                            if block_name not in fields:
+                                fields[block_name] = {}
+                            fields[block_name][fld] = desc[0]
+                            i = desc[1]
+                            continue
+                else:
+                    # enum value
+                    m = re.match(r"([A-Za-z_]\w*)", inner)
+                    if m:
+                        val = m.group(1)
+                        desc = _extract_description_from_line(lines[i], lines, i)
+                        if desc and "@description" in lines[i]:
+                            if block_name in enums:
+                                enums[block_name][val] = desc[0]
+                                i = desc[1]
+                                continue
+                        else:
+                            if block_name in enums and val not in enums[block_name]:
+                                enums[block_name][val] = ""
+
                 i += 1
-
             continue
 
-        # Check for closing brace
-        if stripped == "}" and current_block:
-            current_block = None
-            current_block_type = None
-            i += 1
-            continue
-
-        # Inside a block - parse fields or enum values
-        if current_block:
-            if current_block_type == "class":
-                # Parse field with optional @description
-                field_match = re.match(r"([A-Za-z_]\w*)\s+([^@\n]+)", stripped)
-                if field_match:
-                    field_name = field_match.group(1)
-                    # Look for @description in the line or following lines
-                    desc = _extract_description_from_line(line, lines, i)
-                    if desc and "@description" in line:
-                        field_desc = desc[0]
-                        if current_block not in fields:
-                            fields[current_block] = {}
-                        fields[current_block][field_name] = field_desc
-                        i = desc[1]
-                    else:
-                        i += 1
-                else:
-                    i += 1
-
-            elif current_block_type == "enum":
-                # Parse enum value with optional @description
-                enum_val_match = re.match(r"([A-Za-z_]\w*)", stripped)
-                if enum_val_match:
-                    enum_val = enum_val_match.group(1)
-
-                    # Look for @description in the line or following lines
-                    desc = _extract_description_from_line(line, lines, i)
-                    if desc and "@description" in line:
-                        enum_desc = desc[0]
-                        if current_block in enums:
-                            enums[current_block][enum_val] = enum_desc
-                        i = desc[1]
-                    else:
-                        # No description found, just record the value
-                        if current_block in enums:
-                            if enum_val not in enums[current_block]:
-                                enums[current_block][enum_val] = ""
-                        i += 1
-                else:
-                    i += 1
-        else:
-            i += 1
+        i += 1
 
 
 def _extract_description_from_line(line: str, all_lines: list[str], start_idx: int) -> tuple[str, int] | None:
@@ -366,11 +345,47 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
                         line += f" // {field_desc}"
                     lines.append(line)
 
-        # If this node exposes a metadata map, add the provenance field.
-        # All nodes that can be root entities of ingestion get this field.
+        # If this node exposes a provenance field, prefer `file_metadata.source`
+        # when an ExtraFields class `FileMetadata` is configured; otherwise
+        # fall back to the legacy `metadata.source` map.
         try:
-            if hasattr(node.baml_class, "model_fields") and "metadata" in node.baml_class.model_fields:
+            extras = getattr(node, "extra_classes", []) or []
+            has_file_meta = any(getattr(ec, "__name__", "") == "FileMetadata" for ec in extras)
+            if has_file_meta:
+                lines.append("  file_metadata.source: string // Source of the file from which the data was extracted")
+            elif hasattr(node.baml_class, "model_fields") and "metadata" in node.baml_class.model_fields:
                 lines.append("  metadata.source: string // source of the document")
+        except Exception:
+            pass
+
+        # Document any extra structured fields added via ExtraFields classes
+        try:
+            for extra_cls in getattr(node, "extra_classes", []) or []:
+                # Skip FileMetadata as it's documented in the provenance section above
+                if getattr(extra_cls, "__name__", "") == "FileMetadata":
+                    continue
+                extra_name = "".join(["_" + c.lower() if c.isupper() else c for c in extra_cls.__name__]).lstrip("_")
+                # Introspect fields on the extra class
+                if hasattr(extra_cls, "model_fields"):
+                    for sub_field, sub_info in extra_cls.model_fields.items():
+                        sub_type = _humanize_type_compact(sub_info.annotation)
+
+                        # Try multiple ways to get a Field description from pydantic
+                        sub_desc = ""
+                        if getattr(sub_info, "description", None):
+                            sub_desc = sub_info.description or ""
+                        else:
+                            field_info_obj = getattr(sub_info, "field_info", None)
+                            if field_info_obj is not None and getattr(field_info_obj, "description", None):
+                                sub_desc = field_info_obj.description or ""
+
+                        line = f"  {extra_name}.{sub_field}: {sub_type}"
+                        if sub_desc:
+                            line += f" // {sub_desc}"
+                        lines.append(line)
+                else:
+                    # Unknown structure - at least document the field name
+                    lines.append(f"  {extra_name}: struct // extra structured fields")
         except Exception:
             pass
 

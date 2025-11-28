@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List, Tuple
 
 from pydantic import BaseModel
 from rich.console import Console
 
+from genai_graph.core.extra_fields_utils import apply_extra_fields
 from genai_graph.core.graph_backend import GraphBackend
 from genai_graph.core.graph_schema import GraphNode, GraphRelation, GraphSchema
 
@@ -275,6 +275,30 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
                 struct_type = f"STRUCT({', '.join(struct_parts)})"
                 embedded_struct_fields_by_parent[parent_name].append((field_name, struct_type))
 
+    # Collect extra_classes struct fields per parent node
+    extra_struct_fields_by_parent: dict[str, list[tuple[str, str]]] = {}
+    for node in nodes:
+        extras = getattr(node, "extra_classes", []) or []
+        if not extras:
+            continue
+        parent_name = node.baml_class.__name__
+        if parent_name not in extra_struct_fields_by_parent:
+            extra_struct_fields_by_parent[parent_name] = []
+
+        for extra_cls in extras:
+            # Introspect pydantic model fields for the extra class
+            extra_fields = getattr(extra_cls, "model_fields", None)
+            if not extra_fields:
+                continue
+            struct_parts = []
+            for ef_name, ef_info in extra_fields.items():
+                kuzu_type = _get_kuzu_type(ef_info.annotation)
+                struct_parts.append(f"{ef_name} {kuzu_type}")
+            if struct_parts:
+                field_name = "".join(["_" + c.lower() if c.isupper() else c for c in extra_cls.__name__]).lstrip("_")
+                struct_type = f"STRUCT({', '.join(struct_parts)})"
+                extra_struct_fields_by_parent[parent_name].append((field_name, struct_type))
+
     # Legacy: handle embed_in_parent nodes
     for node in nodes:
         if node.embed_in_parent:
@@ -308,6 +332,11 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
         fields: list[str] = []
         model_fields = node.baml_class.model_fields
 
+        # Add extra_classes struct fields (new mechanism for adding non-BAML fields)
+        extra_struct_fields = dict(extra_struct_fields_by_parent.get(table_name, []))
+        for field_name, struct_type in extra_struct_fields.items():
+            fields.append(f"{field_name} {struct_type}")
+
         # Add metadata fields first
         fields.append("id STRING")  # UUID primary key
         fields.append("_name STRING")  # Human-readable name from name_from
@@ -330,7 +359,13 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
                 if field_name in embedded_struct_fields:
                     kuzu_type = embedded_struct_fields[field_name]
                 elif field_name == "metadata":
-                    # Create metadata as a STRUCT type to allow nested field access with dot notation
+                    # Create metadata as a STRUCT type only when not handled by an ExtraFields class
+                    metadata_handled = any(
+                        getattr(ec, "__name__", "") == "FileMetadata" for ec in getattr(node, "extra_classes", []) or []
+                    )
+                    if metadata_handled:
+                        # Skip creating legacy metadata column when FileMetadata is used
+                        continue
                     kuzu_type = "STRUCT(source STRING)"
                 else:
                     kuzu_type = _get_kuzu_type(field_info.annotation)
@@ -532,7 +567,21 @@ def get_field_by_path(obj: Any, path: str) -> Any:
         return None
 
 
-def extract_graph_data(model: BaseModel, nodes: list, relations: list) -> Tuple[Dict[str, List[Dict]], List[Tuple]]:
+def _to_snake_case(name: str) -> str:
+    """Convert PascalCase class name to snake_case field name."""
+    out: list[str] = []
+    for i, c in enumerate(name):
+        if c.isupper() and i:
+            out.append("_")
+            out.append(c.lower())
+        else:
+            out.append(c.lower())
+    return "".join(out)
+
+
+def extract_graph_data(
+    model: BaseModel, nodes: list, relations: list, source_key: str | None = None
+) -> Tuple[Dict[str, List[Dict]], List[Tuple]]:
     """Generic extraction of nodes and relationships from any Pydantic model.
 
     Args:
@@ -608,24 +657,13 @@ def extract_graph_data(model: BaseModel, nodes: list, relations: list) -> Tuple[
                 # Add embedded fields to this parent record
                 _add_embedded_fields(item_data, model, nodes, node_info)
 
-                # Ensure metadata is a dict (map type) - convert if needed
-                # Only add metadata if the node class actually has a metadata field
-                if hasattr(node_info.baml_class, "model_fields") and "metadata" in node_info.baml_class.model_fields:
-                    if "metadata" in item_data:
-                        metadata = item_data["metadata"]
-                        if not isinstance(metadata, dict):
-                            # If metadata is not a dict, convert it or create empty dict
-                            if isinstance(metadata, str):
-                                # Try to parse as JSON or just create new dict
-                                try:
-                                    item_data["metadata"] = json.loads(metadata)
-                                except (json.JSONDecodeError, TypeError):
-                                    item_data["metadata"] = {}
-                            else:
-                                item_data["metadata"] = {}
-                    else:
-                        # Ensure metadata field exists even if not in original data
-                        item_data["metadata"] = {}
+                # Normalize legacy `metadata` and populate any configured ExtraFields
+                # Use the central helper to keep extraction logic consistent.
+                try:
+                    apply_extra_fields(item_data, node_info, model, item, source_key)
+                except Exception:
+                    # Defensive: do not break extraction if helper fails
+                    pass
 
                 # Add timestamps
                 now = datetime.utcnow().isoformat() + "Z"
@@ -903,28 +941,7 @@ def create_graph(
     create_schema(backend, schema.nodes, schema.relations)
 
     console.print("[cyan]Extracting and loading data...[/cyan]")
-    nodes_dict, relationships = extract_graph_data(model, schema.nodes, schema.relations)
-
-    # If a source key was provided, and the root node has a metadata map field,
-    # attach the source information into the metadata map for the root entity.
-    if source_key is not None:
-        try:
-            root_type = schema.root_model_class.__name__
-            root_nodes = nodes_dict.get(root_type, [])
-            # Only attach to primary/root nodes created for this model
-            for item in root_nodes:
-                # If the model defined a metadata map field, it will be present
-                # in the extracted item as a dict (or as a JSON/string). Prefer
-                # a dict to attach nested keys.
-                meta_val = item.get("metadata")
-                if isinstance(meta_val, dict):
-                    meta_val["source"] = source_key
-                else:
-                    # If metadata is missing or serialized as a string, create dict
-                    item["metadata"] = {"source": source_key}
-        except Exception:
-            # Defensive: do not fail graph creation if attaching source metadata fails
-            pass
+    nodes_dict, relationships = extract_graph_data(model, schema.nodes, schema.relations, source_key=source_key)
 
     load_graph_data(backend, nodes_dict, relationships, schema.nodes)
 

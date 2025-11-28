@@ -29,14 +29,38 @@ class DocumentStats:
     relationships_created: int = 0
 
 
-def _has_metadata_map(root_class: Any) -> bool:
-    """Return True if root_class defines a `metadata` model field typed as dict or Optional[dict]."""
+def _has_metadata_map(root_class: Any, schema: Any) -> bool:
+    """Return True if root_class defines a `metadata` model field typed as dict or Optional[dict].
+
+    Also return True if the schema config for the root class defines an
+    ExtraFields class named `FileMetadata` (compatibility for new behavior).
+    """
     try:
         from typing import get_args, get_origin
 
         if not hasattr(root_class, "model_fields"):
+            # If model_fields missing, fall back to schema inspection
+            root_node = None
+            if hasattr(schema, "nodes"):
+                for n in getattr(schema, "nodes", []):
+                    if getattr(n, "baml_class", None) is root_class:
+                        root_node = n
+                        break
+            if root_node is not None:
+                extras = getattr(root_node, "extra_classes", []) or []
+                return any(getattr(ec, "__name__", "") == "FileMetadata" for ec in extras)
             return False
         if "metadata" not in root_class.model_fields:
+            # Check schema node extra classes as a fallback
+            root_node = None
+            if hasattr(schema, "nodes"):
+                for n in getattr(schema, "nodes", []):
+                    if getattr(n, "baml_class", None) is root_class:
+                        root_node = n
+                        break
+            if root_node is not None:
+                extras = getattr(root_node, "extra_classes", []) or []
+                return any(getattr(ec, "__name__", "") == "FileMetadata" for ec in extras)
             return False
         ann = root_class.model_fields["metadata"].annotation
         # Direct dict
@@ -83,7 +107,7 @@ def add_documents_to_graph(keys: List[str], subgraph_impl: Any, backend: Any, sc
         raise ValueError("schema does not expose root_model_class")
 
     # Validate presence of metadata map field (allow Optional[dict])
-    if not _has_metadata_map(root_class):
+    if not _has_metadata_map(root_class, schema):
         raise ValueError(
             f"Subgraph root model '{root_class.__name__}' must expose a 'metadata' map field (dict or Optional[dict])"
         )

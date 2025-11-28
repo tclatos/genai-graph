@@ -114,16 +114,9 @@ def build_merge_query(
     # Build properties for CREATE
     create_props = []
     for key, value in node_data.items():
-        # Special handling for metadata field which is STRUCT type
-        if key == "metadata" and isinstance(value, dict):
-            if value:  # Non-empty metadata dict
-                # Use STRUCT syntax for STRUCT types in Kuzu
-                items = [f"{k}: {_format_value_for_cypher(v)}" for k, v in value.items()]
-                formatted_value = "{" + ", ".join(items) + "}"
-            else:
-                formatted_value = "NULL"
-        else:
-            formatted_value = _format_value_for_cypher(value)
+        # Generic handling for dicts / struct-like values is sufficient
+        # We format dicts as STRUCT literals. Empty dicts are mapped to NULL.
+        formatted_value = _format_value_for_cypher(value)
         create_props.append(f"{key}: {formatted_value}")
 
     # Add timestamps

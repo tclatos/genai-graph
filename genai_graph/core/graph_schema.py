@@ -10,15 +10,21 @@ from __future__ import annotations
 import warnings
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, get_args, get_origin
+from typing import Any, Callable, Dict, List, Optional, Self, Set, Tuple, Type, Union, get_args, get_origin
 
 from pydantic import BaseModel, model_validator
 
 
 class ExtraFields(BaseModel, ABC):
+    @classmethod
     @abstractmethod
-    def get_data(self, some_contex_data) -> "ExtraFields | None":
-        # Implement logic to extract extra fields from context data
+    def get_data(cls, context: dict | None) -> Self | None:
+        """Return an instance (or None) containing extra structured data.
+
+        The `contex` parameter is a  dictionary provided by
+        the extractor and can contain keys like `root_model`, `item`,
+        `item_data` and `source_key` to help populate the extra fields.
+        """
         ...
 
 

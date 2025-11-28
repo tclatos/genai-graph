@@ -18,7 +18,13 @@ Behavior:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, List
+from typing import TYPE_CHECKING, List, Type
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+
+    from genai_graph.core.graph_backend import QueryExecutor
+    from genai_graph.core.graph_schema import GraphSchema
 
 
 @dataclass
@@ -29,7 +35,7 @@ class DocumentStats:
     relationships_created: int = 0
 
 
-def _has_metadata_map(root_class: Any, schema: Any) -> bool:
+def _has_metadata_map(root_class: Type[BaseModel], schema: GraphSchema) -> bool:
     """Return True if root_class defines a `metadata` model field typed as dict or Optional[dict].
 
     Also return True if the schema config for the root class defines an
@@ -86,7 +92,9 @@ def _has_metadata_map(root_class: Any, schema: Any) -> bool:
         return False
 
 
-def add_documents_to_graph(keys: List[str], subgraph_impl: Any, backend: Any, schema: Any) -> DocumentStats:
+def add_documents_to_graph(
+    keys: List[str], subgraph_impl: Type[BaseModel], backend: "QueryExecutor", schema: GraphSchema
+) -> DocumentStats:
     """Add one or more documents to the knowledge graph.
 
     Args:

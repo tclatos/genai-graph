@@ -15,9 +15,12 @@ The merging strategy follows these principles:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from genai_tk.core.prompts import dedent_ws
+
+if TYPE_CHECKING:
+    import kuzu.connection
 from rich.console import Console
 
 console = Console()
@@ -131,7 +134,7 @@ def build_merge_query(
 
 
 def merge_node_in_graph(
-    conn: Any,
+    conn: kuzu.connection.Connection,
     node_type: str,
     node_data: dict[str, Any],
     schema_config: Any | None = None,
@@ -229,7 +232,7 @@ def merge_node_in_graph(
 
 
 def merge_nodes_batch(
-    conn: Any,
+    conn: kuzu.connection.Connection,
     nodes_dict: dict[str, list[dict[str, Any]]],
     schema_config: Any | None = None,
     merge_on_field: str = "_name",

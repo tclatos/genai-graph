@@ -27,6 +27,7 @@ dependencies = [
     "baml-cli>=0.1.0",
     "pandas>=2.3.3",
     "langchain-litellm>=0.3.2",
+    "case-converter>=1.2.0",
 ]
 
 [project.urls]

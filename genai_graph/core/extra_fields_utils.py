@@ -2,17 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-
-def _to_snake_case(name: str) -> str:
-    """Convert PascalCase class name to snake_case field name."""
-    out: list[str] = []
-    for i, c in enumerate(name):
-        if c.isupper() and i:
-            out.append("_")
-            out.append(c.lower())
-        else:
-            out.append(c.lower())
-    return "".join(out)
+from caseconverter import snakecase
 
 
 def apply_extra_fields(
@@ -44,7 +34,7 @@ def apply_extra_fields(
                     if hasattr(extra_val, "model_dump"):
                         item_data[_to_snake_case(file_meta_cls.__name__)] = extra_val.model_dump()
                     elif isinstance(extra_val, dict):
-                        item_data[_to_snake_case(file_meta_cls.__name__)] = extra_val
+                        item_data[snakecase(file_meta_cls.__name__)] = extra_val
             except Exception:
                 # Do not fail extraction on helper generation errors
                 pass
@@ -87,7 +77,7 @@ def apply_extra_fields(
             else:
                 extra_dict = dict(getattr(extra_val, "__dict__", {}))
 
-            field_name = _to_snake_case(extra_cls.__name__)
+            field_name = snakecase(extra_cls.__name__)
             item_data[field_name] = extra_dict
         except Exception:
             # Defensive: do not fail extraction if extra data generation fails

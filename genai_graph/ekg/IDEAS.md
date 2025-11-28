@@ -1,6 +1,12 @@
 # Ideas around evolution of the Tk and Bleuprint
 
 
+## Fix Typing
+There a quit a lot of 'Any' types in function parameters in current project (/home/tcl/prj/genai-graph)).
+
+Try to fix that (ie find the correct type of the parameter, add the import, etc). Check with Pylance or ruff that there's no error or warning
+
+
 
 
 ## Documents nodes

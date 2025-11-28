@@ -567,17 +567,6 @@ def get_field_by_path(obj: Any, path: str) -> Any:
         return None
 
 
-def _to_snake_case(name: str) -> str:
-    """Convert PascalCase class name to snake_case field name."""
-    out: list[str] = []
-    for i, c in enumerate(name):
-        if c.isupper() and i:
-            out.append("_")
-            out.append(c.lower())
-        else:
-            out.append(c.lower())
-    return "".join(out)
-
 
 def extract_graph_data(
     model: BaseModel, nodes: list, relations: list, source_key: str | None = None

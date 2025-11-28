@@ -6,15 +6,14 @@ Entry point for the REST API
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from genai_tk.core.chain_registry import ChainRegistry
-from langchain_openai import ChatOpenAI
-from langserve import add_routes
-
-"""The usual "tell me a joke" LLM call."""
-
 from genai_tk.core.llm_factory import get_llm
 from genai_tk.core.prompts import def_prompt
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import Runnable, RunnablePassthrough
+from langchain_openai import ChatOpenAI
+from langserve import add_routes
+
+"""The usual "tell me a joke" LLM call."""
 
 load_dotenv(verbose=True)
 

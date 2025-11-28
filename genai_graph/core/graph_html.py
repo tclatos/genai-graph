@@ -230,7 +230,7 @@ def _fetch_graph_data(
                 nodes_result = connection.execute(nodes_query)
                 result_df = nodes_result.get_as_df()
 
-                for idx, row in result_df.iterrows():
+                for _idx, row in result_df.iterrows():
                     node_dict = {}
 
                     # Extract node data from the first column (the node object)
@@ -754,7 +754,7 @@ def generate_html_visualization(
 class KnowledgeGraphHTMLVisualizer:
     """Class-based wrapper for HTML visualization functionality."""
 
-    def __init__(self, custom_colors: dict[str, str] | None = None):
+    def __init__(self, custom_colors: dict[str, str] | None = None) -> None:
         """Initialize the visualizer.
 
         Args:

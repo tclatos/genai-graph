@@ -124,7 +124,7 @@ def load_test_data() -> ReviewedOpportunity:
     return opportunity
 
 
-def display_schema_configuration(schema):
+def display_schema_configuration(schema: GraphSchema):
     """Display the complete schema configuration with auto-deduced information.
 
     Args:
@@ -167,7 +167,7 @@ def display_schema_configuration(schema):
             console.print(f"  └─ Excluded fields: {', '.join(sorted(node.excluded_fields))}")
 
 
-def create_statistics_table(backend: GraphBackend, config=None) -> None:
+def create_statistics_table(backend: GraphBackend, config: GraphSchema | tuple[list[GraphNode], list[GraphRelation]] | None = None) -> None:
     """Display comprehensive statistics about the created graph.
 
     Args:
@@ -426,7 +426,7 @@ def main() -> None:
         console.print(f"• Total nodes created: {total_nodes}")
         console.print(f"• Total relationships created: {len(relationships)}")
         console.print(f"• Node types: {len([k for k, v in nodes_dict.items() if v])}")
-        console.print(f"• Relationship types: {len(set(rel[4] for rel in relationships))}")
+        console.print(f"• Relationship types: {len({rel[4] for rel in relationships})}")
         console.print(f"• Auto-deduced field paths: {sum(len(n.field_paths) for n in schema.nodes)}")
         console.print(f"• Auto-computed excluded fields: {sum(len(n.excluded_fields) for n in schema.nodes)}")
 

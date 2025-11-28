@@ -224,7 +224,7 @@ def _fetch_graph_data(
                 nodes_result = connection.execute(nodes_query)
                 result_df = nodes_result.get_as_df()
 
-                for idx, row in result_df.iterrows():
+                for _idx, row in result_df.iterrows():
                     node_dict = {}
 
                     # Extract node data from the first column (the node object)
@@ -317,7 +317,7 @@ def _fetch_graph_data(
                     continue
 
                 # Extract node types and names from dictionary-based graph db results
-                def extract_node_info(node_obj) -> tuple[str, str]:
+                def extract_node_info(node_obj: dict) -> tuple[str, str]:
                     """Extract node type and name from a graph db node object (dictionary)."""
                     node_type = "Unknown"
                     node_name = "unknown"
@@ -828,7 +828,7 @@ def generate_html(
 class KnowledgeGraphHTMLVisualizer:
     """Class-based wrapper for HTML visualization functionality."""
 
-    def __init__(self, custom_colors: dict[str, str] | None = None, use_3d: bool = True):
+    def __init__(self, custom_colors: dict[str, str] | None = None, use_3d: bool = True) -> None:
         """Initialize the visualizer.
 
         Args:

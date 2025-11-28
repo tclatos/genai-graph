@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from genai_graph.core.graph_schema import GraphSchema
 from genai_graph.core.subgraph import PydanticSubgraph
 from genai_graph.ekg.baml_client.types import ReviewedOpportunity
-from genai_graph.ekg.schema.common_nodes import get_common_nodes
+from genai_graph.ekg.schema.common_nodes import FileMetadata, get_common_nodes
 
 
 class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
@@ -52,6 +52,7 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
             # Root node
             GraphNode(
                 baml_class=self.top_class,
+                extra_classes=[FileMetadata],
                 name_from=lambda data, base: "Rainbow:" + str(data.get("start_date")),
                 description="Root node containing the complete reviewed opportunity",
                 # Embedded fields are stored as MAP/STRUCT properties on the

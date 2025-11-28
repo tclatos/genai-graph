@@ -8,18 +8,18 @@ to derive field paths and relationships, reducing boilerplate and errors.
 from __future__ import annotations
 
 import warnings
+from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, get_args, get_origin
 
 from pydantic import BaseModel, model_validator
 
 
-class ExtraFields(BaseModel):
-    pass
-
-
-class Provenance(ExtraFields):
-    source: str
+class ExtraFields(BaseModel, ABC):
+    @abstractmethod
+    def get_data(self, some_contex_data) -> "ExtraFields | None":
+        # Implement logic to extract extra fields from context data
+        ...
 
 
 class GraphNode(BaseModel):
@@ -273,7 +273,7 @@ class GraphSchema(BaseModel):
                 elif hasattr(annotation, "__forward_arg__"):
                     # Try to resolve ForwardRef to actual class
                     try:
-                        forward_name = annotation.__forward_arg__
+                        forward_name = annotation.__forward_arg__  # type: ignore
                         import sys
 
                         module = sys.modules.get(model_class.__module__)
@@ -318,7 +318,7 @@ class GraphSchema(BaseModel):
                         "is_list": False,
                         "annotation": annotation,
                     }
-                    explore_model(annotation, field_path)
+                    explore_model(annotation, field_path)  # type: ignore
                 else:
                     # Primitive field
                     self._model_field_map[model_class][field_name] = {
@@ -343,8 +343,8 @@ class GraphSchema(BaseModel):
                 continue
 
             # Find all paths where this class appears
-            for model_class, fields in self._model_field_map.items():
-                for field_name, field_info in fields.items():
+            for _model_class, fields in self._model_field_map.items():
+                for _field_name, field_info in fields.items():
                     if field_info["type"] == node_config.baml_class:
                         path = field_info["path"]
                         is_list = field_info["is_list"]

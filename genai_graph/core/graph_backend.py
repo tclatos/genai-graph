@@ -427,8 +427,8 @@ def create_backend_from_config(config_key: str = "default") -> GraphBackend:
         backend.connect(connection_path)
     elif backend_type.lower() == "neo4j":
         # Neo4j connection with credentials
-        username = db_config.get("username")
-        password = db_config.get("password")
+        _username = db_config.get("username")
+        _password = db_config.get("password")
         # Note: Neo4j backend not yet implemented, but config structure is ready
         backend.connect(connection_path)
     else:

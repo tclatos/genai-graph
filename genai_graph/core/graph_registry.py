@@ -179,7 +179,7 @@ class GraphRegistry(BaseModel):
         return sorted(self.subgraphs.keys())
 
 
-def register_subgraph(name: str, subgraph: Subgraph, registry: "GraphRegistry" | None = None) -> None:
+def register_subgraph(name: str, subgraph: Subgraph, registry: "GraphRegistry | None" = None) -> None:
     """Convenience wrapper to register a subgraph on the global registry.
 
     The optional ``registry`` argument allows explicit control over

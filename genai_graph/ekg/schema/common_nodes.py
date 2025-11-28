@@ -1,17 +1,22 @@
+from pydantic import Field
+
 from genai_graph.core.graph_schema import (
+    ExtraFields,
     GraphNode,
 )
 from genai_graph.ekg.baml_client.types import Customer, Opportunity, Person
 
 
+class FileMetadata(ExtraFields):
+    source: str = Field(..., description="Source of the file from which the data was extracted")
+
+    def get_data(self, some_contex_data) -> "ExtraFields | None":
+        # Implement logic to extract extra fields from context data
+        pass  # TODO (replacement of current metadata.source field)
+
+
 def get_common_nodes() -> list[GraphNode]:
     return [
-        # GraphNode(
-        #     baml_class=Document,
-        #     name_from="name",
-        #     description="Information on the document",
-        #     deduplication_key="uuid",
-        # ),
         GraphNode(
             baml_class=Opportunity,
             name_from="name",

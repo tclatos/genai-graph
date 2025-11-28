@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from genai_graph.core.graph_schema import GraphSchema
 from genai_graph.core.subgraph import PydanticSubgraph
 from genai_graph.ekg.baml_client.types import Customer, SWArchitectureDocument
-from genai_graph.ekg.schema.common_nodes import get_common_nodes
+from genai_graph.ekg.schema.common_nodes import FileMetadata, get_common_nodes
 
 
 class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
@@ -51,7 +51,8 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
         nodes = get_common_nodes() + [
             # Root node - the architecture document itself
             GraphNode(
-                baml_class=SWArchitectureDocument,
+                baml_class=self.top_class,
+                extra_classes=[FileMetadata],
                 name_from=lambda data, base: f"Architecture:{data.get('document_date', 'unknown')}",
                 description="Root node containing the complete architecture document with technical stack and solutions",
             ),

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from rich.console import Console
 
 from genai_graph.core.graph_backend import GraphBackend
+from genai_graph.core.graph_schema import GraphNode, GraphRelation, GraphSchema
 
 # Import new schema types
 
@@ -16,7 +17,7 @@ console = Console()
 # Database helpers
 
 
-def _get_kuzu_type(annotation: type) -> str:
+def _get_kuzu_type(annotation: Any) -> str:
     """Map Python type annotation to Kuzu type string.
 
     This is a low-level helper used by the Kuzu-backed implementation to pick an
@@ -29,6 +30,9 @@ def _get_kuzu_type(annotation: type) -> str:
     Returns:
         Kuzu type string
     """
+    if annotation is None:
+        return "STRING"
+
     if getattr(annotation, "__origin__", None) is list:
         return "STRING[]"
     elif annotation in (float,):
@@ -40,7 +44,7 @@ def _get_kuzu_type(annotation: type) -> str:
         return "STRING"
 
 
-def _detect_parent_class(embedded_node, all_nodes: list) -> type[BaseModel] | None:
+def _detect_parent_class(embedded_node: Any, all_nodes: list) -> type[BaseModel] | None:
     """Auto-detect parent class for embedded node based on field path.
 
     Args:
@@ -100,7 +104,7 @@ def _find_embedded_data_in_model(root_model: BaseModel, target_class: type[BaseM
     return None
 
 
-def _add_embedded_fields(parent_data: dict[str, Any], root_model: BaseModel, all_nodes: list, parent_node) -> None:
+def _add_embedded_fields(parent_data: dict[str, Any], root_model: BaseModel, all_nodes: list, parent_node: Any) -> None:
     """Add embedded node fields to parent record.
 
     Args:
@@ -118,7 +122,7 @@ def _add_embedded_fields(parent_data: dict[str, Any], root_model: BaseModel, all
         )
         parent_instance = get_field_by_path(root_model, field_path) if field_path else root_model
 
-        for field_name, embedded_class in parent_node.embedded:
+        for field_name, _embedded_class in parent_node.embedded:
             # Get the embedded data from the parent instance
             embedded_data = getattr(parent_instance, field_name, None) if parent_instance else None
 
@@ -204,7 +208,7 @@ def create_synthetic_key(data: Dict[str, Any], base_name: str) -> str:
 # Schema
 
 
-def create_schema(backend: GraphBackend, nodes: list, relations: list) -> None:
+def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list[GraphRelation]) -> None:
     """Create node and relationship tables in the graph database (idempotent).
 
     Creates CREATE NODE TABLE IF NOT EXISTS and CREATE REL TABLE IF NOT EXISTS statements
@@ -226,6 +230,8 @@ def create_schema(backend: GraphBackend, nodes: list, relations: list) -> None:
     # For modern embedded configuration, we represent each embedded class as a
     # single MAP/STRUCT-typed column on the parent node.
     embedded_struct_fields_by_parent: dict[str, list[tuple[str, str]]] = {}
+    # Backwards-compatible container for legacy embed_in_parent handling
+    embedded_fields_by_parent: dict[str, list[tuple[str, str]]] = {}
 
     # First, collect embedded struct definitions for each parent (new structure)
     for node in nodes:
@@ -314,9 +320,7 @@ def create_schema(backend: GraphBackend, nodes: list, relations: list) -> None:
         fields.append("alternate_names STRING[]")
 
         # Resolve embedded struct field types for this table, if any
-        embedded_struct_fields = {
-            name: struct_type for name, struct_type in embedded_struct_fields_by_parent.get(table_name, [])
-        }
+        embedded_struct_fields = dict(embedded_struct_fields_by_parent.get(table_name, []))
 
         # Add regular fields (excluding any specified excluded_fields).
         # If a field is declared as embedded, we override its scalar type with
@@ -367,7 +371,7 @@ def create_schema(backend: GraphBackend, nodes: list, relations: list) -> None:
 # Extraction helpers
 
 
-def _auto_deduce_node_field_path(node_info: NodeInfo, root_model: BaseModel, all_nodes: list[NodeInfo]) -> str | None:
+def _auto_deduce_node_field_path(node_info: GraphNode, root_model: BaseModel, all_nodes: list[GraphNode]) -> str | None:
     """Auto-deduce field_path for a node if not provided.
 
     Args:
@@ -378,16 +382,16 @@ def _auto_deduce_node_field_path(node_info: NodeInfo, root_model: BaseModel, all
     Returns:
         The deduced field path or None for root nodes
     """
-    if node_info.field_path is not None:
-        return node_info.field_path  # Already set
+    field_path_val = getattr(node_info, "field_path", None)
+    if field_path_val is not None:
+        return field_path_val  # Already set
 
     # If this is the root model class, no field path needed
-    if node_info.baml_class == type(root_model):
+    if node_info.baml_class is type(root_model):
         return None
 
     # Search for field in root model that matches this class
     target_class = node_info.baml_class
-    target_class_name = target_class.__name__
 
     def find_field_path(obj: BaseModel, current_path: str = "") -> str | None:
         """Recursively search for a field that matches the target class."""
@@ -401,7 +405,8 @@ def _auto_deduce_node_field_path(node_info: NodeInfo, root_model: BaseModel, all
             annotation = field_info.annotation
 
             # Handle List[TargetClass]
-            if hasattr(annotation, "__origin__") and annotation.__origin__ is list:
+            origin = getattr(annotation, "__origin__", None)
+            if origin is list:
                 list_args = getattr(annotation, "__args__", [])
                 if list_args and list_args[0] == target_class:
                     return field_path
@@ -411,10 +416,10 @@ def _auto_deduce_node_field_path(node_info: NodeInfo, root_model: BaseModel, all
                 return field_path
 
             # Handle nested models - search one level deeper
-            elif hasattr(annotation, "__origin__") and annotation.__origin__ is not list:
+            elif origin is not None and origin is not list:
                 # Don't recurse too deep to avoid infinite loops
                 pass
-            elif hasattr(annotation, "model_fields"):
+            elif hasattr(annotation, "model_fields") and annotation is not None:
                 # This is a nested BaseModel, search inside it
                 try:
                     # Create a dummy instance to inspect
@@ -431,7 +436,7 @@ def _auto_deduce_node_field_path(node_info: NodeInfo, root_model: BaseModel, all
 
 
 def _auto_deduce_relation_paths(
-    relation_info: RelationInfo, nodes: list[NodeInfo], root_model: BaseModel
+    relation_info: GraphRelation, nodes: list[GraphNode], root_model: BaseModel
 ) -> tuple[str | None, str | None]:
     """Auto-deduce from_field_path and to_field_path for a relationship.
 
@@ -443,15 +448,15 @@ def _auto_deduce_relation_paths(
     Returns:
         Tuple of (from_field_path, to_field_path)
     """
-    from_field_path = relation_info.from_field_path
-    to_field_path = relation_info.to_field_path
+    from_field_path = getattr(relation_info, "_from_field_path", None)
+    to_field_path = getattr(relation_info, "_to_field_path", None)
 
     # Auto-deduce from_field_path if not provided
     if from_field_path is None:
         # Find the node configuration for from_node
         from_node_info = next((n for n in nodes if n.baml_class == relation_info.from_node), None)
         if from_node_info:
-            from_field_path = from_node_info.field_path
+            from_field_path = getattr(from_node_info, "field_path", None)
 
     # Auto-deduce to_field_path if not provided
     if to_field_path is None:
@@ -482,7 +487,8 @@ def _auto_deduce_relation_paths(
 
                 # Check if the field type annotation matches
                 annotation = field_info.annotation
-                if hasattr(annotation, "__origin__") and annotation.__origin__ is list:
+                origin = getattr(annotation, "__origin__", None)
+                if origin is list:
                     # Handle List[TargetClass]
                     list_args = getattr(annotation, "__args__", [])
                     if list_args and list_args[0] == relation_info.to_node:
@@ -578,7 +584,7 @@ def extract_graph_data(model: BaseModel, nodes: list, relations: list) -> Tuple[
                     continue
 
                 if hasattr(item, "model_dump"):
-                    item_data = item.model_dump()
+                    item_data = item.model_dump()  # type: ignore
                 elif isinstance(item, dict):
                     item_data = item.copy()
                 else:
@@ -773,8 +779,12 @@ def load_graph_data(
         merged_from_id = id_mapping.get((from_type, from_id), from_id)
         merged_to_id = id_mapping.get((to_type, to_id), to_id)
 
-        from_id_escaped = merged_from_id.replace("'", "\\'")
-        to_id_escaped = merged_to_id.replace("'", "\\'")
+        # Ensure we have strings before calling replace (defensive)
+        merged_from_id_str = "" if merged_from_id is None else str(merged_from_id)
+        merged_to_id_str = "" if merged_to_id is None else str(merged_to_id)
+
+        from_id_escaped = merged_from_id_str.replace("'", "\\'")
+        to_id_escaped = merged_to_id_str.replace("'", "\\'")
 
         # Build properties string for edge
         props_str = ""
@@ -817,8 +827,8 @@ def load_graph_data(
 def create_graph(
     backend: GraphBackend,
     model: BaseModel,
-    schema_config,
-    relations=None,
+    schema_config: GraphSchema,
+    relations: list | None = None,
     source_key: str | None = None,
 ) -> tuple[Dict[str, List[Dict]], List[Tuple]]:
     """Create a knowledge graph from a Pydantic model in the configured graph database.
@@ -876,18 +886,18 @@ def create_graph(
                 pass
 
         # Store is_list as a dynamic attribute
-        node_config._is_list = is_list
-        node_config._field_path = field_path
+        node_config._is_list = is_list  # type: ignore
+        node_config._field_path = field_path  # type: ignore
 
     # Prepare relations with field paths
     for relation_config in schema.relations:
         if relation_config.field_paths:
             from_path, to_path = relation_config.field_paths[0]
-            relation_config._from_field_path = from_path
-            relation_config._to_field_path = to_path
+            relation_config._from_field_path = from_path  # type: ignore
+            relation_config._to_field_path = to_path  # type: ignore
         else:
-            relation_config._from_field_path = None
-            relation_config._to_field_path = None
+            relation_config._from_field_path = None  # type: ignore
+            relation_config._to_field_path = None  # type: ignore
 
     console.print("[cyan]Creating database tables...[/cyan]")
     create_schema(backend, schema.nodes, schema.relations)
@@ -929,7 +939,7 @@ def create_graph(
 class KnowledgeGraphExtractor:
     """Extract graph data from the graph database for visualization."""
 
-    def __init__(self, backend: GraphBackend):
+    def __init__(self, backend: GraphBackend) -> None:
         """Initialize with a graph backend.
 
         Args:

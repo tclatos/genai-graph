@@ -1,6 +1,29 @@
 # Ideas around evolution of the Tk and Bleuprint
 
 
+## Extra Data
+
+Today the graph is built from BAML genererated Pydantic objects, except for a special case 'metadata' added to top classes. 
+We want to generalise the mecanism to add fields to a node that are not in BAML (that is used for document parsing). Our idea is to have a Pydantic class that will contain the extra fields.
+
+For that, I've added a field "extra_classes" in class GraphNode. I's  a list of Pydantic classes that inherit an abstract class 'ExtraFields' with a abstract method 'get_data' that you should refine and implement in some descendant.
+
+The contett returned by get_data shoukd be stored as a Struct in the node, whose name is the name of the class (in snakecase).
+
+I think that 'get_data' should be called in merge_node_in_graph or related functions, to get the extended list of fields to be inserted in the node.
+Adapt parameters and typing. Idealy 'get_data' should return an instance of the concrete class to enfore type safety, but you can return a dict. 
+
+Fist use case is to change the hard-coded 'metadata' field by new class 'FileMetadata". (I've added extra_classes=[FileMetadata] in the top classes). You shoud generate a node struc field 'file_metadata" with a field 'source'  (similar to old 'metadata').  Remove old hrad-coded stuff and use mechanism described above (notably implement the 'get_data' method). 
+
+Second use case is to implement a WinLoss struct in the 'Oporunity' node. It will later be coded by getting information from the database.  Today, just return fake data (but ensure we have access to the opportunity id and other fields)
+
+you can test using 'uv run cli kg delete -f ; uv run cli kg add-doc --key rainbow-cnes-venus-tma  ; uv run cli kg add-doc --key add-fake-cnes-1 -g ArchitectureDocument'
+
+Use 'uv run cli kg schema' to check the new fields are there (file_metadata.source, win_loss.result, win_loss.reason,..), with their description
+
+
+
+
 ## Documents nodes
 
 Modify (deeply) add-doc commmand in /home/tcl/prj/genai-graph/genai_graph/core/commands_ekg.py. For each doc added

@@ -20,10 +20,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Type
 
+from genai_graph.core.graph_backend import GraphBackend
+from genai_graph.core.subgraph import Subgraph
+
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from genai_graph.core.graph_backend import QueryExecutor
     from genai_graph.core.graph_schema import GraphSchema
 
 
@@ -93,7 +95,7 @@ def _has_metadata_map(root_class: Type[BaseModel], schema: GraphSchema) -> bool:
 
 
 def add_documents_to_graph(
-    keys: List[str], subgraph_impl: Type[BaseModel], backend: "QueryExecutor", schema: GraphSchema
+    keys: List[str], subgraph_impl: Subgraph, backend: GraphBackend, schema: GraphSchema
 ) -> DocumentStats:
     """Add one or more documents to the knowledge graph.
 

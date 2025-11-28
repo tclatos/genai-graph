@@ -32,7 +32,7 @@ def apply_extra_fields(
                 extra_val = file_meta_cls.get_data(ctx)
                 if extra_val is not None:
                     if hasattr(extra_val, "model_dump"):
-                        item_data[_to_snake_case(file_meta_cls.__name__)] = extra_val.model_dump()
+                        item_data[snakecase(file_meta_cls.__name__)] = extra_val.model_dump()
                     elif isinstance(extra_val, dict):
                         item_data[snakecase(file_meta_cls.__name__)] = extra_val
             except Exception:

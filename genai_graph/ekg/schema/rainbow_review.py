@@ -74,7 +74,7 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
                 description="Technical implementation approach and stack",
                 index_fields=["architecture", "technical_stack"],
             ),
-            # GraphNodeConfig(
+            # GraphNode(
             #     baml_class=CompetitiveLandscape,
             #     name_from=lambda data, base: data.get("competitive_position") or f"{base}_competitive_position",
             #     description="Competitive positioning and analysis",

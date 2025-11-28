@@ -3,10 +3,13 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from caseconverter import snakecase
+from pydantic import BaseModel
+
+from genai_graph.core.graph_schema import GraphNode
 
 
 def apply_extra_fields(
-    item_data: Dict[str, Any], node_info: Any, model: Any, item: Any, source_key: str | None
+    item_data: Dict[str, Any], node_info: GraphNode, model: BaseModel, item: Any, source_key: str | None
 ) -> None:
     """Apply extra structured fields and normalize legacy `metadata`.
 

@@ -167,7 +167,9 @@ def display_schema_configuration(schema: GraphSchema):
             console.print(f"  └─ Excluded fields: {', '.join(sorted(node.excluded_fields))}")
 
 
-def create_statistics_table(backend: GraphBackend, config: GraphSchema | tuple[list[GraphNode], list[GraphRelation]] | None = None) -> None:
+def create_statistics_table(
+    backend: GraphBackend, config: GraphSchema | tuple[list[GraphNode], list[GraphRelation]] | None = None
+) -> None:
     """Display comprehensive statistics about the created graph.
 
     Args:

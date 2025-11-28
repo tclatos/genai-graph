@@ -22,7 +22,7 @@ from genai_graph.core.graph_backend import GraphBackend
 
 # Import new schema types
 
-# from genai_graph.demos.ekg.graph_schema import GraphNodeConfig, GraphRelationConfig, GraphSchema
+# from genai_graph.demos.ekg.graph_schema import GraphNode, GraphRelationConfig, GraphSchema
 
 
 def _generate_node_id(node_type: str, node_name: str, max_length: int = 50) -> str:

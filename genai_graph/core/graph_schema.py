@@ -407,7 +407,7 @@ class GraphSchema(BaseModel):
         """Compute which fields should be excluded from each node based on relationships.
 
         Notes:
-            Embedded fields defined via ``GraphNodeConfig.embedded`` are *not* excluded
+            Embedded fields defined via ``GraphNode.embedded`` are *not* excluded
             here anymore. They are represented as structured properties (MAP/STRUCT)
             on the parent node rather than being flattened or removed.
         """
@@ -477,7 +477,7 @@ class GraphSchema(BaseModel):
 
         if missing_classes:
             for cls in missing_classes:
-                warnings_list.append(f"Class {cls.__name__} is referenced in relationships but has no GraphNodeConfig")
+                warnings_list.append(f"Class {cls.__name__} is referenced in relationships but has no GraphNode")
 
         # Check for duplicate relationships between the same classes
         relation_pairs = {}

@@ -4,8 +4,6 @@ This module provides an abstract interface for graph databases and concrete
 implementations for different backends (Kuzu, Neo4j, etc.).
 """
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -280,7 +278,6 @@ class KuzuBackend(GraphBackend):
             conn=self.conn,
             node_type=node_type,
             node_data=node_data,
-            schema_config=schema_config,
         )
 
     def close(self) -> None:

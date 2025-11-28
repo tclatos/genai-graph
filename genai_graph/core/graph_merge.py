@@ -139,7 +139,6 @@ def merge_node_in_graph(
     conn: GraphBackend,
     node_type: str,
     node_data: dict[str, Any],
-    schema_config: Any | None = None,
     merge_on_field: str = "_name",
 ) -> tuple[bool, str]:
     """Merge a single node into the graph database.
@@ -236,7 +235,6 @@ def merge_node_in_graph(
 def merge_nodes_batch(
     conn: GraphBackend,
     nodes_dict: dict[str, list[dict[str, Any]]],
-    schema_config: Any | None = None,
     merge_on_field: str = "_name",
 ) -> tuple[dict[str, dict[str, int]], dict[tuple[str, str], str]]:
     """Merge multiple nodes into the graph database in batch.
@@ -275,7 +273,6 @@ def merge_nodes_batch(
                 conn=conn,
                 node_type=node_type,
                 node_data=node_data,
-                schema_config=schema_config,
                 merge_on_field=merge_on_field,
             )
 

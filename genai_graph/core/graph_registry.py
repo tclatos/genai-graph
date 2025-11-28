@@ -7,6 +7,7 @@ subgraph implementation module.
 
 from __future__ import annotations
 
+import typing
 from typing import Any
 
 from genai_tk.utils.config_mngr import global_config, import_from_qualified
@@ -16,6 +17,13 @@ from pydantic import BaseModel, Field
 
 from genai_graph.core.graph_schema import GraphSchema
 from genai_graph.core.subgraph import Subgraph
+
+if typing.TYPE_CHECKING:
+    from genai_graph.core.graph_registry import GraphRegistry
+
+from beartype import BeartypeConf, beartype
+
+beartype_nop = beartype(conf=BeartypeConf(claw_decoration_position_funcs=None))
 
 
 class GraphRegistry(BaseModel):
@@ -179,7 +187,10 @@ class GraphRegistry(BaseModel):
         return sorted(self.subgraphs.keys())
 
 
-def register_subgraph(name: str, subgraph: Subgraph, registry: "GraphRegistry | None" = None) -> None:
+# @beartype_nop
+def register_subgraph(
+    name: str, subgraph: Subgraph, registry: Any = None
+) -> None:  # registry is "Optional[GraphRegistry]"
     """Convenience wrapper to register a subgraph on the global registry.
 
     The optional ``registry`` argument allows explicit control over

@@ -4,8 +4,6 @@ This module centralizes the system prompt and tools used by CLI commands
 that interact with the Enterprise Knowledge Graph (EKG).
 """
 
-from __future__ import annotations
-
 from genai_tk.core.prompts import dedent_ws
 from langchain_core.tools import BaseTool, tool
 from rich.console import Console

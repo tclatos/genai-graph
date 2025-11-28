@@ -15,18 +15,14 @@ Behavior:
   dict by the extraction/creation code.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Type
+from typing import List, Type
+
+from pydantic import BaseModel
 
 from genai_graph.core.graph_backend import GraphBackend
+from genai_graph.core.graph_schema import GraphSchema
 from genai_graph.core.subgraph import Subgraph
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
-
-    from genai_graph.core.graph_schema import GraphSchema
 
 
 @dataclass

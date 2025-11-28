@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Type
+from typing import Any, Optional, Type
 
 from genai_tk.utils.pydantic.kv_store import PydanticStore
 from pydantic import BaseModel
@@ -56,7 +56,7 @@ class Subgraph(ABC):
         """Extract a human-readable entity name from loaded data."""
         return "Unknown Entity"
 
-    def register(self, registry: "GraphRegistry | None" = None) -> None:  # noqa: F821
+    def register(self, registry: Any = None) -> None:  # noqa: F821 "Optional[GraphRegistry]"
         """Register this subgraph implementation.
 
         If ``registry`` is not provided, the global :class:`GraphRegistry`

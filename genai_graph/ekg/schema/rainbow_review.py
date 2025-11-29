@@ -52,12 +52,11 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
             # Root node
             GraphNode(
                 baml_class=self.top_class,
-                extra_classes=[FileMetadata],
+                structs=[FileMetadata, FinancialMetrics, CompetitiveLandscape],
                 name_from=lambda data, base: "Rainbow:" + str(data.get("start_date")),
                 description="Root node containing the complete reviewed opportunity",
                 # Embedded fields are stored as MAP/STRUCT properties on the
                 # ReviewedOpportunity node.
-                embedded=[("financials", FinancialMetrics), ("competition", CompetitiveLandscape)],
             ),
             # Regular nodes - field paths auto-deduced
             GraphNode(

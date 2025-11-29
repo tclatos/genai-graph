@@ -52,7 +52,7 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
             # Root node - the architecture document itself
             GraphNode(
                 baml_class=self.top_class,
-                extra_classes=[FileMetadata],
+                structs=[FileMetadata],
                 name_from=lambda data, base: f"Architecture:{data.get('document_date', 'unknown')}",
                 description="Root node containing the complete architecture document with technical stack and solutions",
             ),

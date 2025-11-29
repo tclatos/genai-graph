@@ -76,7 +76,7 @@ def get_common_nodes() -> list[GraphNode]:
     return [
         GraphNode(
             baml_class=Opportunity,
-            extra_classes=[WinLoss],
+            structs=[WinLoss],
             name_from="name",
             description="Core opportunity information with financial metrics embedded",
             deduplication_key="opportunity_id",

@@ -12,9 +12,10 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from typing import Any
+from typing import Any, Iterable
 
 from genai_graph.core.graph_backend import GraphBackend
+from genai_graph.core.graph_core import RelationshipRecord
 
 # Import new schema types
 
@@ -838,18 +839,23 @@ class KnowledgeGraphHTMLVisualizer:
         self.custom_colors = custom_colors or {}
         self.use_3d = use_3d
 
-    def generate_html(self, nodes: list[tuple[str, dict]], links: list[tuple[str, str, str, dict]]) -> str:
+    def generate_html(
+        self,
+        nodes: list[tuple[str, dict]],
+        links: Iterable[RelationshipRecord] | Iterable[tuple[str, str, str, dict[str, Any]]],
+    ) -> str:
         """Generate HTML visualization from node and link data.
 
         Args:
             nodes: List of (node_id, properties_dict) tuples
-            links: List of (source_id, target_id, relationship_name, properties_dict) tuples
+            links: Iterable of :class:`RelationshipRecord` or
+                (source_id, target_id, relationship_name, properties_dict) tuples
 
         Returns:
             HTML content as string
         """
         # Convert to the format expected by the HTML template
-        nodes_list = []
+        nodes_list: list[dict[str, Any]] = []
         for node_id, node_info in nodes:
             node_info = dict(node_info)  # shallow copy
             node_info["id"] = str(node_id)
@@ -861,15 +867,23 @@ class KnowledgeGraphHTMLVisualizer:
             node_info.pop("created_at", None)
             nodes_list.append(node_info)
 
-        links_list = []
-        for source, target, relation, edge_info in links:
-            source_s = str(source)
-            target_s = str(target)
+        links_list: list[dict[str, Any]] = []
+        for link in links:
+            # Support both RelationshipRecord and 4-tuples
+            if isinstance(link, RelationshipRecord):
+                source_s = str(link.from_id)
+                target_s = str(link.to_id)
+                relation = link.name
+                edge_info: dict[str, Any] = dict(link.properties or {})
+            else:
+                source, target, relation, edge_info = link
+                source_s = str(source)
+                target_s = str(target)
+                edge_info = edge_info or {}
 
             # Extract weight variations
-            all_weights = {}
-            primary_weight = None
-            edge_info = edge_info or {}
+            all_weights: dict[str, float] = {}
+            primary_weight: float | None = None
 
             if "weight" in edge_info:
                 try:

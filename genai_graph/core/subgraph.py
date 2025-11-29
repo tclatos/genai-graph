@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Type
+from typing import Any, Type
 
 from genai_tk.utils.pydantic.kv_store import PydanticStore
 from pydantic import BaseModel

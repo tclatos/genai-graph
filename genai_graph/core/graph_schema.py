@@ -28,23 +28,78 @@ class ExtraFields(BaseModel, ABC):
         ...
 
 
+def _find_embedded_field_for_class(parent_cls: Type[BaseModel], embedded_cls: Type[BaseModel]) -> str | None:
+    """Return the field name on *parent_cls* that holds *embedded_cls*.
+
+    The field may be typed directly as the embedded class, or wrapped inside
+    Optional/Union or list containers, for example::
+
+        financials: FinancialMetrics
+        financials: FinancialMetrics | None
+        financials: list[FinancialMetrics] | None
+    """
+    if not hasattr(parent_cls, "model_fields"):
+        return None
+
+    for field_name, field_info in parent_cls.model_fields.items():
+        annotation = field_info.annotation
+        origin = get_origin(annotation)
+        args = get_args(annotation)
+
+        candidate_types: list[type[BaseModel]] = []
+        if origin is None:
+            if isinstance(annotation, type):
+                candidate_types = [annotation]
+        elif origin is list:
+            inner = args[0] if args else None
+            if isinstance(inner, type):
+                candidate_types = [inner]
+        elif origin is Union:
+            non_none_args = [t for t in args if t is not type(None)]  # noqa: E721
+            for t in non_none_args:
+                t_origin = get_origin(t)
+                t_args = get_args(t)
+                if t_origin is list and t_args:
+                    inner = t_args[0]
+                    if isinstance(inner, type):
+                        candidate_types.append(inner)
+                elif isinstance(t, type):
+                    candidate_types.append(t)
+
+        if any(ct is embedded_cls for ct in candidate_types):
+            return field_name
+
+    return None
+
+
 class GraphNode(BaseModel):
     """Simplified node configuration for graph creation.
 
     Only requires the essential information that cannot be auto-deduced:
     - Which Pydantic class to create nodes for
     - Which field to use as primary key (name_from)
-    - Optional customizations like embedding
+    - Optional customizations like structured ``structs`` fields
 
     All field paths, excluded fields, and list detection are automatically
     determined by introspecting the Pydantic model structure.
+
+    The ``structs`` attribute is the unified configuration entry for
+    additional structured properties attached to a node. It can contain
+    either:
+
+    * ``ExtraFields`` subclasses (for synthetic/derived data such as
+      ``FileMetadata`` or ``WinLoss``)
+    * Regular Pydantic models referenced from the BAML-generated class,
+      which are treated as embedded structs.
+
+    Legacy attributes ``extra_classes`` and ``embedded`` remain available
+    as computed properties for backwards compatibility.
     """
 
     baml_class: Type[BaseModel]
-    extra_classes: list[Type[ExtraFields]] = []  # to be implemented
+    structs: List[Type[BaseModel]] = []
     name_from: str | Callable[[Dict[str, Any], str], str]
     description: str = ""
-    embedded: List[Tuple[str, Type[BaseModel]]] = []
     # Can be a field name or a callable similar to ``name_from``
     deduplication_key: str | Callable[[Dict[str, Any], str], Any] | None = None
     index_fields: List[str] = []
@@ -64,12 +119,60 @@ class GraphNode(BaseModel):
         # Handle legacy embed_in_parent for backward compatibility
         if self.embed_in_parent:
             warnings.warn(
-                "embed_in_parent is deprecated. Use 'embedded' field in parent node instead.",
+                "embed_in_parent is deprecated. Use structured 'structs' on the parent node instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
             if not self.embed_prefix:
                 self.embed_prefix = f"{self.baml_class.__name__.lower()}_"
+
+    @property
+    def extra_classes(self) -> list[Type[ExtraFields]]:
+        """Return ``structs`` that are ``ExtraFields`` subclasses.
+
+        This provides a backwards-compatible view for older code that still
+        expects ``GraphNode.extra_classes`` while new configuration should
+        populate the unified ``structs`` list.
+        """
+
+        extras: list[Type[ExtraFields]] = []
+        for struct_cls in self.structs:
+            try:
+                if issubclass(struct_cls, ExtraFields):
+                    extras.append(struct_cls)  # type: ignore[arg-type]
+            except TypeError:
+                # Not a class or not suitable for issubclass; ignore
+                continue
+        return extras
+
+    @property
+    def embedded(self) -> List[Tuple[str, Type[BaseModel]]]:
+        """Return embedded BAML structs as (field_name, struct_class) pairs.
+
+        Any ``structs`` entry that is *not* an ``ExtraFields`` subclass is
+        treated as a BAML-embedded struct. The corresponding field name on
+        ``baml_class`` is auto-detected from its type annotation. This keeps
+        the external API compatible with the previous ``embedded`` field
+        while avoiding duplicate configuration.
+        """
+
+        embedded: list[tuple[str, Type[BaseModel]]] = []
+        if not hasattr(self.baml_class, "model_fields"):
+            return embedded
+
+        for struct_cls in self.structs:
+            try:
+                if issubclass(struct_cls, ExtraFields):
+                    # Handled via ``extra_classes`` / ExtraFields
+                    continue
+            except TypeError:
+                continue
+
+            field_name = _find_embedded_field_for_class(self.baml_class, struct_cls)
+            if field_name:
+                embedded.append((field_name, struct_cls))
+
+        return embedded
 
     @property
     def key(self) -> str:
@@ -134,6 +237,35 @@ class GraphNode(BaseModel):
         """Get the prefix for an embedded field."""
         return f"{field_name}_"
 
+    @property
+    def label(self) -> str:
+        """Return the canonical label for this node (its BAML class name)."""
+        return self.baml_class.__name__
+
+    def struct_field_names(self) -> list[str]:
+        """Return the field names under which structs are stored on this node.
+
+        ExtraFields subclasses are exposed using their snake_case class name,
+        while embedded BAML structs use the actual field names detected from
+        the parent Pydantic model.
+        """
+        names: list[str] = []
+
+        # ExtraFields-based structs
+        for extra_cls in self.extra_classes:
+            struct_name = "".join(["_" + c.lower() if c.isupper() else c for c in extra_cls.__name__]).lstrip("_")
+            names.append(struct_name)
+
+        # Embedded BAML structs
+        for field_name, _ in self.embedded:
+            names.append(field_name)
+
+        return names
+
+    def embedded_field_names(self) -> list[str]:
+        """Return just the field names for embedded BAML structs."""
+        return [name for name, _ in self.embedded]
+
 
 class GraphRelation(BaseModel):
     """Simplified relationship configuration.
@@ -152,6 +284,23 @@ class GraphRelation(BaseModel):
 
     # Auto-deduced attributes (populated during schema validation)
     field_paths: List[Tuple[str, str]] = []  # (from_path, to_path) pairs
+
+    @property
+    def label(self) -> str:
+        """Return the canonical label for this relationship (its name)."""
+        return self.name
+
+    @property
+    def endpoints_label(self) -> str:
+        """Return a human-readable description of the endpoints.
+
+        Example: ``ReviewedOpportunity → HAS_RISK → RiskAnalysis``.
+        """
+        return f"{self.from_node.__name__} → {self.name} → {self.to_node.__name__}"
+
+    def iter_field_paths(self) -> List[Tuple[str, str]]:
+        """Return a copy of the (from_path, to_path) pairs for this relation."""
+        return list(self.field_paths)
 
 
 class GraphSchema(BaseModel):

@@ -1,7 +1,48 @@
 # Ideas around evolution of the Tk and Bleuprint
 
 
-## Fix Typing
+## Fix Style
+
+ekg_core/py and related code works well, nut are diffivult to understand and maintain. 
+Improve it, for example:
+ - use NamedTupple of Dataframe instead of tuple 
+ - break down functions in smaller ones
+ - Replace 'Any' by more precise types
+ - Add more methods in GraphNodes, GraphRelation, ...  
+
+ Also, we can unify the GraphNodes fields "extra_classes" and 'embedded' by just deducing the key of that later with the snacecase of the class name. 
+ So replace these 2 fields by a new one called 'structs', that extend the node fields the extra fields.  In Kuzu, these fiells will be set in a 'Struct' type (and ccessed by dot notation), but takes provision that in the future we will support neo4j, and theses fields could be added as separate properties (with underscore in the name). 
+Doing so, consider to have a single place (file ? ) to provide desctiptions of nodes, fields, properties and enumeration, either taking them from the Pydantic 'Field' description (as done curentlu with 'extra_classes'), or from the BAML description (as done with embedded and other stuff ).  
+
+You can test with :  
+uv run cli kg delete -f ; uv run cli kg add-doc --key rainbow-fake-cnes-1 -g ReviewedOpportunity
+uv run cli kg info
+uv run cli kg schema  (check the descriptions are there !)
+
+
+## Code cleanup
+
+
+- Use Pydantic models instead of dicts
+- Use correct typing instead of Any
+- Use correct variable names
+- Use correct docstrings
+- Use correct comments
+- Use correct indentation
+- Use correct line length
+- Use correct blank lines
+- Use correct imports
+- Use correct ordering of imports
+- Use correct ordering of functions
+- Use correct ordering of classes
+- Use correct ordering of variables
+- Use correct ordering of statements
+- Use correct ordering of expressions
+- Use correct ordering of operators
+- Use correct ordering of keywords
+- Use correct ordering of literals
+- Use correct ordering of
+
 There a quit a lot of 'Any' types in function parameters in current project (/home/tcl/prj/genai-graph)).
 
 Try to fix that (ie find the correct type of the parameter, add the import, etc). Check with Pylance or ruff that there's no error or warning

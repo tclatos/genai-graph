@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterable, NamedTuple
 
 from pydantic import BaseModel
 from rich.console import Console
@@ -9,6 +9,27 @@ from genai_graph.core.extra_fields_utils import apply_extra_fields
 from genai_graph.core.graph_backend import GraphBackend, create_in_memory_backend
 from genai_graph.core.graph_merge import merge_nodes_batch
 from genai_graph.core.graph_schema import GraphNode, GraphRelation, GraphSchema
+
+
+class RelationshipRecord(NamedTuple):
+    """Structured representation of a graph relationship.
+
+    Attributes:
+        from_type: Source node label (table name).
+        from_id: Source node primary key value.
+        to_type: Target node label (table name).
+        to_id: Target node primary key value.
+        name: Relationship type name.
+        properties: Edge properties dictionary.
+    """
+
+    from_type: str
+    from_id: str
+    to_type: str
+    to_id: str
+    name: str
+    properties: dict[str, Any]
+
 
 # Import new schema types
 
@@ -433,21 +454,24 @@ def get_field_by_path(obj: BaseModel, path: str) -> Any:
 
 
 def extract_graph_data(
-    model: BaseModel, nodes: list[GraphNode], relations: list[GraphRelation], source_key: str | None = None
-) -> Tuple[Dict[str, List[Dict]], List[Tuple]]:
+    model: BaseModel,
+    nodes: list[GraphNode],
+    relations: list[GraphRelation],
+    source_key: str | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], list[RelationshipRecord]]:
     """Generic extraction of nodes and relationships from any Pydantic model.
 
     Args:
         model: Pydantic model instance
         nodes: List of GraphNode objects
-        relations: List of GraphRelationConfig objects
+        relations: List of GraphRelation objects
 
     Returns:
         nodes_dict: Mapping of node type to list of property dicts
-        relationships: Tuples of (from_type, from_id, to_type, to_id, rel_name, rel_properties)
+        relationships: List of :class:`RelationshipRecord` instances
     """
-    nodes_dict: Dict[str, List[Dict]] = {}
-    relationships: List[Tuple] = []
+    nodes_dict: dict[str, list[dict[str, Any]]] = {}
+    relationships: list[RelationshipRecord] = []
     node_registry: Dict[str, set[str]] = {}  # For deduplication: node_type -> set of dedup values
     id_registry: Dict[str, Dict[str, str]] = {}  # For relationships: node_type -> {dedup_value: _id}
 
@@ -475,10 +499,13 @@ def extract_graph_data(
             if field_data is None:
                 continue
 
-            # Check if this field path represents a list
-            is_list = (
-                node_info.is_list_at_paths.get(field_path, False) if hasattr(node_info, "is_list_at_paths") else False
-            )
+            # Check if this field path represents a list. Guard against a
+            # ``None`` field_path to keep type-checkers happy – the
+            # is_list_at_paths mapping is keyed by concrete path strings.
+            if field_path is not None and hasattr(node_info, "is_list_at_paths"):
+                is_list = node_info.is_list_at_paths.get(field_path, False)
+            else:
+                is_list = False
             items = field_data if is_list else [field_data]
 
             for item in items:
@@ -574,7 +601,13 @@ def extract_graph_data(
                 continue
 
             # Get dedup value for from_node to lookup id
-            from_dict = from_item.model_dump() if hasattr(from_item, "model_dump") else from_item
+            raw_from = from_item.model_dump() if hasattr(from_item, "model_dump") else from_item
+            from_dict: Dict[str, Any]
+            if isinstance(raw_from, dict):
+                from_dict = raw_from
+            else:
+                # Fallback: best-effort conversion for unexpected types
+                from_dict = dict(getattr(raw_from, "__dict__", {}))
 
             # Get dedup value for from node using the same helper as extraction
             from_dedup_value = from_node_info.get_dedup_value(from_dict, from_type)
@@ -588,7 +621,12 @@ def extract_graph_data(
             for to_item in to_items:
                 if to_item is None:
                     continue
-                to_dict = to_item.model_dump() if hasattr(to_item, "model_dump") else to_item
+                raw_to = to_item.model_dump() if hasattr(to_item, "model_dump") else to_item
+                to_dict: Dict[str, Any]
+                if isinstance(raw_to, dict):
+                    to_dict = raw_to
+                else:
+                    to_dict = dict(getattr(raw_to, "__dict__", {}))
 
                 # Get dedup value for to node using the same helper as extraction
                 to_dedup_value = to_node_info.get_dedup_value(to_dict, to_type)
@@ -607,7 +645,16 @@ def extract_graph_data(
                                     edge_properties[prop_name] = prop_value
 
                     # Use id values for relationships with properties
-                    relationships.append((from_type, from_id, to_type, to_id, relation_info.name, edge_properties))
+                    relationships.append(
+                        RelationshipRecord(
+                            from_type=from_type,
+                            from_id=from_id,
+                            to_type=to_type,
+                            to_id=to_id,
+                            name=relation_info.name,
+                            properties=edge_properties,
+                        )
+                    )
 
     return nodes_dict, relationships
 
@@ -615,7 +662,11 @@ def extract_graph_data(
 # Loading
 
 
-def load_graph_data(backend: GraphBackend, nodes_dict: Dict[str, List[Dict]], relationships: List[Tuple]) -> None:
+def load_graph_data(
+    backend: GraphBackend,
+    nodes_dict: dict[str, list[dict[str, Any]]],
+    relationships: list[RelationshipRecord] | list[tuple[Any, ...]],
+) -> None:
     """Load nodes and relationships into the graph database using MERGE semantics.
 
     Uses MERGE statements to insert or update nodes, preserving _created_at timestamps
@@ -639,29 +690,55 @@ def load_graph_data(backend: GraphBackend, nodes_dict: Dict[str, List[Dict]], re
         merge_on_field="_dedup_key",
     )
 
+    # Normalise relationships into RelationshipRecord instances so that
+    # downstream code can rely on named attributes rather than tuple
+    # indexing. This also preserves backwards compatibility with any
+    # older callers that might still pass raw tuples.
+    normalised_rels: list[RelationshipRecord] = []
+    for rel in relationships:
+        if isinstance(rel, RelationshipRecord):
+            normalised_rels.append(rel)
+            continue
+
+        # Tuple fallback – support both legacy 5-field and 6-field formats
+        if not isinstance(rel, tuple):
+            continue
+
+        if len(rel) == 6:
+            from_type, from_id, to_type, to_id, rel_name, edge_properties = rel
+        elif len(rel) == 5:
+            from_type, from_id, to_type, to_id, rel_name = rel
+            edge_properties = {}
+        else:
+            continue
+
+        normalised_rels.append(
+            RelationshipRecord(
+                from_type=str(from_type),
+                from_id=str(from_id),
+                to_type=str(to_type),
+                to_id=str(to_id),
+                name=str(rel_name),
+                properties=dict(edge_properties or {}),
+            )
+        )
+
     # Relationships - use merged IDs for all node references
     # TODO: Implement relationship deduplication to avoid duplicate edges between same node pairs.
     # Currently, relationships are created even if they already exist. A future enhancement
     # could use MERGE for relationships as well, matching on (from_node, to_node, rel_type)
     # and optionally updating edge properties.
 
-    console.print(f"[bold]Creating {len(relationships)} relationships...[/bold]")
-    edge_props_count = sum(1 for r in relationships if len(r) == 6 and r[5])
+    console.print(f"[bold]Creating {len(normalised_rels)} relationships...[/bold]")
+    edge_props_count = sum(1 for r in normalised_rels if r.properties)
     if edge_props_count > 0:
         console.print(f"[cyan]  {edge_props_count} relationships have properties[/cyan]")
 
     relationships_created = 0
-    for rel_tuple in relationships:
-        # Handle both old format (5 elements) and new format (6 elements with properties)
-        if len(rel_tuple) == 6:
-            from_type, from_id, to_type, to_id, rel_name, edge_properties = rel_tuple
-        else:
-            from_type, from_id, to_type, to_id, rel_name = rel_tuple
-            edge_properties = {}
-
+    for rel in normalised_rels:
         # Translate original IDs to merged IDs using id_mapping
-        merged_from_id = id_mapping.get((from_type, from_id), from_id)
-        merged_to_id = id_mapping.get((to_type, to_id), to_id)
+        merged_from_id = id_mapping.get((rel.from_type, rel.from_id), rel.from_id)
+        merged_to_id = id_mapping.get((rel.to_type, rel.to_id), rel.to_id)
 
         # Ensure we have strings before calling replace (defensive)
         merged_from_id_str = "" if merged_from_id is None else str(merged_from_id)
@@ -672,6 +749,7 @@ def load_graph_data(backend: GraphBackend, nodes_dict: Dict[str, List[Dict]], re
 
         # Build properties string for edge
         props_str = ""
+        edge_properties = rel.properties or {}
         if edge_properties:
             prop_parts = []
             for key, value in edge_properties.items():
@@ -689,16 +767,16 @@ def load_graph_data(backend: GraphBackend, nodes_dict: Dict[str, List[Dict]], re
                 props_str = " {" + ", ".join(prop_parts) + "}"
 
         match_sql = f"""
-        MATCH (from:{from_type}), (to:{to_type})
+        MATCH (from:{rel.from_type}), (to:{rel.to_type})
         WHERE from.id = '{from_id_escaped}'
           AND to.id = '{to_id_escaped}'
-        CREATE (from)-[:{rel_name}{props_str}]->(to)
+        CREATE (from)-[:{rel.name}{props_str}]->(to)
         """
         try:
             backend.execute(match_sql)
             relationships_created += 1
         except Exception as e:
-            console.print(f"[red]Error creating {rel_name} relationship:[/red] {e}")
+            console.print(f"[red]Error creating {rel.name} relationship:[/red] {e}")
             console.print(f"[dim]SQL: {match_sql}[/dim]")
 
     console.print(f"[green]✓ Created {relationships_created} relationships[/green]")
@@ -713,7 +791,7 @@ def create_graph(
     model: BaseModel,
     schema_config: GraphSchema,
     source_key: str | None = None,
-) -> tuple[Dict[str, List[Dict]], List[Tuple]]:
+) -> tuple[dict[str, list[dict[str, Any]]], list[RelationshipRecord]]:
     """Create a knowledge graph from a Pydantic model in the configured graph database.
 
     Args:
@@ -796,3 +874,34 @@ def create_graph(
     console.print(f"[green]Total relationships:[/green] {len(relationships)}")
 
     return nodes_dict, relationships
+
+
+def build_visualization_nodes(nodes_dict: dict[str, list[dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:
+    """Build a flat (id, properties) list suitable for HTML visualizers.
+
+    The returned node IDs are taken from each record's ``id`` field when
+    present; a synthetic value is generated as a fallback.
+    """
+    flattened: list[tuple[str, dict[str, Any]]] = []
+    for node_type, items in nodes_dict.items():
+        for item in items:
+            node_id_val = item.get("id")
+            node_id = str(node_id_val) if node_id_val is not None else f"{node_type}_{uuid.uuid4()}"
+            flattened.append((node_id, item))
+    return flattened
+
+
+def build_visualization_links_from_relationships(
+    relationships: Iterable[RelationshipRecord],
+) -> list[tuple[str, str, str, dict[str, Any]]]:
+    """Convert :class:`RelationshipRecord` instances into HTML link tuples.
+
+    Returns a list of ``(from_id, to_id, name, properties)`` tuples that can
+    be consumed by visualization helpers without knowing about
+    :class:`RelationshipRecord` internals.
+    """
+    links: list[tuple[str, str, str, dict[str, Any]]] = []
+    for rel in relationships:
+        props = dict(rel.properties or {})
+        links.append((rel.from_id, rel.to_id, rel.name, props))
+    return links

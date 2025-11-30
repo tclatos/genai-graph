@@ -178,9 +178,9 @@ def _fetch_graph_data(
         try:
             labels: set[str] = set()
             for cfg in node_configs:
-                baml_class = getattr(cfg, "baml_class", None)
-                if baml_class is not None and hasattr(baml_class, "__name__"):
-                    labels.add(baml_class.__name__)
+                node_class = getattr(cfg, "node_class", None)
+                if node_class is not None and hasattr(node_class, "__name__"):
+                    labels.add(node_class.__name__)
             if labels:
                 allowed_node_labels = labels
         except Exception:

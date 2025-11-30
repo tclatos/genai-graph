@@ -59,23 +59,23 @@ def create_configuration():
     # Define nodes - just specify the class and name_from field
     nodes = [
         # Root node
-        GraphNode(baml_class=ReviewedOpportunity, name_from="start_date"),
+        GraphNode(node_class=ReviewedOpportunity, name_from="start_date"),
         # Regular nodes - field paths auto-deduced
-        GraphNode(baml_class=Opportunity, name_from="name"),
-        GraphNode(baml_class=Customer, name_from="name"),
-        GraphNode(baml_class=Person, name_from="name", deduplication_key="name"),  # Handles both contacts and team
-        GraphNode(baml_class=Partner, name_from="name"),
-        GraphNode(baml_class=RiskAnalysis, name_from="risk_description"),
+        GraphNode(node_class=Opportunity, name_from="name"),
+        GraphNode(node_class=Customer, name_from="name"),
+        GraphNode(node_class=Person, name_from="name", deduplication_key="name"),  # Handles both contacts and team
+        GraphNode(node_class=Partner, name_from="name"),
+        GraphNode(node_class=RiskAnalysis, name_from="risk_description"),
         GraphNode(
-            baml_class=TechnicalApproach,
+            node_class=TechnicalApproach,
             name_from=lambda data, base: data.get("technical_stack") or data.get("architecture") or f"{base}_default",
         ),
         GraphNode(
-            baml_class=CompetitiveLandscape,
+            node_class=CompetitiveLandscape,
             name_from=lambda data, base: data.get("competitive_position") or f"{base}_competitive_position",
         ),
-        # Embedded node - financials will be embedded in Opportunity table
-        GraphNode(baml_class=FinancialMetrics, name_from="tcv", embed_in_parent=True, embed_prefix="financial_"),
+        # FinancialMetrics is now expected to be provided via extra_classes on the
+        # appropriate node in real schemas; we do not configure embed_in_parent here.
     ]
 
     # Define relationships - just specify from/to classes and relationship name
@@ -162,7 +162,7 @@ def display_schema_configuration(schema: GraphSchema):
         else:
             paths_info = "ROOT"
 
-        console.print(f"• {node.baml_class.__name__}: {paths_info}")
+        console.print(f"• {node.node_class.__name__}: {paths_info}")
         if node.excluded_fields:
             console.print(f"  └─ Excluded fields: {', '.join(sorted(node.excluded_fields))}")
 
@@ -203,7 +203,7 @@ def create_statistics_table(
     # Get unique node types to avoid duplicates
     unique_node_types = set()
     for node_info in nodes:
-        node_type = node_info.baml_class.__name__
+        node_type = node_info.node_class.__name__
         if node_type not in unique_node_types:
             unique_node_types.add(node_type)
             try:

@@ -3,65 +3,33 @@
 
 ## Fix Style
 
-ekg_core/py and related code works well, nut are diffivult to understand and maintain. 
-Improve it, for example:
- - use NamedTupple of Dataframe instead of tuple 
- - break down functions in smaller ones
- - Replace 'Any' by more precise types
- - Add more methods in GraphNodes, GraphRelation, ...  
+ekg_core/py and related code works well, but are still difficult to understand and maintain. And there are some old stuff we could simplify.
+Improve it: 
 
- Also, we can unify the GraphNodes fields "extra_classes" and 'embedded' by just deducing the key of that later with the snacecase of the class name. 
- So replace these 2 fields by a new one called 'structs', that extend the node fields the extra fields.  In Kuzu, these fiells will be set in a 'Struct' type (and ccessed by dot notation), but takes provision that in the future we will support neo4j, and theses fields could be added as separate properties (with underscore in the name). 
-Doing so, consider to have a single place (file ? ) to provide desctiptions of nodes, fields, properties and enumeration, either taking them from the Pydantic 'Field' description (as done curentlu with 'extra_classes'), or from the BAML description (as done with embedded and other stuff ).  
+- rename 'baml_class' as 'node_class', and 'structs' as 'extra_classes'.   Make sure node_class can accept any Pydantic class, and try to mutualise code with extra_classes handling  ('execpt they are directlu inserted in the nodes). 
 
-You can test with :  
-uv run cli kg delete -f ; uv run cli kg add-doc --key rainbow-fake-cnes-1 -g ReviewedOpportunity
-uv run cli kg info
-uv run cli kg schema  (check the descriptions are there !)
+- remove all legacy code such as attributes``embedded`` .
+- Remove code that is not called (ex in the 'assert') and legacy one.  Rename functions and variables to make them more explicit, and update doc.
+Rename methods and fields.
 
+- Check that no nodes is orphan.
 
-## Code cleanup
+- Suggest other improvement to make it clean, generic and maintenable.
 
+## Better HTML visualisation
 
-- Use Pydantic models instead of dicts
-- Use correct typing instead of Any
-- Use correct variable names
-- Use correct docstrings
-- Use correct comments
-- Use correct indentation
-- Use correct line length
-- Use correct blank lines
-- Use correct imports
-- Use correct ordering of imports
-- Use correct ordering of functions
-- Use correct ordering of classes
-- Use correct ordering of variables
-- Use correct ordering of statements
-- Use correct ordering of expressions
-- Use correct ordering of operators
-- Use correct ordering of keywords
-- Use correct ordering of literals
-- Use correct ordering of
+- User can select the types of nodes and relationsips
 
-There a quit a lot of 'Any' types in function parameters in current project (/home/tcl/prj/genai-graph)).
-
-Try to fix that (ie find the correct type of the parameter, add the import, etc). Check with Pylance or ruff that there's no error or warning
+- Use G.V()
 
 
+## Better HTML visualisation
+- User can 
+  - select the types of nodes and relationsips
 
+- Use G.V()
 
-## Documents nodes
-
-Modify (deeply) add-doc commmand in /home/tcl/prj/genai-graph/genai_graph/core/commands_ekg.py. For each doc added
-- create a node (if not exists) in the Knowledge Graph (of type Document) with properties 'uuid' (set to the key name) and 'metadata' (an empty map). 
-- Create a relationship "SOURCE" between the node associated to the top class (such as 'ReviewedOpportunity' - but keep code independant of the schema) and the new node.
-
-Modify create_graph accordingly
-Ensure these nodes are displayed when calling 'uv run cli kg info' and uv run cli kg schema .
-
-
-
-
+## Hybrid
 
 
 ## Better React with Agent Midleware
@@ -215,3 +183,9 @@ you can test using 'uv run cli kg delete -f ; uv run cli kg add-doc --key rainbo
 Use 'uv run cli kg schema' to check the new fields are there (file_metadata.source, win_loss.result, win_loss.reason,..), with their description
 
 Enforce typing whenever possible (avoid Any...)
+
+You can test with :  
+uv run cli kg delete -f ; uv run cli kg add-doc --key rainbow-cnes-venus-tma --key rainbow-fake-cnes-1 -g ReviewedOpportunity ; uv run cli kg add-doc --key add-fake-cnes-1 -g ArchitectureDocument; uv run cli kg export-html
+
+uv run cli kg info
+uv run cli kg schema  (check the descriptions are there !)  

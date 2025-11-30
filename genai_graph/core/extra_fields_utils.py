@@ -18,7 +18,7 @@ def apply_extra_fields(
     legacy `metadata` map fallback. It mutates `item_data` in-place.
     """
     # Determine if FileMetadata is configured for this node
-    extras = getattr(node_info, "extra_classes", []) or []
+    extras = getattr(node_info, "extra_field_classes", []) or []
     metadata_handled = any(getattr(ec, "__name__", "") == "FileMetadata" for ec in extras)
 
     # If FileMetadata is present, convert existing raw metadata map into the
@@ -45,9 +45,9 @@ def apply_extra_fields(
             # Remove legacy metadata to avoid schema mismatches
             item_data.pop("metadata", None)
     else:
-        # Legacy behavior: ensure metadata is a dict when the BAML class defines it
+        # Legacy behavior: ensure metadata is a dict when the node class defines it
         try:
-            if hasattr(node_info.baml_class, "model_fields") and "metadata" in node_info.baml_class.model_fields:
+            if hasattr(node_info.node_class, "model_fields") and "metadata" in node_info.node_class.model_fields:
                 if "metadata" in item_data:
                     metadata = item_data["metadata"]
                     if not isinstance(metadata, dict):

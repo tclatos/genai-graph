@@ -36,7 +36,7 @@ class Subgraph(ABC):
     def get_node_labels(self) -> dict[str, str]:
         """Get mapping of node types to human-readable descriptions from schema."""
         schema = self.build_schema()
-        return {node.baml_class.__name__: node.description for node in schema.nodes}
+        return {node.node_class.__name__: node.description for node in schema.nodes}
 
     def get_relationship_labels(self) -> dict[str, tuple[str, str]]:
         """Get mapping of relationship types to (direction, meaning) tuples from schema."""

@@ -75,21 +75,21 @@ class WinLoss(ExtraFields):
 def get_common_nodes() -> list[GraphNode]:
     return [
         GraphNode(
-            baml_class=Opportunity,
-            structs=[WinLoss],
+            node_class=Opportunity,
+            extra_classes=[WinLoss],
             name_from="name",
             description="Core opportunity information with financial metrics embedded",
             deduplication_key="opportunity_id",
             index_fields=["name", "status"],
         ),
         GraphNode(
-            baml_class=Customer,
+            node_class=Customer,
             name_from="name",
             description="Customer organization details",
             index_fields=["name"],
         ),
         GraphNode(
-            baml_class=Person,
+            node_class=Person,
             name_from="name",
             deduplication_key="name",
             description="Individual contacts and team members",

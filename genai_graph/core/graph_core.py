@@ -8,7 +8,12 @@ from rich.console import Console
 from genai_graph.core.extra_fields_utils import apply_extra_fields
 from genai_graph.core.graph_backend import GraphBackend, create_in_memory_backend
 from genai_graph.core.graph_merge import merge_nodes_batch
-from genai_graph.core.graph_schema import GraphNode, GraphRelation, GraphSchema
+from genai_graph.core.graph_schema import (
+    GraphNode,
+    GraphRelation,
+    GraphSchema,
+    _find_embedded_field_for_class,
+)
 
 
 class RelationshipRecord(NamedTuple):
@@ -66,141 +71,44 @@ def _get_kuzu_type(annotation: Any) -> str:
         return "STRING"
 
 
-def _detect_parent_class(embedded_node: GraphNode, all_nodes: list[GraphNode]) -> type[BaseModel] | None:
-    """Auto-detect parent class for embedded node based on field path.
-
-    Args:
-        embedded_node: The node to be embedded
-        all_nodes: All node configurations to search through
-
-    Returns:
-        Parent node class or None if not found
-    """
-    field_path = getattr(
-        embedded_node, "_field_path", embedded_node.field_paths[0] if embedded_node.field_paths else None
-    )
-    if not field_path:
-        return None
-
-    # Simple heuristic: find the node whose field_path is a prefix of this one
-    field_parts = field_path.split(".")
-    if len(field_parts) <= 1:
-        return None
-
-    parent_path = ".".join(field_parts[:-1])
-
-    for node in all_nodes:
-        node_field_path = getattr(node, "_field_path", node.field_paths[0] if node.field_paths else None)
-        if not node.embed_in_parent and node_field_path == parent_path:
-            return node.baml_class
-
-    return None
-
-
-def _find_embedded_data_in_model(root_model: BaseModel, target_class: type[BaseModel]) -> Any:
-    """Find data of target_class type within the root model.
-
-    Args:
-        root_model: Root model to search in
-        target_class: The class type to find
-
-    Returns:
-        Instance of target_class or None if not found
-    """
-    if not hasattr(root_model, "model_fields"):
-        return None
-
-    for field_name, field_info in root_model.model_fields.items():
-        field_value = getattr(root_model, field_name, None)
-        if field_value is None:
-            continue
-
-        # Check if this field is an instance of target_class
-        if isinstance(field_value, target_class):
-            return field_value
-
-        # Check if this field's type annotation matches target_class
-        if field_info.annotation == target_class:
-            return field_value
-
-    return None
-
-
 def _add_embedded_fields(
-    parent_data: dict[str, Any], root_model: BaseModel, all_nodes: list[GraphNode], parent_node: GraphNode
+    parent_data: dict[str, Any], root_model: BaseModel, _all_nodes: list[GraphNode], parent_node: GraphNode
 ) -> None:
-    """Add embedded node fields to parent record.
+    """Add embedded struct fields to the parent record as nested maps.
 
-    Args:
-        parent_data: Parent record dictionary to modify
-        root_model: Root model instance for field path resolution
-        all_nodes: All node configurations (GraphNode objects)
-        parent_node: Parent node configuration (GraphNode object)
+    Embedded structs are configured via ``GraphNode.extra_classes`` using
+    plain Pydantic models (non-:class:`ExtraFields` subclasses). For each such
+    class we locate the corresponding field on ``parent_node.node_class`` and
+    copy its ``model_dump()`` into the parent data.
     """
-    # New structure: handle embedded fields from parent_node.embedded as MAP/STRUCT
-    # properties on the parent node, not flattened.
-    if hasattr(parent_node, "embedded") and parent_node.embedded:
-        # Get the parent instance data
-        field_path = getattr(
-            parent_node, "_field_path", parent_node.field_paths[0] if parent_node.field_paths else None
-        )
-        parent_instance = get_field_by_path(root_model, field_path) if field_path else root_model
+    if not parent_node.embedded_struct_classes:
+        return
 
-        for field_name, _embedded_class in parent_node.embedded:
-            # Get the embedded data from the parent instance
-            embedded_data = getattr(parent_instance, field_name, None) if parent_instance else None
+    # Locate the parent instance under the root model using the primary
+    # field path selected for this node configuration.
+    field_path = getattr(parent_node, "_field_path", parent_node.field_paths[0] if parent_node.field_paths else None)
+    parent_instance = get_field_by_path(root_model, field_path) if field_path else root_model
 
-            if embedded_data is None:
-                continue
+    if parent_instance is None:
+        return
 
-            # Convert to dict if needed
-            if hasattr(embedded_data, "model_dump"):
-                embedded_dict = embedded_data.model_dump()
-            elif isinstance(embedded_data, dict):
-                embedded_dict = embedded_data
-            else:
-                continue
-
-            # Store as a nested map/struct property on the parent record
-            parent_data[field_name] = embedded_dict
-
-    # Legacy: handle embed_in_parent nodes
-    for embedded_node in all_nodes:
-        if not embedded_node.embed_in_parent:
+    for embedded_cls in parent_node.embedded_struct_classes:
+        field_name = _find_embedded_field_for_class(parent_node.node_class, embedded_cls)
+        if not field_name:
             continue
 
-        # Check if this embedded node belongs to this parent
-        parent_class = embedded_node.parent_node_class
-        if not parent_class:
-            parent_class = _detect_parent_class(embedded_node, all_nodes)
-
-        if not parent_class or parent_class != parent_node.baml_class:
-            continue
-
-        # Extract embedded data - need to find it in the root model
-        field_path = getattr(
-            embedded_node, "_field_path", embedded_node.field_paths[0] if embedded_node.field_paths else None
-        )
-        embedded_data = get_field_by_path(root_model, field_path) if field_path else None
+        embedded_data = getattr(parent_instance, field_name, None)
         if embedded_data is None:
-            # Try to find the embedded data by searching for the class type in root model
-            embedded_data = _find_embedded_data_in_model(root_model, embedded_node.baml_class)
-            if embedded_data is None:
-                continue
+            continue
 
-        # Convert to dict if needed
         if hasattr(embedded_data, "model_dump"):
             embedded_dict = embedded_data.model_dump()
         elif isinstance(embedded_data, dict):
             embedded_dict = embedded_data
         else:
-            continue
+            embedded_dict = dict(getattr(embedded_data, "__dict__", {}))
 
-        # Add embedded fields with prefix
-        prefix = embedded_node.embed_prefix or f"{embedded_node.baml_class.__name__.lower()}_"
-        for field_name, field_value in embedded_dict.items():
-            embedded_field_name = f"{prefix}{field_name}"
-            parent_data[embedded_field_name] = field_value
+        parent_data[field_name] = embedded_dict
 
 
 def restart_database() -> GraphBackend:
@@ -213,19 +121,6 @@ def restart_database() -> GraphBackend:
     backend = create_in_memory_backend()
     console.print("[yellow]🔄 Database restarted - all tables cleared[/yellow]")
     return backend
-
-
-def create_synthetic_key(data: Dict[str, Any], base_name: str) -> str:
-    """Generate a synthetic key when primary key is missing.
-
-    Args:
-        data: The node data
-        base_name: Node type to prefix the synthetic key
-
-    Returns:
-        Generated synthetic key
-    """
-    return f"{base_name}_{hash(str(sorted(data.items()))) % 10000}"
 
 
 # Schema
@@ -248,24 +143,27 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
     # and creating missing tables on the fly. This would allow adding new document types
     # with extended schemas without requiring database restarts.
 
-    # Create node tables (skip embedded ones)
+    # Create node tables
     created_tables: set[str] = set()
-    # For modern embedded configuration, we represent each embedded class as a
+    # For embedded configuration, we represent each embedded class as a
     # single MAP/STRUCT-typed column on the parent node.
     embedded_struct_fields_by_parent: dict[str, list[tuple[str, str]]] = {}
-    # Backwards-compatible container for legacy embed_in_parent handling
-    embedded_fields_by_parent: dict[str, list[tuple[str, str]]] = {}
 
-    # First, collect embedded struct definitions for each parent (new structure)
+    # First, collect embedded struct definitions for each parent
     for node in nodes:
-        if hasattr(node, "embedded") and node.embedded:
-            parent_name = node.baml_class.__name__
-            if parent_name not in embedded_struct_fields_by_parent:
-                embedded_struct_fields_by_parent[parent_name] = []
+        if not node.embedded_struct_classes:
+            continue
 
-            parent_model_fields = getattr(node.baml_class, "model_fields", {})
+        parent_name = node.node_class.__name__
+        if parent_name not in embedded_struct_fields_by_parent:
+            embedded_struct_fields_by_parent[parent_name] = []
 
-            for field_name, embedded_class in node.embedded:
+        parent_model_fields = getattr(node.node_class, "model_fields", {})
+
+        for embedded_class in node.embedded_struct_classes:
+            field_name = _find_embedded_field_for_class(node.node_class, embedded_class)
+            if not field_name:
+                continue
                 # Validate that the embedded field exists on the parent model
                 if field_name not in parent_model_fields:
                     console.print(
@@ -298,13 +196,13 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
                 struct_type = f"STRUCT({', '.join(struct_parts)})"
                 embedded_struct_fields_by_parent[parent_name].append((field_name, struct_type))
 
-    # Collect extra_classes struct fields per parent node
+    # Collect ExtraFields-based struct fields per parent node
     extra_struct_fields_by_parent: dict[str, list[tuple[str, str]]] = {}
     for node in nodes:
-        extras = getattr(node, "extra_classes", []) or []
+        extras = getattr(node, "extra_field_classes", []) or []
         if not extras:
             continue
-        parent_name = node.baml_class.__name__
+        parent_name = node.node_class.__name__
         if parent_name not in extra_struct_fields_by_parent:
             extra_struct_fields_by_parent[parent_name] = []
 
@@ -322,40 +220,17 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
                 struct_type = f"STRUCT({', '.join(struct_parts)})"
                 extra_struct_fields_by_parent[parent_name].append((field_name, struct_type))
 
-    # Legacy: handle embed_in_parent nodes
+    # Create node tables
     for node in nodes:
-        if node.embed_in_parent:
-            # Find parent node class
-            parent_class = node.parent_node_class
-            if not parent_class:
-                # Auto-detect parent from field_path
-                parent_class = _detect_parent_class(node, nodes)
-
-            if parent_class:
-                parent_name = parent_class.__name__
-                if parent_name not in embedded_fields_by_parent:
-                    embedded_fields_by_parent[parent_name] = []
-
-                # Add embedded fields with prefix
-                prefix = node.embed_prefix or f"{node.baml_class.__name__.lower()}_"
-                for field_name, field_info in node.baml_class.model_fields.items():
-                    embedded_field_name = f"{prefix}{field_name}"
-                    kuzu_type = _get_kuzu_type(field_info.annotation)
-                    embedded_fields_by_parent[parent_name].append((embedded_field_name, kuzu_type))
-
-    for node in nodes:
-        if node.embed_in_parent:
-            continue  # Skip creating tables for embedded nodes
-
-        table_name = node.baml_class.__name__
+        table_name = node.node_class.__name__
         if table_name in created_tables:
             continue
 
         key_field = node.key
         fields: list[str] = []
-        model_fields = node.baml_class.model_fields
+        model_fields = node.node_class.model_fields
 
-        # Add extra_classes struct fields (new mechanism for adding non-BAML fields)
+        # Add ExtraFields-based struct fields (synthetic extras)
         extra_struct_fields = dict(extra_struct_fields_by_parent.get(table_name, []))
         for field_name, struct_type in extra_struct_fields.items():
             fields.append(f"{field_name} {struct_type}")
@@ -384,7 +259,8 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
                 elif field_name == "metadata":
                     # Create metadata as a STRUCT type only when not handled by an ExtraFields class
                     metadata_handled = any(
-                        getattr(ec, "__name__", "") == "FileMetadata" for ec in getattr(node, "extra_classes", []) or []
+                        getattr(ec, "__name__", "") == "FileMetadata"
+                        for ec in getattr(node, "extra_field_classes", []) or []
                     )
                     if metadata_handled:
                         # Skip creating legacy metadata column when FileMetadata is used
@@ -479,17 +355,14 @@ def extract_graph_data(
 
     # Init buckets
     for node_info in nodes:
-        node_type = node_info.baml_class.__name__
+        node_type = node_info.node_class.__name__
         nodes_dict[node_type] = []
         node_registry[node_type] = set()
         id_registry[node_type] = {}
 
     # Nodes
     for node_info in nodes:
-        if node_info.embed_in_parent:
-            continue  # Handle embedded nodes separately
-
-        node_type = node_info.baml_class.__name__
+        node_type = node_info.node_class.__name__
 
         # Process ALL field paths for this node type, not just the first one
         field_paths_to_process = node_info.field_paths if node_info.field_paths else [None]
@@ -572,15 +445,11 @@ def extract_graph_data(
         from_type = relation_info.from_node.__name__
         to_type = relation_info.to_node.__name__
 
-        # Skip relationships involving embedded nodes
-        from_node_info = next((n for n in nodes if n.baml_class.__name__ == from_type), None)
-        to_node_info = next((n for n in nodes if n.baml_class.__name__ == to_type), None)
+        # Skip relationships involving node classes that are not configured
+        from_node_info = next((n for n in nodes if n.node_class.__name__ == from_type), None)
+        to_node_info = next((n for n in nodes if n.node_class.__name__ == to_type), None)
 
         if not from_node_info or not to_node_info:
-            continue
-
-        # Skip if either node is embedded (no separate table created)
-        if from_node_info.embed_in_parent or to_node_info.embed_in_parent:
             continue
 
         # Get field paths from relation config
@@ -710,6 +579,7 @@ def load_graph_data(
             from_type, from_id, to_type, to_id, rel_name = rel
             edge_properties = {}
         else:
+            # Unsupported legacy shape
             continue
 
         normalised_rels.append(

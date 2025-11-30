@@ -595,6 +595,7 @@ class EkgCommands(CliTopCommand):
                 get_backend_storage_path_from_config,
             )
             from genai_graph.core.graph_registry import GraphRegistry
+            from genai_graph.core.graph_schema import _find_embedded_field_for_class
 
             registry = GraphRegistry.get_instance()
             selected_subgraphs = subgraphs or registry.listsubgraphs()
@@ -666,7 +667,7 @@ class EkgCommands(CliTopCommand):
                 # tables such as SOURCE_ReviewedOpportunity or
                 # SOURCE_SWArchitectureDocument.
                 if schema:
-                    allowed_node_labels = {n.baml_class.__name__ for n in schema.nodes}
+                    allowed_node_labels = {n.node_class.__name__ for n in schema.nodes}
                     allowed_rel_types = {r.name for r in schema.relations}
 
                     # Filter node and relationship tables to the configured schema
@@ -744,7 +745,7 @@ class EkgCommands(CliTopCommand):
 
             # Get node labels and deduplication strategy from the combined schema
             for node in schema.nodes:
-                node_type = node.baml_class.__name__
+                node_type = node.node_class.__name__
                 description = node.description or ""
 
                 # Human-readable dedup key description
@@ -795,7 +796,7 @@ class EkgCommands(CliTopCommand):
                 if node.index_fields:
                     has_indexed = True
                     fields_str = ", ".join(node.index_fields)
-                    indexed_fields_table.add_row(node.baml_class.__name__, fields_str)
+                    indexed_fields_table.add_row(node.node_class.__name__, fields_str)
 
             if has_indexed:
                 console.print(indexed_fields_table)
@@ -811,10 +812,12 @@ class EkgCommands(CliTopCommand):
 
             has_embedded = False
             for node in schema.nodes:
-                if node.embedded:
+                for embedded_class in getattr(node, "embedded_struct_classes", []) or []:
+                    field_name = _find_embedded_field_for_class(node.node_class, embedded_class)  # type: ignore[name-defined]
+                    if not field_name:
+                        continue
                     has_embedded = True
-                    for field_name, embedded_class in node.embedded:
-                        embedded_table.add_row(node.baml_class.__name__, field_name, embedded_class.__name__)
+                    embedded_table.add_row(node.node_class.__name__, field_name, embedded_class.__name__)
 
             if has_embedded:
                 console.print(embedded_table)

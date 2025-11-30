@@ -13,7 +13,7 @@ from functools import lru_cache
 from typing import Any, get_args, get_origin
 
 from genai_graph.core.graph_registry import GraphRegistry, get_subgraph
-from genai_graph.core.graph_schema import GraphSchema
+from genai_graph.core.graph_schema import GraphSchema, _find_embedded_field_for_class
 
 
 def generate_schema_description(subgraphs: str | list[str]) -> str:
@@ -279,7 +279,7 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
     # Track embedded classes to exclude from main type listing
     embedded_classes = set()
     for node in schema.nodes:
-        for _, embedded_class in node.embedded:
+        for embedded_class in getattr(node, "embedded_struct_classes", []) or []:
             embedded_classes.add(embedded_class.__name__)
 
     # Group nodes by type
@@ -287,7 +287,7 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
     lines.append("")
 
     for node in schema.nodes:
-        node_name = node.baml_class.__name__
+        node_name = node.node_class.__name__
 
         # Skip embedded classes from main listing
         if node_name in embedded_classes:
@@ -303,7 +303,7 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
             lines.append(f"{node_name}")
 
         # Build field list with compact format
-        for field_name, field_info in node.baml_class.model_fields.items():
+        for field_name, field_info in node.node_class.model_fields.items():
             # Do not print the raw `metadata` map field – we surface
             # provenance via `metadata.source` for the root model below.
             if field_name == "metadata":
@@ -319,7 +319,8 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
 
                 # Check if this field is an embedded class and flatten it
                 embedded_class = None
-                for emb_field_name, emb_class in node.embedded:
+                for emb_class in getattr(node, "embedded_struct_classes", []) or []:
+                    emb_field_name = _find_embedded_field_for_class(node.node_class, emb_class)  # type: ignore[name-defined]
                     if emb_field_name == field_name:
                         embedded_class = emb_class
                         break
@@ -349,18 +350,18 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
         # when an ExtraFields class `FileMetadata` is configured; otherwise
         # fall back to the legacy `metadata.source` map.
         try:
-            extras = getattr(node, "extra_classes", []) or []
+            extras = getattr(node, "extra_field_classes", []) or []
             has_file_meta = any(getattr(ec, "__name__", "") == "FileMetadata" for ec in extras)
             if has_file_meta:
                 lines.append("  file_metadata.source: string // Source of the file from which the data was extracted")
-            elif hasattr(node.baml_class, "model_fields") and "metadata" in node.baml_class.model_fields:
+            elif hasattr(node.node_class, "model_fields") and "metadata" in node.node_class.model_fields:
                 lines.append("  metadata.source: string // source of the document")
         except Exception:
             pass
 
         # Document any extra structured fields added via ExtraFields classes
         try:
-            for extra_cls in getattr(node, "extra_classes", []) or []:
+            for extra_cls in getattr(node, "extra_field_classes", []) or []:
                 # Skip FileMetadata as it's documented in the provenance section above
                 if getattr(extra_cls, "__name__", "") == "FileMetadata":
                     continue

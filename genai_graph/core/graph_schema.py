@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Self, Set, Tuple, Type, Union, get_args, get_origin
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class ExtraFields(BaseModel, ABC):
@@ -76,28 +76,32 @@ class GraphNode(BaseModel):
     """Simplified node configuration for graph creation.
 
     Only requires the essential information that cannot be auto-deduced:
-    - Which Pydantic class to create nodes for
-    - Which field to use as primary key (name_from)
-    - Optional customizations like structured ``structs`` fields
+
+    - Which Pydantic class to create nodes for (`node_class`)
+    - Which field to use as primary key for display (`name_from`)
+    - Optional customizations like additional structured `extra_classes`
 
     All field paths, excluded fields, and list detection are automatically
     determined by introspecting the Pydantic model structure.
 
-    The ``structs`` attribute is the unified configuration entry for
+    The ``extra_classes`` attribute is the unified configuration entry for
     additional structured properties attached to a node. It can contain
     either:
 
     * ``ExtraFields`` subclasses (for synthetic/derived data such as
-      ``FileMetadata`` or ``WinLoss``)
-    * Regular Pydantic models referenced from the BAML-generated class,
-      which are treated as embedded structs.
-
-    Legacy attributes ``extra_classes`` and ``embedded`` remain available
-    as computed properties for backwards compatibility.
+      ``FileMetadata`` or ``WinLoss``) – values are computed via
+      :meth:`ExtraFields.get_data` and inserted as nested maps.
+    * Regular Pydantic models referenced from the main ``node_class``,
+      which are treated as embedded structs and stored as MAP/STRUCT
+      properties on the node.
     """
 
-    baml_class: Type[BaseModel]
-    structs: List[Type[BaseModel]] = []
+    node_class: Type[BaseModel]
+    extra_classes: List[Type[BaseModel]] = []
+
+    model_config = {
+        "populate_by_name": True,
+    }
     name_from: str | Callable[[Dict[str, Any], str], str]
     description: str = ""
     # Can be a field name or a callable similar to ``name_from``
@@ -109,34 +113,21 @@ class GraphNode(BaseModel):
     is_list_at_paths: Dict[str, bool] = {}  # Whether it's a list at each path
     excluded_fields: Set[str] = set()  # Auto-computed based on relationships
 
-    # Legacy fields for backward compatibility (deprecated)
-    embed_in_parent: bool = False
-    embed_prefix: str = ""
-    parent_node_class: Optional[Type[BaseModel]] = None
-
-    def model_post_init(self, __context: Any) -> None:
-        """Initialize auto-deduced fields after model creation."""
-        # Handle legacy embed_in_parent for backward compatibility
-        if self.embed_in_parent:
-            warnings.warn(
-                "embed_in_parent is deprecated. Use structured 'structs' on the parent node instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if not self.embed_prefix:
-                self.embed_prefix = f"{self.baml_class.__name__.lower()}_"
+    def model_post_init(self, __context: Any) -> None:  # noqa: D401
+        """Hook for future post-init logic (currently unused)."""
+        # Kept for forwards-compatibility; no-op for now.
+        return None
 
     @property
-    def extra_classes(self) -> list[Type[ExtraFields]]:
-        """Return ``structs`` that are ``ExtraFields`` subclasses.
+    def extra_field_classes(self) -> list[Type[ExtraFields]]:
+        """Return configured ``ExtraFields`` subclasses for this node.
 
-        This provides a backwards-compatible view for older code that still
-        expects ``GraphNode.extra_classes`` while new configuration should
-        populate the unified ``structs`` list.
+        These classes are used to compute synthetic/derived structured
+        properties that are stored directly on the node (e.g. ``file_metadata``).
         """
 
         extras: list[Type[ExtraFields]] = []
-        for struct_cls in self.structs:
+        for struct_cls in self.extra_classes:
             try:
                 if issubclass(struct_cls, ExtraFields):
                     extras.append(struct_cls)  # type: ignore[arg-type]
@@ -146,32 +137,18 @@ class GraphNode(BaseModel):
         return extras
 
     @property
-    def embedded(self) -> List[Tuple[str, Type[BaseModel]]]:
-        """Return embedded BAML structs as (field_name, struct_class) pairs.
+    def embedded_struct_classes(self) -> list[Type[BaseModel]]:
+        """Return non-``ExtraFields`` Pydantic classes used as embedded structs."""
 
-        Any ``structs`` entry that is *not* an ``ExtraFields`` subclass is
-        treated as a BAML-embedded struct. The corresponding field name on
-        ``baml_class`` is auto-detected from its type annotation. This keeps
-        the external API compatible with the previous ``embedded`` field
-        while avoiding duplicate configuration.
-        """
-
-        embedded: list[tuple[str, Type[BaseModel]]] = []
-        if not hasattr(self.baml_class, "model_fields"):
-            return embedded
-
-        for struct_cls in self.structs:
+        embedded: list[Type[BaseModel]] = []
+        for struct_cls in self.extra_classes:
             try:
                 if issubclass(struct_cls, ExtraFields):
-                    # Handled via ``extra_classes`` / ExtraFields
                     continue
             except TypeError:
                 continue
-
-            field_name = _find_embedded_field_for_class(self.baml_class, struct_cls)
-            if field_name:
-                embedded.append((field_name, struct_cls))
-
+            if isinstance(struct_cls, type) and issubclass(struct_cls, BaseModel):
+                embedded.append(struct_cls)
         return embedded
 
     @property
@@ -229,42 +206,32 @@ class GraphNode(BaseModel):
             return value.name
         return str(value)
 
-    def has_embedded_fields(self) -> bool:
-        """Check if this node has embedded fields."""
-        return len(self.embedded) > 0
-
-    def get_embedded_prefix(self, field_name: str) -> str:
-        """Get the prefix for an embedded field."""
-        return f"{field_name}_"
-
     @property
     def label(self) -> str:
-        """Return the canonical label for this node (its BAML class name)."""
-        return self.baml_class.__name__
+        """Return the canonical label for this node (its class name)."""
+        return self.node_class.__name__
 
     def struct_field_names(self) -> list[str]:
-        """Return the field names under which structs are stored on this node.
+        """Return the field names under which extra structs are stored.
 
         ExtraFields subclasses are exposed using their snake_case class name,
-        while embedded BAML structs use the actual field names detected from
-        the parent Pydantic model.
+        while embedded structs use the actual field names detected from the
+        parent Pydantic model.
         """
         names: list[str] = []
 
         # ExtraFields-based structs
-        for extra_cls in self.extra_classes:
+        for extra_cls in self.extra_field_classes:
             struct_name = "".join(["_" + c.lower() if c.isupper() else c for c in extra_cls.__name__]).lstrip("_")
             names.append(struct_name)
 
-        # Embedded BAML structs
-        for field_name, _ in self.embedded:
-            names.append(field_name)
+        # Embedded structs: resolve field names on the parent model
+        for embedded_cls in self.embedded_struct_classes:
+            field_name = _find_embedded_field_for_class(self.node_class, embedded_cls)
+            if field_name:
+                names.append(field_name)
 
         return names
-
-    def embedded_field_names(self) -> list[str]:
-        """Return just the field names for embedded BAML structs."""
-        return [name for name, _ in self.embedded]
 
 
 class GraphRelation(BaseModel):
@@ -309,6 +276,10 @@ class GraphSchema(BaseModel):
     root_model_class: Type[BaseModel]
     nodes: List[GraphNode]
     relations: List[GraphRelation]
+
+    model_config = {
+        "populate_by_name": True,
+    }
 
     # Validation results
     _model_field_map: Dict[Type[BaseModel], Dict[str, Any]] = {}
@@ -492,7 +463,7 @@ class GraphSchema(BaseModel):
             node_config.is_list_at_paths = {}
 
             # Special case: root model
-            if node_config.baml_class == self.root_model_class:
+            if node_config.node_class == self.root_model_class:
                 node_config.field_paths = [""]  # Empty path = root
                 node_config.is_list_at_paths[""] = False
                 continue
@@ -500,7 +471,7 @@ class GraphSchema(BaseModel):
             # Find all paths where this class appears
             for _model_class, fields in self._model_field_map.items():
                 for _field_name, field_info in fields.items():
-                    if field_info["type"] == node_config.baml_class:
+                    if field_info["type"] == node_config.node_class:
                         path = field_info["path"]
                         is_list = field_info["is_list"]
 
@@ -524,7 +495,7 @@ class GraphSchema(BaseModel):
 
     def _get_node_paths(self, node_class: Type[BaseModel]) -> List[str]:
         """Get all field paths for a given node class."""
-        node_config = next((n for n in self.nodes if n.baml_class == node_class), None)
+        node_config = next((n for n in self.nodes if n.node_class == node_class), None)
         return node_config.field_paths if node_config else []
 
     def _is_valid_relationship_path(self, from_path: str, to_path: str, relation_config: GraphRelation) -> bool:
@@ -556,22 +527,23 @@ class GraphSchema(BaseModel):
         """Compute which fields should be excluded from each node based on relationships.
 
         Notes:
-            Embedded fields defined via ``GraphNode.embedded`` are *not* excluded
-            here anymore. They are represented as structured properties (MAP/STRUCT)
-            on the parent node rather than being flattened or removed.
+            Relationship targets (other nodes) are excluded so they are not
+            materialised twice. Additional structured data modelled via
+            ``extra_classes`` is never excluded here; it is always represented
+            as MAP/STRUCT properties on the parent node.
         """
         for node_config in self.nodes:
             excluded_fields = set()
 
             # Exclude fields with p_*_ pattern (these become edge properties)
-            if hasattr(node_config.baml_class, "model_fields"):
-                for field_name in node_config.baml_class.model_fields.keys():
+            if hasattr(node_config.node_class, "model_fields"):
+                for field_name in node_config.node_class.model_fields.keys():
                     if field_name.startswith("p_") and field_name.endswith("_"):
                         excluded_fields.add(field_name)
 
             # Find all fields that are handled by relationships
             for relation_config in self.relations:
-                if relation_config.from_node == node_config.baml_class:
+                if relation_config.from_node == node_config.node_class:
                     # Fields that point to other nodes should be excluded
                     for from_path, to_path in relation_config.field_paths:
                         # Extract the field name from the path
@@ -591,23 +563,10 @@ class GraphSchema(BaseModel):
                             if from_path == "":
                                 excluded_fields.add(to_path)
 
-            # Legacy: handle embed_in_parent nodes (these are still flattened)
-            for other_node in self.nodes:
-                if other_node.embed_in_parent and other_node.baml_class != node_config.baml_class:
-                    # Find if this other node is embedded in our node
-                    other_paths = other_node.field_paths
-                    our_paths = node_config.field_paths
-
-                    for other_path in other_paths:
-                        for our_path in our_paths:
-                            if other_path.startswith(our_path + ".") or (our_path == "" and "." in other_path):
-                                # The other node is nested under our node
-                                if our_path == "":
-                                    field_name = other_path.split(".")[0]
-                                else:
-                                    relative = other_path[len(our_path) + 1 :] if our_path else other_path
-                                    field_name = relative.split(".")[0]
-                                excluded_fields.add(field_name)
+            # Note: legacy `embed_in_parent` behaviour has been removed. All
+            # additional structured data should now be modelled via
+            # ``extra_classes`` on the parent node and is never flattened into
+            # scalar columns here.
 
             node_config.excluded_fields = excluded_fields
 
@@ -621,7 +580,7 @@ class GraphSchema(BaseModel):
             referenced_classes.add(relation.from_node)
             referenced_classes.add(relation.to_node)
 
-        configured_classes = {node.baml_class for node in self.nodes}
+        configured_classes = {node.node_class for node in self.nodes}
         missing_classes = referenced_classes - configured_classes
 
         if missing_classes:
@@ -643,10 +602,14 @@ class GraphSchema(BaseModel):
                     f"Multiple relationships defined between {from_cls.__name__} and {to_cls.__name__}: {', '.join(names)}"
                 )
 
-        # Check that field paths were found for all nodes
-        # for node in self.nodes:
-        #     if not node.field_paths and node.baml_class != self.root_model_class:
-        #         warnings_list.append(f"No field paths found for {node.baml_class.__name__} in the model structure")
+        # Warn when we have node classes that never appear in the reachable
+        # model structure (likely orphan configurations).
+        for node in self.nodes:
+            if not node.field_paths and node.node_class is not self.root_model_class:
+                warnings_list.append(
+                    f"No field paths found for {node.node_class.__name__} in the root model structure; "
+                    "this node may be orphaned."
+                )
 
         # # Check that field paths were found for relationships
         # for relation in self.relations:
@@ -660,15 +623,22 @@ class GraphSchema(BaseModel):
         from typing import get_args, get_origin
 
         for node in self.nodes:
-            if not node.embedded:
+            if not node.embedded_struct_classes:
                 continue
 
-            model_fields = getattr(node.baml_class, "model_fields", {})
-            for field_name, embedded_class in node.embedded:
+            model_fields = getattr(node.node_class, "model_fields", {})
+            for embedded_class in node.embedded_struct_classes:
+                field_name = _find_embedded_field_for_class(node.node_class, embedded_class)
+                if not field_name:
+                    warnings_list.append(
+                        f"Embedded class {embedded_class.__name__} is not referenced on "
+                        f"{node.node_class.__name__}; it will not be materialised."
+                    )
+                    continue
                 # Check that the field exists on the parent class
                 if field_name not in model_fields:
                     warnings_list.append(
-                        f"Embedded field '{field_name}' is not defined on class {node.baml_class.__name__}"
+                        f"Embedded field '{field_name}' is not defined on class {node.node_class.__name__}"
                     )
                     continue
 
@@ -691,7 +661,7 @@ class GraphSchema(BaseModel):
                 if embedded_class not in candidate_types:
                     warnings_list.append(
                         "Embedded field '"
-                        f"{field_name}' on class {node.baml_class.__name__} has incompatible type "
+                        f"{field_name}' on class {node.node_class.__name__} has incompatible type "
                         f"{annotation!r}; expected {embedded_class.__name__} or Optional[{embedded_class.__name__}]"
                     )
 
@@ -761,7 +731,7 @@ class GraphSchema(BaseModel):
                         doc = Document(
                             page_content=content,
                             metadata={
-                                "node_type": node_config.baml_class.__name__,
+                                "node_type": node_config.node_class.__name__,
                                 "field_name": field_name,
                                 "primary_key": str(primary_key),
                                 "field_path": field_path or "root",
@@ -811,7 +781,7 @@ class GraphSchema(BaseModel):
         for node in self.nodes:
             paths_str = ", ".join(node.field_paths) if node.field_paths else "ROOT"
             excluded_str = ", ".join(sorted(node.excluded_fields)) if node.excluded_fields else "None"
-            nodes_table.add_row(node.baml_class.__name__, node.key, paths_str, excluded_str)
+            nodes_table.add_row(node.node_class.__name__, node.key, paths_str, excluded_str)
 
         console.print(nodes_table)
 

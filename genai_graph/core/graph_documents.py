@@ -47,7 +47,7 @@ def _has_metadata_map(root_class: Type[BaseModel], schema: GraphSchema) -> bool:
             root_node = None
             if hasattr(schema, "nodes"):
                 for n in getattr(schema, "nodes", []):
-                    if getattr(n, "baml_class", None) is root_class:
+                    if getattr(n, "node_class", None) is root_class:
                         root_node = n
                         break
             if root_node is not None:
@@ -59,7 +59,7 @@ def _has_metadata_map(root_class: Type[BaseModel], schema: GraphSchema) -> bool:
             root_node = None
             if hasattr(schema, "nodes"):
                 for n in getattr(schema, "nodes", []):
-                    if getattr(n, "baml_class", None) is root_class:
+                    if getattr(n, "node_class", None) is root_class:
                         root_node = n
                         break
             if root_node is not None:

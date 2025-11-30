@@ -111,7 +111,7 @@ class GraphRegistry(BaseModel):
             the union of the selected subgraphs.
 
         Notes:
-            - Node configurations are de-duplicated by their ``baml_class``.
+            - Node configurations are de-duplicated by their underlying Pydantic ``node_class``.
             - Relationship configurations are de-duplicated by the
               ``(from_node, to_node, name)`` triple.
             - The ``root_model_class`` of the first selected subgraph is used
@@ -146,7 +146,7 @@ class GraphRegistry(BaseModel):
         seen_node_classes: set[type] = set()
         for schema in schemas:
             for node in schema.nodes:
-                node_class = node.baml_class
+                node_class = node.node_class
                 if node_class in seen_node_classes:
                     continue
                 seen_node_classes.add(node_class)

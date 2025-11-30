@@ -51,14 +51,14 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
         nodes = get_common_nodes() + [
             # Root node - the architecture document itself
             GraphNode(
-                baml_class=self.top_class,
-                structs=[FileMetadata],
+                node_class=self.top_class,
+                extra_classes=[FileMetadata],
                 name_from=lambda data, base: f"Architecture:{data.get('document_date', 'unknown')}",
                 description="Root node containing the complete architecture document with technical stack and solutions",
             ),
             # Technical Component nodes - individual technologies and tools
             GraphNode(
-                baml_class=TechnicalComponent,
+                node_class=TechnicalComponent,
                 name_from="name",
                 description="Individual technology, framework, platform, tool, or infrastructure component",
                 index_fields=["name", "type"],
@@ -66,7 +66,7 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
             ),
             # Solution nodes - managed services, products, and OSS solutions
             GraphNode(
-                baml_class=Solution,
+                node_class=Solution,
                 name_from="name",
                 description="Specific product, managed service, or OSS solution used in the architecture",
                 index_fields=["name", "vendor", "type"],

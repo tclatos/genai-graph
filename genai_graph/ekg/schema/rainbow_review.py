@@ -51,8 +51,8 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
         nodes = get_common_nodes() + [
             # Root node
             GraphNode(
-                baml_class=self.top_class,
-                structs=[FileMetadata, FinancialMetrics, CompetitiveLandscape],
+                node_class=self.top_class,
+                extra_classes=[FileMetadata, FinancialMetrics, CompetitiveLandscape],
                 name_from=lambda data, base: "Rainbow:" + str(data.get("start_date")),
                 description="Root node containing the complete reviewed opportunity",
                 # Embedded fields are stored as MAP/STRUCT properties on the
@@ -60,13 +60,13 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
             ),
             # Regular nodes - field paths auto-deduced
             GraphNode(
-                baml_class=RiskAnalysis,
+                node_class=RiskAnalysis,
                 name_from=lambda data, _: data.get("risk_category") or data.get("p_risk_description_") or "other_risk",
                 description="Risk assessment and mitigation details",
                 index_fields=["risk_description"],
             ),
             GraphNode(
-                baml_class=TechnicalApproach,
+                node_class=TechnicalApproach,
                 name_from=lambda data, base: data.get("technical_stack")
                 or data.get("architecture")
                 or f"{base}_default",
@@ -74,18 +74,18 @@ class ReviewedOpportunitySubgraph(PydanticSubgraph, BaseModel):
                 index_fields=["architecture", "technical_stack"],
             ),
             # GraphNode(
-            #     baml_class=CompetitiveLandscape,
+            #     node_class=CompetitiveLandscape,
             #     name_from=lambda data, base: data.get("competitive_position") or f"{base}_competitive_position",
             #     description="Competitive positioning and analysis",
             # ),
             GraphNode(
-                baml_class=Competitor,
+                node_class=Competitor,
                 name_from=lambda data, base: data.get("known_as") or data.get("name") or f"{base}_competitor",
                 # name_from="known_as",
                 description="Competitor",
             ),
             GraphNode(
-                baml_class=Partner,
+                node_class=Partner,
                 name_from="name",
                 # deduplication_key="name",
                 description="Atos partner organization information",

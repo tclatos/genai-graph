@@ -8,12 +8,7 @@ from rich.console import Console
 from genai_graph.core.extra_fields_utils import apply_extra_fields
 from genai_graph.core.graph_backend import GraphBackend, create_in_memory_backend
 from genai_graph.core.graph_merge import merge_nodes_batch
-from genai_graph.core.graph_schema import (
-    GraphNode,
-    GraphRelation,
-    GraphSchema,
-    _find_embedded_field_for_class,
-)
+from genai_graph.core.graph_schema import GraphNode, GraphRelation, GraphSchema, _find_embedded_field_for_class
 
 
 class RelationshipRecord(NamedTuple):

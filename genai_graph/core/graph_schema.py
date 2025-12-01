@@ -10,9 +10,16 @@ from __future__ import annotations
 import warnings
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Self, Set, Tuple, Type, Union, get_args, get_origin
+from typing import (
+    Any,
+    Callable,
+    Self,
+    Union,
+    get_args,
+    get_origin,
+)
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, model_validator
 
 
 class ExtraFields(BaseModel, ABC):
@@ -28,7 +35,7 @@ class ExtraFields(BaseModel, ABC):
         ...
 
 
-def _find_embedded_field_for_class(parent_cls: Type[BaseModel], embedded_cls: Type[BaseModel]) -> str | None:
+def _find_embedded_field_for_class(parent_cls: type[BaseModel], embedded_cls: type[BaseModel]) -> str | None:
     """Return the field name on *parent_cls* that holds *embedded_cls*.
 
     The field may be typed directly as the embedded class, or wrapped inside
@@ -96,22 +103,22 @@ class GraphNode(BaseModel):
       properties on the node.
     """
 
-    node_class: Type[BaseModel]
-    extra_classes: List[Type[BaseModel]] = []
+    node_class: type[BaseModel]
+    extra_classes: list[type[BaseModel]] = []
 
     model_config = {
         "populate_by_name": True,
     }
-    name_from: str | Callable[[Dict[str, Any], str], str]
+    name_from: str | Callable[[dict[str, Any], str], str]
     description: str = ""
     # Can be a field name or a callable similar to ``name_from``
-    deduplication_key: str | Callable[[Dict[str, Any], str], Any] | None = None
-    index_fields: List[str] = []
+    deduplication_key: str | Callable[[dict[str, Any], str], Any] | None = None
+    index_fields: list[str] = []
 
     # Auto-deduced attributes (populated during schema validation)
-    field_paths: List[str] = []  # All paths where this class appears in the root model
-    is_list_at_paths: Dict[str, bool] = {}  # Whether it's a list at each path
-    excluded_fields: Set[str] = set()  # Auto-computed based on relationships
+    field_paths: list[str] = []  # All paths where this class appears in the root model
+    is_list_at_paths: dict[str, bool] = {}  # Whether it's a list at each path
+    excluded_fields: set[str] = set()  # Auto-computed based on relationships
 
     def model_post_init(self, __context: Any) -> None:  # noqa: D401
         """Hook for future post-init logic (currently unused)."""
@@ -119,14 +126,14 @@ class GraphNode(BaseModel):
         return None
 
     @property
-    def extra_field_classes(self) -> list[Type[ExtraFields]]:
+    def extra_field_classes(self) -> list[type[ExtraFields]]:
         """Return configured ``ExtraFields`` subclasses for this node.
 
         These classes are used to compute synthetic/derived structured
         properties that are stored directly on the node (e.g. ``file_metadata``).
         """
 
-        extras: list[Type[ExtraFields]] = []
+        extras: list[type[ExtraFields]] = []
         for struct_cls in self.extra_classes:
             try:
                 if issubclass(struct_cls, ExtraFields):
@@ -137,10 +144,10 @@ class GraphNode(BaseModel):
         return extras
 
     @property
-    def embedded_struct_classes(self) -> list[Type[BaseModel]]:
+    def embedded_struct_classes(self) -> list[type[BaseModel]]:
         """Return non-``ExtraFields`` Pydantic classes used as embedded structs."""
 
-        embedded: list[Type[BaseModel]] = []
+        embedded: list[type[BaseModel]] = []
         for struct_cls in self.extra_classes:
             try:
                 if issubclass(struct_cls, ExtraFields):
@@ -159,7 +166,7 @@ class GraphNode(BaseModel):
         """
         return "id"
 
-    def get_name_value(self, data: Dict[str, Any], node_type: str) -> str:
+    def get_name_value(self, data: dict[str, Any], node_type: str) -> str:
         """Get the _name value for a node instance.
 
         Args:
@@ -182,7 +189,7 @@ class GraphNode(BaseModel):
         else:
             return str(value)
 
-    def get_dedup_value(self, data: Dict[str, Any], node_type: str) -> str | None:
+    def get_dedup_value(self, data: dict[str, Any], node_type: str) -> str | None:
         """Get the value used for deduplication for a node instance.
 
         When ``deduplication_key`` is not set, this falls back to the
@@ -244,13 +251,13 @@ class GraphRelation(BaseModel):
     All field paths are automatically deduced from the Pydantic model structure.
     """
 
-    from_node: Type[BaseModel]
-    to_node: Type[BaseModel]
+    from_node: type[BaseModel]
+    to_node: type[BaseModel]
     name: str
     description: str = ""
 
     # Auto-deduced attributes (populated during schema validation)
-    field_paths: List[Tuple[str, str]] = []  # (from_path, to_path) pairs
+    field_paths: list[tuple[str, str]] = []  # (from_path, to_path) pairs
 
     @property
     def label(self) -> str:
@@ -265,7 +272,7 @@ class GraphRelation(BaseModel):
         """
         return f"{self.from_node.__name__} → {self.name} → {self.to_node.__name__}"
 
-    def iter_field_paths(self) -> List[Tuple[str, str]]:
+    def iter_field_paths(self) -> list[tuple[str, str]]:
         """Return a copy of the (from_path, to_path) pairs for this relation."""
         return list(self.field_paths)
 
@@ -273,17 +280,17 @@ class GraphRelation(BaseModel):
 class GraphSchema(BaseModel):
     """Complete graph schema with validation and auto-deduction capabilities."""
 
-    root_model_class: Type[BaseModel]
-    nodes: List[GraphNode]
-    relations: List[GraphRelation]
+    root_model_class: type[BaseModel]
+    nodes: list[GraphNode]
+    relations: list[GraphRelation]
 
     model_config = {
         "populate_by_name": True,
     }
 
     # Validation results
-    _model_field_map: Dict[Type[BaseModel], Dict[str, Any]] = {}
-    _warnings: List[str] = []
+    _model_field_map: dict[type[BaseModel], dict[str, Any]] = {}
+    _warnings: list[str] = []
 
     @model_validator(mode="after")
     def validate_and_deduce_schema(self) -> "GraphSchema":
@@ -299,7 +306,7 @@ class GraphSchema(BaseModel):
         """Build a map of all reachable Pydantic model classes and their fields."""
         visited = set()
 
-        def explore_model(model_class: Type[BaseModel], path: str = ""):
+        def explore_model(model_class: type[BaseModel], path: str = ""):
             if model_class in visited:
                 return
             visited.add(model_class)
@@ -493,7 +500,7 @@ class GraphSchema(BaseModel):
                     if self._is_valid_relationship_path(from_path, to_path, relation_config):
                         relation_config.field_paths.append((from_path, to_path))
 
-    def _get_node_paths(self, node_class: Type[BaseModel]) -> List[str]:
+    def _get_node_paths(self, node_class: type[BaseModel]) -> list[str]:
         """Get all field paths for a given node class."""
         node_config = next((n for n in self.nodes if n.node_class == node_class), None)
         return node_config.field_paths if node_config else []
@@ -672,7 +679,7 @@ class GraphSchema(BaseModel):
         for warning_msg in warnings_list:
             warnings.warn(f"Graph schema validation: {warning_msg}", UserWarning, stacklevel=2)
 
-    def get_warnings(self) -> List[str]:
+    def get_warnings(self) -> list[str]:
         """Get all validation warnings."""
         return self._warnings.copy()
 
@@ -690,7 +697,7 @@ class GraphSchema(BaseModel):
         embeddings_store = EmbeddingsStore.create_from_config(embeddings_store_config)
         vector_store = embeddings_store.get()
 
-        documents: List[Document] = []
+        documents: list[Document] = []
 
         # Iterate through nodes with index_fields
         for node_config in self.nodes:

@@ -40,6 +40,7 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
         )
         from genai_graph.ekg.baml_client.types import (
             Opportunity,
+            Person,
             Solution,
             SWArchitectureDocument,
             TechnicalComponent,
@@ -104,6 +105,9 @@ class ArchitectureDocumentSubgraph(PydanticSubgraph, BaseModel):
                 to_node=Customer,
                 name="HAS_CUSTOMER",
                 description="Opportunity belongs to customer",
+            ),
+            GraphRelation(
+                from_node=Customer, to_node=Person, name="HAS_CONTACT", description="Customer contact persons"
             ),
             # Component to component relationships (dependencies/integration)
         ]

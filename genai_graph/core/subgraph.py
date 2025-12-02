@@ -14,7 +14,7 @@ from genai_graph.core.graph_schema import GraphSchema
 console = Console()
 
 
-class Subgraph(ABC):
+class SubgraphFactory(ABC):
     """Abstract base class for subgraph implementations."""
 
     @property
@@ -68,7 +68,7 @@ class Subgraph(ABC):
         register_subgraph(self.name, self, registry=registry)
 
 
-class PydanticSubgraph(Subgraph, BaseModel):
+class PydanticSubgraphFactory(SubgraphFactory, BaseModel):
     top_class: Type[BaseModel]
     kv_store_id: str
 

@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from genai_graph.core.graph_backend import GraphBackend
 from genai_graph.core.graph_schema import GraphSchema
-from genai_graph.core.subgraph import Subgraph
+from genai_graph.core.subgraph import SubgraphFactory
 
 
 @dataclass
@@ -91,7 +91,7 @@ def _has_metadata_map(root_class: Type[BaseModel], schema: GraphSchema) -> bool:
 
 
 def add_documents_to_graph(
-    keys: List[str], subgraph_impl: Subgraph, backend: GraphBackend, schema: GraphSchema
+    keys: List[str], subgraph_impl: SubgraphFactory, backend: GraphBackend, schema: GraphSchema
 ) -> DocumentStats:
     """Add one or more documents to the knowledge graph.
 

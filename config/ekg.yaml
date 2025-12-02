@@ -1,6 +1,6 @@
 kg_configs:
   default:
-    subgraphs:
+    subgraphs_factories:
     - genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
     - genai_graph.ekg.schema.architecture_doc:ArchitectureDocumentSubgraph
     content:

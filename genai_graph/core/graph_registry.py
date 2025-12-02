@@ -16,7 +16,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from genai_graph.core.graph_schema import GraphSchema
-from genai_graph.core.subgraph import Subgraph
+from genai_graph.core.subgraph import SubgraphFactory
 
 if typing.TYPE_CHECKING:
     from genai_graph.core.graph_registry import GraphRegistry
@@ -35,7 +35,7 @@ class GraphRegistry(BaseModel):
     operate on a logical union of several subgraphs.
     """
 
-    subgraphs: dict[str, Subgraph] = Field(default_factory=dict)
+    subgraphs: dict[str, SubgraphFactory] = Field(default_factory=dict)
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -58,19 +58,19 @@ class GraphRegistry(BaseModel):
         """
         # Load subgraph providers from YAML config (config/ekg.yaml), keyed by global 'kg_config'
         cfg_name = global_config().get("kg_config", default="default")
-        subgraph_factories = global_config().get_list(f"kg_configs.{cfg_name}.subgraphs")
+        subgraph_factories = global_config().get_list(f"kg_configs.{cfg_name}.subgraphs_factories")
         for factory in subgraph_factories:
             try:
                 logger.debug(f"import {factory}")
                 imported = import_from_qualified(factory)
 
-                subgraph: Subgraph | None = None
+                subgraph: SubgraphFactory | None = None
 
                 # Already-instantiated Subgraph instance
-                if isinstance(imported, Subgraph):
+                if isinstance(imported, SubgraphFactory):
                     subgraph = imported
                 # Subgraph subclass – instantiate with defaults
-                elif isinstance(imported, type) and issubclass(imported, Subgraph):
+                elif isinstance(imported, type) and issubclass(imported, SubgraphFactory):
                     subgraph = imported()
                 else:
                     # Callable provider – may be a factory returning a Subgraph
@@ -80,7 +80,7 @@ class GraphRegistry(BaseModel):
                     except TypeError:
                         candidate = imported()
 
-                    if isinstance(candidate, Subgraph):
+                    if isinstance(candidate, SubgraphFactory):
                         subgraph = candidate
                     else:
                         # Legacy path: callable handled registration itself.
@@ -97,7 +97,7 @@ class GraphRegistry(BaseModel):
         """Get the global GraphRegistry instance."""
         return GraphRegistry()
 
-    def register_subgraph(self, name: str, subgraph: Subgraph) -> None:
+    def register_subgraph(self, name: str, subgraph: SubgraphFactory) -> None:
         """Register a subgraph implementation under the given name."""
         self.subgraphs[name] = subgraph
 
@@ -167,7 +167,7 @@ class GraphRegistry(BaseModel):
 
         return GraphSchema(root_model_class=root_model_class, nodes=merged_nodes, relations=merged_relations)
 
-    def get_subgraph(self, name: str) -> Subgraph:
+    def get_subgraph(self, name: str) -> SubgraphFactory:
         """Get a subgraph instance by name.
 
         Args:
@@ -191,7 +191,7 @@ class GraphRegistry(BaseModel):
 
 # @beartype_nop
 def register_subgraph(
-    name: str, subgraph: Subgraph, registry: Any = None
+    name: str, subgraph: SubgraphFactory, registry: Any = None
 ) -> None:  # registry is "Optional[GraphRegistry]"
     """Convenience wrapper to register a subgraph on the global registry.
 
@@ -204,7 +204,7 @@ def register_subgraph(
     target.register_subgraph(name, subgraph)
 
 
-def get_subgraph(name: str) -> Subgraph:
+def get_subgraph(name: str) -> SubgraphFactory:
     """Convenience wrapper to retrieve a subgraph from the global registry."""
     return GraphRegistry.get_instance().get_subgraph(name)
 

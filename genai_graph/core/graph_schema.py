@@ -578,8 +578,7 @@ class GraphSchema(BaseModel):
 
             node_config.excluded_fields = excluded_fields
 
-    
-    @no_type_check # Avoid type-checking *ANY* methods or attributes of this class.
+    @no_type_check  # Avoid type-checking *ANY* methods or attributes of this class.
     def _validate_coherence(self) -> None:
         """Validate that the schema configuration is coherent with the Pydantic model."""
         warnings_list = []

@@ -17,6 +17,7 @@ from typing import (
     Union,
     get_args,
     get_origin,
+    no_type_check,
 )
 
 from pydantic import BaseModel, model_validator
@@ -577,6 +578,8 @@ class GraphSchema(BaseModel):
 
             node_config.excluded_fields = excluded_fields
 
+    
+    @no_type_check # Avoid type-checking *ANY* methods or attributes of this class.
     def _validate_coherence(self) -> None:
         """Validate that the schema configuration is coherent with the Pydantic model."""
         warnings_list = []
@@ -612,7 +615,9 @@ class GraphSchema(BaseModel):
         # Warn when we have node classes that never appear in the reachable
         # model structure (likely orphan configurations).
         for node in self.nodes:
-            if not node.field_paths and node.node_class is not self.root_model_class:
+            # Skip the root node itself (has field_paths = [""])
+            is_root_node = node.node_class is self.root_model_class or node.field_paths == [""]
+            if not node.field_paths and not is_root_node:
                 warnings_list.append(
                     f"No field paths found for {node.node_class.__name__} in the root model structure; "
                     "this node may be orphaned."

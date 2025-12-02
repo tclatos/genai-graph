@@ -56,11 +56,13 @@ class GraphRegistry(BaseModel):
           compatibility and is responsible for calling
           :func:`register_subgraph` manually.
         """
-        providers = global_config().get_list("subgraphs", value_type=str)
-        for provider in providers:
+        # Load subgraph providers from YAML config (config/ekg.yaml), keyed by global 'kg_config'
+        cfg_name = global_config().get("kg_config", default="default")
+        subgraph_factories = global_config().get_list(f"kg_configs.{cfg_name}.subgraphs")
+        for factory in subgraph_factories:
             try:
-                logger.info(f"import {provider}")
-                imported = import_from_qualified(provider)
+                logger.debug(f"import {factory}")
+                imported = import_from_qualified(factory)
 
                 subgraph: Subgraph | None = None
 
@@ -88,7 +90,7 @@ class GraphRegistry(BaseModel):
                     subgraph.register(self)
 
             except Exception as ex:
-                logger.warning(f"Cannot load subgraph provider {provider}: {ex}")
+                logger.warning(f"Cannot load subgraph provider {factory}: {ex}")
 
     @once
     def get_instance() -> "GraphRegistry":

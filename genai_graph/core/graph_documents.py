@@ -118,9 +118,14 @@ def add_documents_to_graph(
             f"Subgraph root model '{root_class.__name__}' must expose a 'metadata' map field (dict or Optional[dict])"
         )
 
+    from rich.console import Console
+
+    console = Console()
     for key in keys:
         try:
+            console.print(f"[cyan]Loading key {key} for subgraph {subgraph_impl.name}[/cyan]")
             data = subgraph_impl.load_data(key)
+            console.print(f"[cyan]Loaded? {bool(data)}[/cyan]")
             if not data:
                 stats.total_failed += 1
                 continue

@@ -35,12 +35,12 @@ Usage Examples:
     ```
 """
 
-import webbrowser
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from genai_tk.main.cli import CliTopCommand
+from genai_tk.utils.config_mngr import global_config
 from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
@@ -65,155 +65,85 @@ class EkgCommands(CliTopCommand):
         # Import concrete subgraph modules so they can register themselves.
         # This keeps the CLI generic while still enabling default subgraphs.
 
-        @cli_app.command("add-doc")
-        def add_doc(
-            keys: Annotated[
-                list[str],
+        @cli_app.command("create")
+        def create(
+            config_name: Annotated[
+                str | None,
                 typer.Option(
-                    "--key", "-k", help="Data key(s) to add to the EKG database (can be specified multiple times)"
+                    "--config",
+                    help="Name of the KG config to use from config/ekg.yaml (default: value of key 'kg_config')",
                 ),
-            ],
-            subgraph: Annotated[str, typer.Option("--subgraph", "-g", help="Subgraph type to use")],
+            ] = None,
         ) -> None:
-            """Add one or more documents to the shared EKG database.
+            """Create KG and ingest documents defined in YAML config (config/ekg.yaml)."""
 
-            Loads data from the key-value store and adds it to the
-            shared EKG database, creating the database if it doesn't exist.
-            Supports incremental additions - nodes with the same _name will be merged,
-            preserving creation timestamps and updating modification timestamps.
-
-            Examples:
-                # Add single document
-                cli kg add --key fake_cnes_1
-
-                # Add multiple documents in one command
-                cli kg add --key fake_cnes_1 --key cnes-venus-tma
-
-                # Add documents sequentially (without deleting DB in between)
-                cli kg add --key fake_cnes_1
-                cli kg add --key cnes-venus-tma
-            """
             from genai_graph.core.graph_backend import (
                 create_backend_from_config,
                 get_backend_storage_path_from_config,
             )
             from genai_graph.core.graph_documents import add_documents_to_graph
-            from genai_graph.core.graph_registry import get_subgraph
+            from genai_graph.core.graph_registry import GraphRegistry
 
-            # Get subgraph implementation
-            try:
-                subgraph_impl = get_subgraph(subgraph)
-            except ValueError as e:
-                import traceback as tb
+            if config_name:
+                global_config().set("kg_config", config_name)
+            cfg_name = config_name or global_config().get("kg_config", default="default")
+            kg_cfg = global_config().get_dict(f"kg_configs.{cfg_name}")
 
-                console.print(f"[red]❌ {e}[/red]")
-                console.print("[red]" + tb.format_exc() + "[/red]")
-                raise typer.Exit(1) from e
-
-            # Validate that we have at least one key
-            if not keys:
-                console.print("[red]❌ At least one --key must be provided[/red]")
-                raise typer.Exit(1)
-
-            console.print(Panel(f"[bold cyan]Adding {len(keys)} Document(s) to EKG[/bold cyan]"))
-
-            # Create graph configuration once
-            console.print("⚙️  Creating graph schema...")
-            schema = subgraph_impl.build_schema()
-            console.print(
-                f"[green]✓[/green] Schema: {len(schema.nodes)} node types, {len(schema.relations)} relationships"
-            )
-
-            # Initialize or connect to database once
-            console.print("🔧 Connecting to EKG database...")
+            # Build registry (which reads subgraphs from YAML) and backend
+            registry = GraphRegistry.get_instance()
             backend = create_backend_from_config("default")
-
-            # Process documents with enhanced error handling and per-document status
             db_path = get_backend_storage_path_from_config("default")
 
-            try:
-                # Process each key sequentially with UI feedback
-                total_docs_processed = 0
-                total_docs_failed = 0
+            # Iterate content sections: each item is {SubgraphName: {keys: [...]}}
+            content = kg_cfg.get("content", [])
+            total_docs_processed = 0
+            total_docs_failed = 0
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                subgraph_name = next(iter(item.keys()))
+                keys_cfg = item[subgraph_name] or {}
+                keys = keys_cfg.get("keys", [])
+                if not keys:
+                    continue
+                try:
+                    subgraph_impl = registry.get_subgraph(subgraph_name)
+                    console.print(f"[green]Matched registered subgraph name: {subgraph_impl.name}[/green]")
+                except ValueError:
+                    candidates = registry.listsubgraphs()
+                    fallback = None
+                    for cand in candidates:
+                        if cand == f"{subgraph_name}Subgraph" or cand.startswith(subgraph_name):
+                            fallback = cand
+                            break
+                    if not fallback:
+                        console.print(
+                            f"[red]❌ Unknown subgraph '{subgraph_name}'. Available: {', '.join(candidates)}[/red]"
+                        )
+                        continue
+                    subgraph_impl = registry.get_subgraph(fallback)
+                    console.print(f"[yellow]Using fallback subgraph name: {fallback}[/yellow]")
+                schema = subgraph_impl.build_schema()
+                try:
+                    from genai_graph.core.graph_core import create_schema as _create_schema
 
-                for idx, key in enumerate(keys, 1):
-                    console.print(f"\n[bold cyan]═══ Processing document {idx}/{len(keys)}: {key} ═══[/bold cyan]")
-
+                    _create_schema(backend, schema.nodes, schema.relations)
+                except Exception:
+                    pass
+                if keys:
                     try:
-                        # Load data
-                        console.print("📁 Loading data...")
-                        data = subgraph_impl.load_data(key)
-                        if not data:
-                            console.print(f"[red]❌ No {subgraph} data found for key: {key}[/red]")
-                            total_docs_failed += 1
-                            continue
-
-                        entity_name = subgraph_impl.get_entity_name_from_data(data)
-                        console.print(f"[green]✓[/green] Loaded: [bold]{entity_name}[/bold]")
-
-                        # Delegate complete document ingestion logic to graph_documents
-                        console.print("🚀 Merging into graph...")
-                        try:
-                            stats = add_documents_to_graph([key], subgraph_impl, backend, schema)
-                        except Exception as e:
-                            import traceback as tb
-
-                            console.print(f"[red]❌ {e}[/red]")
-                            console.print("[red]" + tb.format_exc() + "[/red]")
-                            total_docs_failed += 1
-                            continue
-
-                        if stats.total_processed > 0:
-                            total_docs_processed += 1
-                            console.print(
-                                f"[green]✓[/green] Document {idx} processed: {stats.nodes_created} nodes, {stats.relationships_created} relationships"
-                            )
-                        else:
-                            total_docs_failed += 1
-                            console.print(f"[red]❌ Failed to process document: {key}[/red]")
-
+                        stats = add_documents_to_graph(keys, subgraph_impl, backend, schema)
+                        console.print(
+                            f"[magenta]Ingest stats: processed={stats.total_processed} failed={stats.total_failed} nodes={stats.nodes_created} rels={stats.relationships_created}[/magenta]"
+                        )
+                        total_docs_processed += stats.total_processed
+                        total_docs_failed += stats.total_failed
                     except Exception as e:
-                        import traceback as tb
-
-                        console.print(f"[red]❌ Error processing {key}: {e}[/red]")
-                        console.print("[red]" + tb.format_exc() + "[/red]")
-                        total_docs_failed += 1
+                        console.print(f"[red]Ingestion error for {subgraph_name}: {e}[/red]")
+                        total_docs_failed += len(keys)
                         continue
 
-                # Display final summary
-                console.print(f"\n{'═' * 60}")
-                if total_docs_processed > 0:
-                    console.print(
-                        Panel(
-                            f"[bold green]✅ Successfully processed {total_docs_processed}/{len(keys)} documents![/bold green]"
-                        )
-                    )
-                else:
-                    console.print(Panel("[bold red]❌ Failed to process any documents[/bold red]"))
-                    raise typer.Exit(1)
-
-                summary_table = Table(title="Final Summary")
-                summary_table.add_column("Metric", style="cyan", no_wrap=True)
-                summary_table.add_column("Value", justify="right", style="magenta")
-
-                summary_table.add_row("Documents Processed", f"{total_docs_processed}/{len(keys)}")
-                if total_docs_failed > 0:
-                    summary_table.add_row("Documents Failed", str(total_docs_failed))
-                summary_table.add_row("Database Path", str(db_path))
-
-                console.print(summary_table)
-
-                console.print("\n[green]💡 Next steps:[/green]")
-                console.print("   • Query: [bold]cli kg query[/bold]")
-                console.print("   • Info:  [bold]cli kg info[/bold]")
-                console.print("   • Export: [bold]cli kg export-html[/bold]")
-
-            except Exception as e:
-                import traceback as tb
-
-                console.print(f"[red]❌ Unexpected error during document ingestion: {e}[/red]")
-                console.print("[red]" + tb.format_exc() + "[/red]")
-                raise typer.Exit(1) from e
+            console.print(f"Processed: {total_docs_processed} ok, {total_docs_failed} failed. Path: {db_path}")
 
         @cli_app.command("delete")
         def delete_ekg(
@@ -932,6 +862,8 @@ class EkgCommands(CliTopCommand):
                 # Optionally open in browser
                 if open_browser:
                     try:
+                        import webbrowser
+
                         console.print("🌐 Opening in default browser...")
                         webbrowser.open(file_url)
                         console.print("[green]✅ Opened in browser[/green]")
@@ -948,26 +880,6 @@ class EkgCommands(CliTopCommand):
                 console.print(f"[red]❌ Error generating visualization: {e}[/red]")
                 console.print("[red]" + tb.format_exc() + "[/red]")
                 raise typer.Exit(1) from e
-
-        @cli_app.command("list-subgraphs")
-        def listsubgraphs() -> None:
-            """List all registered knowledge graph subgraphs."""
-            from genai_graph.core.graph_registry import GraphRegistry
-
-            registry = GraphRegistry.get_instance()
-            names = registry.listsubgraphs()
-
-            if not names:
-                console.print("[yellow]No subgraphs are currently registered.[/yellow]")
-                return
-
-            table = Table(title="Registered Subgraphs")
-            table.add_column("Name", style="cyan", no_wrap=True)
-
-            for name in names:
-                table.add_row(name)
-
-            console.print(table)
 
         @cli_app.command("schema")
         def show_schema(

@@ -27,6 +27,7 @@ paths:
   - ${paths.config}/baseline.yaml
   - ${paths.config}/overrides.yaml
   - ${paths.config}/mcp_servers.yaml
+  - ${paths.config}/ekg.yaml 
 
 
 #### 

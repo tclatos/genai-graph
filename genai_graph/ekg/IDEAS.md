@@ -1,6 +1,16 @@
 # Ideas around evolution of the Tk and Bleuprint
 
 
+# Config
+ Improve commands related to KG so most parameters are taken from a YAML configuration file.
+ - Create a new "kg create"  that create a KG and add data names in the YAML file. It is equivalent to "uv run cli kg add-doc --key rainbow-cnes-venus-tma --key rainbow-fake-cnes-1 -g ReviewedOpportunity ; uv run cli kg add-doc --key add-fake-cnes-1 -g ArchitectureDocument" but with keys and graphs taken from the YAML file. 
+ - The YAMl file is in : config/ekg.yaml  .  The config to loard is given by the global config key "kg_config"  (set in overrides.yaml)
+ -  Take inspiration from /home/tcl/prj/genai-tk/genai_tk/extra/agents/commands_agents.py
+ - remove the "add-doc" command.  Don't care about legacy issue
+ - Refactor the GraphRegistry : the subgraphs classes should now be taken from the new YAML file  (remove them from /home/tcl/prj/genai-graph/config/overrides.yaml ) . Update schema_doc_generator.py accordingly 
+- check with : uv run cli kg create --config "default" ; uv run cli kg schema
+ 
+
 ## Fix Style
 
 ekg_core/py and related code works well, but are still difficult to understand and maintain. And there are some old stuff we could simplify.
@@ -35,11 +45,11 @@ Rename methods and fields.
 ## Better React with Agent Midleware
 
 
-- Use LangChain Midlewares to print tool calls, either in CLI or Streamlit
+- Use LangChain Midlewares to print tool calls in Streamlit (like in CLI)
 
 
 # UI for Graph Query
-Create a Streamlit page to  visualize the KG, and run queries on it (either in natural language, or in Cypher)
+Create a Streamlit page to  visualize the KG, and run queries on it (either in natural language, or in Cypher).
 Look at CLI commmands in /home/tcl/prj/genai-graph/genai_graph/core/commands_ekg.py (query_ekg, cypher, export_html).
 Vizualize HTML as in /home/tcl/prj/genai-blueprint/genai_blueprint/webapp/pages/demos/cognee_KG.py
 

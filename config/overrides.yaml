@@ -9,14 +9,25 @@ ekg_local:
 # Overide envivonment variable 
   :env:
     BAML_LOG: "warn"
+
+  kg_config: default
+
   llm:
     models:
       default: kimi_k2_openrouter
+  
   embeddings:
     models:
       default: qwen3_06b_deepinfra
-  vector_store:
-    default : PgVector
+
+  embeddings_store:
+    default:
+      backend: Chroma 
+      embeddings: default
+      table_name_prefix: embeddings
+      record_manager: sqlite:///${paths.data_root}/vector_store/record_manager_cache.sql
+      config:
+        storage: ${paths.data_root}/vector_store  # Updated: was 'chroma_path'
   cli:
     commands:  
     - genai_tk.core.commands_core:CoreCommands
@@ -54,7 +65,4 @@ ekg_local:
     rainbow: 
       baml_client: genai_graph.ekg.baml_client
 
-  subgraphs:
-  - genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
-  - genai_graph.ekg.schema.architecture_doc:ArchitectureDocumentSubgraph
 

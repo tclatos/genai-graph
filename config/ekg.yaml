@@ -1,0 +1,20 @@
+kg_configs:
+  default:
+    subgraphs:
+    - genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
+    - genai_graph.ekg.schema.architecture_doc:ArchitectureDocumentSubgraph
+    content:
+      - ReviewedOpportunity:
+          keys: [rainbow-cnes-venus-tma, rainbow-fake-cnes-1]
+      - ArchitectureDocument:
+          keys: [add-fake-cnes-1]
+    agent:
+      mcp_servers:
+        - filesystem    
+
+  simple:
+    subgraphs:
+    - genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
+    content:
+      - ReviewedOpportunity:
+          keys: [rainbow-cnes-venus-tma]

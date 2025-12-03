@@ -52,14 +52,28 @@ def _get_kuzu_type(annotation: Any) -> str:
     Returns:
         Kuzu type string
     """
+    import typing
+
     if annotation is None:
         return "STRING"
 
-    if getattr(annotation, "__origin__", None) is list:
+    origin = getattr(annotation, "__origin__", None)
+    actual_type = annotation
+
+    # Handle Optional[...] types by unwrapping to get the inner type
+    if origin is typing.Union:
+        args = typing.get_args(annotation)
+        # Optional[X] is Union[X, None], so extract X
+        if len(args) == 2 and type(None) in args:
+            actual_type = args[0] if args[1] is type(None) else args[1]
+            origin = getattr(actual_type, "__origin__", None)
+
+    # Check if it's a list type
+    if origin is list:
         return "STRING[]"
-    elif annotation in (float,):
+    elif actual_type in (float,):
         return "DOUBLE"
-    elif annotation in (int,):
+    elif actual_type in (int,):
         return "INT64"
     else:
         # Fallback for strings, enums and complex types that are not marked as embedded

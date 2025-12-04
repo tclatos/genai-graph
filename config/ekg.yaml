@@ -3,6 +3,8 @@ kg_configs:
     subgraphs_factories:
     - genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
     - genai_graph.ekg.schema.architecture_doc:ArchitectureDocumentSubgraph
+    # - genai_graph.ekg.schema.another_schema:AnotherSubgraphFactory 
+        # db: sqlite:///path/to/another_database.db         
     content:
       - ReviewedOpportunity:
           keys: [rainbow-cnes-venus-tma, rainbow-fake-cnes-1]

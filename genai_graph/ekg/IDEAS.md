@@ -1,30 +1,20 @@
 # Ideas around evolution of the Tk and Bleuprint
 
 
-# Config
- Improve commands related to KG so most parameters are taken from a YAML configuration file.
- - Create a new "kg create"  that create a KG and add data names in the YAML file. It is equivalent to "uv run cli kg add-doc --key rainbow-cnes-venus-tma --key rainbow-fake-cnes-1 -g ReviewedOpportunity ; uv run cli kg add-doc --key add-fake-cnes-1 -g ArchitectureDocument" but with keys and graphs taken from the YAML file. 
- - The YAMl file is in : config/ekg.yaml  .  The config to loard is given by the global config key "kg_config"  (set in overrides.yaml)
- -  Take inspiration from /home/tcl/prj/genai-tk/genai_tk/extra/agents/commands_agents.py
- - remove the "add-doc" command.  Don't care about legacy issue
- - Refactor the GraphRegistry : the subgraphs classes should now be taken from the new YAML file  (remove them from /home/tcl/prj/genai-graph/config/overrides.yaml ) . Update schema_doc_generator.py accordingly 
+# Graph from tables
+
+We want to be create a graph from unnormalized table (typically Excel exports)
+"Atos Opportunity ID"	"Fiscal Period"	"Order entry (converted) Currency"	"Order entry (converted)"	"IRIS Account Name"	"Opportunity Name"	"Closing Date"	"Leading Profit Center: Profit Center Name"	"Status	"Reason"	"Item Order Entry (converted)" "Currency"	"Item Order Entry (converted)"	"Industry"	"Item Number"	"Client" "Leader"	"Close Month"	"Account Name"	"Product Business Line Code"	"Leading Profit Center: Country	Portfolio"	"Sub-Industry"	"Bid Budget (converted)" "Currency	Bid Budget (converted)"	"Item Business Line Name"
+
+
+
+ Update schema_doc_generator.py accordingly 
 - check with : uv run cli kg create --config "default" ; uv run cli kg schema
  
 
 ## Fix Style
 
-ekg_core/py and related code works well, but are still difficult to understand and maintain. And there are some old stuff we could simplify.
-Improve it: 
 
-- rename 'baml_class' as 'node_class', and 'structs' as 'extra_classes'.   Make sure node_class can accept any Pydantic class, and try to mutualise code with extra_classes handling  ('execpt they are directlu inserted in the nodes). 
-
-- remove all legacy code such as attributes``embedded`` .
-- Remove code that is not called (ex in the 'assert') and legacy one.  Rename functions and variables to make them more explicit, and update doc.
-Rename methods and fields.
-
-- Check that no nodes is orphan.
-
-- Suggest other improvement to make it clean, generic and maintenable.
 
 ## Better HTML visualisation
 
@@ -163,6 +153,8 @@ Use https://github.com/GrahamDumpleton/wrapt for @once
 - Win / Loss review
 - RFQ
 - Architecture document
+- Eval criteria in RFQ (from Bruno)
+- Dashboard ? 
 - ....
 
 

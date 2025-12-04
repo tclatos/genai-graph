@@ -52,29 +52,32 @@ def _get_kuzu_type(annotation: Any) -> str:
     Returns:
         Kuzu type string
     """
+    import types
     import typing
+    from typing import get_origin
 
     if annotation is None:
         return "STRING"
 
-    origin = getattr(annotation, "__origin__", None)
+    origin = get_origin(annotation)
     actual_type = annotation
 
     # Handle Optional[...] types by unwrapping to get the inner type
-    if origin is typing.Union:
+    # Supports both typing.Union and types.UnionType (Python 3.10+)
+    if origin is typing.Union or origin is types.UnionType:
         args = typing.get_args(annotation)
         # Optional[X] is Union[X, None], so extract X
         if len(args) == 2 and type(None) in args:
             actual_type = args[0] if args[1] is type(None) else args[1]
-            origin = getattr(actual_type, "__origin__", None)
+            origin = get_origin(actual_type)
 
-    # Check if it's a list type
+    # Check if it's a list type (after unwrapping Optional)
     if origin is list:
         return "STRING[]"
-    elif actual_type in (float,):
-        return "DOUBLE"
-    elif actual_type in (int,):
+    elif actual_type is int:
         return "INT64"
+    elif actual_type is float:
+        return "DOUBLE"
     else:
         # Fallback for strings, enums and complex types that are not marked as embedded
         return "STRING"
@@ -173,37 +176,38 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
             field_name = _find_embedded_field_for_class(node.node_class, embedded_class)
             if not field_name:
                 continue
-                # Validate that the embedded field exists on the parent model
-                if field_name not in parent_model_fields:
-                    console.print(
-                        f"[yellow]Warning: embedded field '{field_name}' is not defined on {parent_name}[/yellow]"
-                    )
-                    continue
 
-                # Ensure we can introspect the embedded class
-                embedded_model_fields = getattr(embedded_class, "model_fields", None)
-                if embedded_model_fields is None:
-                    console.print(
-                        f"[yellow]Warning: embedded class {embedded_class!r} for field '{field_name}' "
-                        f"on {parent_name} has no model_fields; skipping STRUCT generation[/yellow]"
-                    )
-                    continue
+            # Validate that the embedded field exists on the parent model
+            if field_name not in parent_model_fields:
+                console.print(
+                    f"[yellow]Warning: embedded field '{field_name}' is not defined on {parent_name}[/yellow]"
+                )
+                continue
 
-                # Build STRUCT(field1 TYPE, field2 TYPE, ...) definition
-                struct_parts: list[str] = []
-                for emb_field_name, emb_field_info in embedded_model_fields.items():
-                    kuzu_type = _get_kuzu_type(emb_field_info.annotation)
-                    struct_parts.append(f"{emb_field_name} {kuzu_type}")
+            # Ensure we can introspect the embedded class
+            embedded_model_fields = getattr(embedded_class, "model_fields", None)
+            if embedded_model_fields is None:
+                console.print(
+                    f"[yellow]Warning: embedded class {embedded_class!r} for field '{field_name}' "
+                    f"on {parent_name} has no model_fields; skipping STRUCT generation[/yellow]"
+                )
+                continue
 
-                if not struct_parts:
-                    console.print(
-                        f"[yellow]Warning: embedded class {embedded_class.__name__} for field "
-                        f"'{field_name}' on {parent_name} has no fields; skipping[/yellow]"
-                    )
-                    continue
+            # Build STRUCT(field1 TYPE, field2 TYPE, ...) definition
+            struct_parts: list[str] = []
+            for emb_field_name, emb_field_info in embedded_model_fields.items():
+                kuzu_type = _get_kuzu_type(emb_field_info.annotation)
+                struct_parts.append(f"{emb_field_name} {kuzu_type}")
 
-                struct_type = f"STRUCT({', '.join(struct_parts)})"
-                embedded_struct_fields_by_parent[parent_name].append((field_name, struct_type))
+            if not struct_parts:
+                console.print(
+                    f"[yellow]Warning: embedded class {embedded_class.__name__} for field "
+                    f"'{field_name}' on {parent_name} has no fields; skipping[/yellow]"
+                )
+                continue
+
+            struct_type = f"STRUCT({', '.join(struct_parts)})"
+            embedded_struct_fields_by_parent[parent_name].append((field_name, struct_type))
 
     # Collect ExtraFields-based struct fields per parent node
     extra_struct_fields_by_parent: dict[str, list[tuple[str, str]]] = {}
@@ -258,10 +262,16 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
         # Resolve embedded struct field types for this table, if any
         embedded_struct_fields = dict(embedded_struct_fields_by_parent.get(table_name, []))
 
+        # Metadata field names that are handled separately and should not be added from model_fields
+        metadata_field_names = {"id", "name", "created_at", "updated_at", "dedup_key", "alternate_names"}
+
         # Add regular fields (excluding any specified excluded_fields).
         # If a field is declared as embedded, we override its scalar type with
         # a STRUCT(...) definition so it becomes a MAP/STRUCT column.
         for field_name, field_info in model_fields.items():
+            # Skip metadata fields (they're added separately with _ prefix)
+            if field_name in metadata_field_names:
+                continue
             if field_name not in node.excluded_fields:
                 if field_name in embedded_struct_fields:
                     kuzu_type = embedded_struct_fields[field_name]

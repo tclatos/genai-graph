@@ -20,7 +20,7 @@ from typing import (
     no_type_check,
 )
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, PrivateAttr, model_validator
 
 
 class ExtraFields(BaseModel, ABC):
@@ -46,6 +46,8 @@ def _find_embedded_field_for_class(parent_cls: type[BaseModel], embedded_cls: ty
         financials: FinancialMetrics | None
         financials: list[FinancialMetrics] | None
     """
+    import types
+
     if not hasattr(parent_cls, "model_fields"):
         return None
 
@@ -62,7 +64,8 @@ def _find_embedded_field_for_class(parent_cls: type[BaseModel], embedded_cls: ty
             inner = args[0] if args else None
             if isinstance(inner, type):
                 candidate_types = [inner]
-        elif origin is Union:
+        elif origin is Union or origin is types.UnionType:
+            # Handle both typing.Union and types.UnionType (Python 3.10+)
             non_none_args = [t for t in args if t is not type(None)]  # noqa: E721
             for t in non_none_args:
                 t_origin = get_origin(t)
@@ -284,14 +287,16 @@ class GraphSchema(BaseModel):
     root_model_class: type[BaseModel]
     nodes: list[GraphNode]
     relations: list[GraphRelation]
+    # Track all root model classes from merged schemas (for combined schemas)
+    merged_root_classes: list[type[BaseModel]] = []
 
     model_config = {
         "populate_by_name": True,
     }
 
-    # Validation results
-    _model_field_map: dict[type[BaseModel], dict[str, Any]] = {}
-    _warnings: list[str] = []
+    # Validation results - must be instance variables, not class variables
+    _model_field_map: dict[type[BaseModel], dict[str, Any]] = PrivateAttr(default_factory=dict)
+    _warnings: list[str] = PrivateAttr(default_factory=list)
 
     @model_validator(mode="after")
     def validate_and_deduce_schema(self) -> "GraphSchema":
@@ -317,9 +322,18 @@ class GraphSchema(BaseModel):
 
             self._model_field_map[model_class] = {}
 
+            # Use get_type_hints to resolve ForwardRefs automatically
+            try:
+                from typing import get_type_hints
+
+                type_hints = get_type_hints(model_class)
+            except Exception:
+                type_hints = {}
+
             for field_name, field_info in model_class.model_fields.items():
                 field_path = f"{path}.{field_name}" if path else field_name
-                annotation = field_info.annotation
+                # Use resolved type hint if available, otherwise use annotation
+                annotation = type_hints.get(field_name, field_info.annotation)
 
                 # Handle List[Model] annotations
                 if get_origin(annotation) is list:
@@ -462,7 +476,10 @@ class GraphSchema(BaseModel):
                         "annotation": annotation,
                     }
 
-        explore_model(self.root_model_class)
+        # For combined schemas, explore ALL root model classes
+        root_classes_to_explore = [self.root_model_class] + self.merged_root_classes
+        for root_class in root_classes_to_explore:
+            explore_model(root_class)
 
     def _deduce_node_field_paths(self) -> None:
         """Auto-deduce field paths for all node configurations."""
@@ -482,7 +499,6 @@ class GraphSchema(BaseModel):
                     if field_info["type"] == node_config.node_class:
                         path = field_info["path"]
                         is_list = field_info["is_list"]
-
                         node_config.field_paths.append(path)
                         node_config.is_list_at_paths[path] = is_list
 
@@ -613,10 +629,17 @@ class GraphSchema(BaseModel):
 
         # Warn when we have node classes that never appear in the reachable
         # model structure (likely orphan configurations).
+        # For combined schemas, also check if node is a root in any merged schema
+        all_root_classes = {self.root_model_class} | set(self.merged_root_classes)
+
         for node in self.nodes:
-            # Skip the root node itself (has field_paths = [""])
-            is_root_node = node.node_class is self.root_model_class or node.field_paths == [""]
-            if not node.field_paths and not is_root_node:
+            # Robustly skip the root node (by class or by field_paths)
+            is_root_node = node.node_class in all_root_classes or node.field_paths == [""]
+            # Never warn for the root node, even if field_paths is empty or [""]
+            if is_root_node:
+                continue
+            # Only warn if not root node and field_paths is empty or None
+            if not node.field_paths:
                 warnings_list.append(
                     f"No field paths found for {node.node_class.__name__} in the root model structure; "
                     "this node may be orphaned."

@@ -133,7 +133,8 @@ class GraphRegistry(BaseModel):
             if name not in self.subgraphs:
                 available = ", ".join(sorted(self.subgraphs.keys())) or "<none>"
                 raise ValueError(f"Unknown subgraph '{name}'. Available: {available}")
-            schemas.append(self.subgraphs[name].build_schema())
+            schema = self.subgraphs[name].build_schema()
+            schemas.append(schema)
 
         if not schemas:
             raise ValueError("No schemas could be built from the selected subgraphs")
@@ -142,6 +143,9 @@ class GraphRegistry(BaseModel):
         # different roots but their node/relationship configurations are still
         # meaningful when merged.
         root_model_class = schemas[0].root_model_class
+
+        # Track all root model classes from all schemas for validation
+        merged_root_classes = [schema.root_model_class for schema in schemas]
 
         # Merge nodes, de-duplicating by underlying Pydantic class
         merged_nodes: list[Any] = []
@@ -165,7 +169,12 @@ class GraphRegistry(BaseModel):
                 seen_relations.add(key)
                 merged_relations.append(rel)
 
-        return GraphSchema(root_model_class=root_model_class, nodes=merged_nodes, relations=merged_relations)
+        return GraphSchema(
+            root_model_class=root_model_class,
+            nodes=merged_nodes,
+            relations=merged_relations,
+            merged_root_classes=merged_root_classes,
+        )
 
     def get_subgraph(self, name: str) -> SubgraphFactory:
         """Get a subgraph instance by name.

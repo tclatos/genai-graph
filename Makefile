@@ -48,7 +48,9 @@ include deploy/docker.mk
 #include deploy/github.mk
 #include deploy/modal.mk
 
-.PHONY: .uv   .pre-commit .pythonpath show-dev-path benchmark
+.PHONY: .uv .pre-commit .pythonpath show-dev-path benchmark
+.PHONY: fmt lint test test-unit test-integration test-install check
+
 .uv:  ## Check that uv is installed
 	@uv -V || echo 'Please install uv: curl -LsSf https://astral.sh/uv/install.sh | sh 
 
@@ -64,6 +66,29 @@ show-dev-path: ## Show current DEV_PYTHONPATH setting
 	@echo "Current DEV_PYTHONPATH: $(DEV_PYTHONPATH)"
 	@echo "Checking genai-tk availability: $$([ -d ../genai-tk ] && echo 'EXISTS' || echo 'NOT FOUND')"
 	@echo "Usage: make webapp (uses DEV_PYTHONPATH) or make test-install"
+
+
+##############################
+##  Development & Testing
+##############################
+
+fmt: ## Format code with ruff
+	uv run ruff format .
+	uv run ruff check --select I --fix .
+
+lint: ## Lint code with ruff
+	uv run ruff check --fix genai_graph
+
+test: ## Run all tests
+	uv run pytest tests/unit_tests/ tests/integration_tests/ -v
+
+test-unit: ## Run unit tests only
+	uv run pytest tests/unit_tests/ -v
+
+test-integration: ## Run integration tests only
+	uv run pytest tests/integration_tests/ -v
+
+check: fmt lint test ## Run format, lint, and test sequentially
 
 
 ##############################
@@ -97,7 +122,7 @@ lint: ## Run Ruff an all Python files to format fix imports
 
 quality: ## Run Ruff on all Python files to check quality (fast version)
 	@echo "Running ruff on Python files (excluding .venv and wip)..."
-	ruff check --fix --exclude .venv --exclude genai_graph/wip .
+	ruff check --fix --exclude .venv --exclude genai_graph/wip  --exclude *.ipynb .
 
 
 ##############################

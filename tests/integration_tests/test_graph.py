@@ -27,7 +27,6 @@ from genai_graph.core.graph_schema import GraphNode, GraphRelation, GraphSchema
 from genai_graph.ekg.baml_client.types import (
     CompetitiveLandscape,
     Customer,
-    FinancialMetrics,
     Opportunity,
     Partner,
     Person,

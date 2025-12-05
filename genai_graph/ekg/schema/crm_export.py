@@ -27,6 +27,9 @@ class CrmExtractSubGraph(TableBackedSubgraphFactory, BaseModel):
 
     def mapper_function(self, row: dict[str, Any]) -> CrmExtract | None:
         """Map database row to CrmExtract model."""
+        from devtools import debug
+
+        debug(row)
         return CrmExtract(
             opportunity=Opportunity(
                 opportunity_id=str(row.get("Atos Opportunity ID", "")),
@@ -36,9 +39,7 @@ class CrmExtractSubGraph(TableBackedSubgraphFactory, BaseModel):
                     segment=row.get("Sub-Industry", ""),
                 ),
             ),
-            lead=Person(
-                name=row.get("Client Leader", ""),
-            ),
+            lead=Person(name=row.get("Client Leader", ""), p_role_="Client Leader", organization="Atos"),
             win_loss=WinLoss(
                 result=row.get("status", ""),
                 reason=row.get("Reason", ""),

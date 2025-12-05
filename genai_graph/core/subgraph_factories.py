@@ -1,7 +1,5 @@
 """ """
 
-from __future__ import annotations
-
 import hashlib
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -103,9 +101,19 @@ class TableBackedSubgraphFactory(SubgraphFactory):
 
     _db_engine: Engine | None = None
 
+    @abstractmethod
+    def mapper_function(self, row: dict[str, Any]) -> BaseModel | None:
+        """Map database row to model instance.
+
+        Subclasses must implement this to convert a database row dictionary
+        to an instance of their top_class model.
+        """
+
+    @abstractmethod
     def get_key_field(self) -> str:
-        """Return the field name used as the unique key for data retrieval."""
-        raise NotImplementedError("Subclasses must implement get_key_field")
+        """Return the field name used as the unique key for data retrieval.
+        Must implement by subclass.
+        """
 
     def model_post_init(self, _context: Any) -> None:
         """Initialize the database engine and load data from files."""
@@ -358,14 +366,6 @@ class TableBackedSubgraphFactory(SubgraphFactory):
         except Exception as e:
             logger.error(f"Failed to import dataframe to database: {str(e)}")
             raise
-
-    def mapper_function(self, row: dict[str, Any]) -> BaseModel | None:
-        """Map database row to model instance.
-
-        Subclasses must implement this to convert a database row dictionary
-        to an instance of their top_class model.
-        """
-        raise NotImplementedError("Subclasses must implement mapper_function")
 
     def get_struct_data_by_key(self, key: str) -> BaseModel | None:
         """Load data for the given key from the SQL database."""

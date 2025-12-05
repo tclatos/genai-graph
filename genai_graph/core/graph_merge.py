@@ -99,9 +99,6 @@ def build_merge_query(
     if merge_value is None:
         raise ValueError(f"Node data missing required merge field '{merge_on_field}'")
 
-    # Generate current timestamp
-    timestamp = datetime.utcnow().isoformat() + "Z"
-
     # Format merge value
     merge_value_formatted = _format_value_for_cypher(merge_value)
 
@@ -116,17 +113,21 @@ def build_merge_query(
     # Query 2b: Create new node with all properties
     # We'll return a template that the caller will use based on check results
 
+    # Metadata fields from the Pydantic model that are renamed with _ prefix in the schema
+    # These should be excluded since they're already in node_data with the _ prefix
+    # For example: "name" -> "_name", "created_at" -> "_created_at"
+    excluded_metadata_fields = {"name", "created_at", "updated_at", "dedup_key"}
+
     # Build properties for CREATE
     create_props = []
     for key, value in node_data.items():
+        # Skip metadata fields without _ prefix (they're duplicates)
+        if key in excluded_metadata_fields:
+            continue
         # Generic handling for dicts / struct-like values is sufficient
         # We format dicts as STRUCT literals. Empty dicts are mapped to NULL.
         formatted_value = _format_value_for_cypher(value)
         create_props.append(f"{key}: {formatted_value}")
-
-    # Add timestamps
-    create_props.append(f"_created_at: '{timestamp}'")
-    create_props.append(f"_updated_at: '{timestamp}'")
 
     props_str = ", ".join(create_props)
 
@@ -227,8 +228,11 @@ def merge_node_in_graph(
             return True, node_id
 
     except Exception as e:
+        import traceback as tb
+
         console.print(f"[red]Error merging {node_type} node:[/red] {e}")
         console.print(f"[dim]Node data: {node_data.get(merge_on_field, 'unknown')}[/dim]")
+        console.print("[red]" + tb.format_exc() + "[/red]")
         raise
 
 

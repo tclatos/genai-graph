@@ -16,7 +16,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from genai_graph.core.graph_schema import GraphSchema
-from genai_graph.core.subgraph import SubgraphFactory
+from genai_graph.core.subgraph_factories import SubgraphFactory
 
 if typing.TYPE_CHECKING:
     from genai_graph.core.graph_registry import GraphRegistry
@@ -56,10 +56,21 @@ class GraphRegistry(BaseModel):
           compatibility and is responsible for calling
           :func:`register_subgraph` manually.
         """
-        # Load subgraph providers from YAML config (config/ekg.yaml), keyed by global 'kg_config'
+        # Load subgraph providers from YAML config (config/ekg.yaml)
         cfg_name = global_config().get("kg_config", default="default")
-        subgraph_factories = global_config().get_list(f"kg_configs.{cfg_name}.subgraphs_factories")
-        for factory in subgraph_factories:
+
+        # Get subgraphs: [{factory: "module:Class", initial_load: [...]}, ...]
+        try:
+            subgraphs = global_config().get_list(f"kg_configs.{cfg_name}.subgraphs")
+        except Exception:
+            subgraphs = []
+
+        # Extract and import factory classes
+        for subgraph_cfg in subgraphs:
+            if not isinstance(subgraph_cfg, dict) or "factory" not in subgraph_cfg:
+                continue
+
+            factory = subgraph_cfg["factory"]
             try:
                 logger.debug(f"import {factory}")
                 imported = import_from_qualified(factory)

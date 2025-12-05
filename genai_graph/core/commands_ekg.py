@@ -40,12 +40,14 @@ from typing import Annotated
 
 import typer
 from genai_tk.main.cli import CliTopCommand
-from genai_tk.utils.config_mngr import global_config
+from genai_tk.utils.config_mngr import global_config, import_from_qualified
 from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.table import Table
+
+from genai_graph.core.subgraph_factories import SubgraphFactory
 
 # Initialize Rich console
 console = Console()
@@ -82,7 +84,6 @@ class EkgCommands(CliTopCommand):
                 get_backend_storage_path_from_config,
             )
             from genai_graph.core.graph_documents import add_documents_to_graph
-            from genai_graph.core.graph_registry import GraphRegistry
 
             if config_name:
                 global_config().set("kg_config", config_name)
@@ -90,39 +91,41 @@ class EkgCommands(CliTopCommand):
             kg_cfg = global_config().get_dict(f"kg_configs.{cfg_name}")
 
             # Build registry (which reads subgraphs from YAML) and backend
-            registry = GraphRegistry.get_instance()
             backend = create_backend_from_config("default")
             db_path = get_backend_storage_path_from_config("default")
 
-            # Iterate content sections: each item is {SubgraphName: {keys: [...]}}
-            content = kg_cfg.get("content", [])
+            # Process subgraphs: [{factory: "module:Class", initial_load: [...]}, ...]
+            subgraphs = kg_cfg.get("subgraphs", [])
+
             total_docs_processed = 0
             total_docs_failed = 0
-            for item in content:
-                if not isinstance(item, dict):
+
+            for subgraph_cfg in subgraphs:
+                if not isinstance(subgraph_cfg, dict):
                     continue
-                subgraph_name = next(iter(item.keys()))
-                keys_cfg = item[subgraph_name] or {}
-                keys = keys_cfg.get("keys", [])
-                if not keys:
+
+                factory_path = subgraph_cfg.get("factory")
+                keys = subgraph_cfg.get("initial_load", [])
+
+                if not factory_path or not keys:
                     continue
+
+                # Import the factory and get the subgraph instance
                 try:
-                    subgraph_impl = registry.get_subgraph(subgraph_name)
-                    console.print(f"[green]Matched registered subgraph name: {subgraph_impl.name}[/green]")
-                except ValueError:
-                    candidates = registry.listsubgraphs()
-                    fallback = None
-                    for cand in candidates:
-                        if cand == f"{subgraph_name}Subgraph" or cand.startswith(subgraph_name):
-                            fallback = cand
-                            break
-                    if not fallback:
-                        console.print(
-                            f"[red]❌ Unknown subgraph '{subgraph_name}'. Available: {', '.join(candidates)}[/red]"
-                        )
+                    imported = import_from_qualified(factory_path)
+                    if isinstance(imported, SubgraphFactory):
+                        subgraph_impl = imported
+                    elif isinstance(imported, type) and issubclass(imported, SubgraphFactory):
+                        # Instantiate the subgraph class with no arguments (uses defaults)
+                        subgraph_impl = imported()  # type: ignore[call-arg]
+                    else:
+                        console.print(f"[red]❌ Factory {factory_path} is not a SubgraphFactory[/red]")
                         continue
-                    subgraph_impl = registry.get_subgraph(fallback)
-                    console.print(f"[yellow]Using fallback subgraph name: {fallback}[/yellow]")
+                    console.print(f"[green]Loaded subgraph factory: {subgraph_impl.name}[/green]")
+                except Exception as e:
+                    console.print(f"[red]❌ Failed to import factory {factory_path}: {e}[/red]")
+                    continue
+
                 schema = subgraph_impl.build_schema()
                 try:
                     from genai_graph.core.graph_core import create_schema as _create_schema
@@ -130,6 +133,7 @@ class EkgCommands(CliTopCommand):
                     _create_schema(backend, schema.nodes, schema.relations)
                 except Exception:
                     pass
+
                 if keys:
                     try:
                         stats = add_documents_to_graph(keys, subgraph_impl, backend, schema)
@@ -139,9 +143,8 @@ class EkgCommands(CliTopCommand):
                         total_docs_processed += stats.total_processed
                         total_docs_failed += stats.total_failed
                     except Exception as e:
-                        console.print(f"[red]Ingestion error for {subgraph_name}: {e}[/red]")
+                        console.print(f"[red]Ingestion error for {factory_path}: {e}[/red]")
                         total_docs_failed += len(keys)
-                        continue
 
             console.print(f"Processed: {total_docs_processed} ok, {total_docs_failed} failed. Path: {db_path}")
 
@@ -892,9 +895,9 @@ class EkgCommands(CliTopCommand):
                 ),
             ] = [],
         ) -> None:
-            """Display knowledge graph schema in Markdown format for LLM context.
+            """Display knowledge graph schema as used in LLM context.
 
-            Generates a comprehensive Markdown description of the graph schema including
+            Generates a comprehensive, comâct Markdown description of the graph schema including
             node types, relationships, properties, and indexed fields. This output is
             designed to provide context to LLMs for generating correct Cypher queries.
             """
@@ -922,4 +925,77 @@ class EkgCommands(CliTopCommand):
 
                 console.print(f"[red]❌ {e}[/red]")
                 console.print("[red]" + tb.format_exc() + "[/red]")
+                raise typer.Exit(1) from e
+
+        @cli_app.command("add-doc")
+        def add_doc(
+            keys: Annotated[
+                list[str],
+                typer.Option(
+                    "--key", "-k", help="Data key(s) to add to the EKG database (can be specified multiple times)"
+                ),
+            ],
+            subgraph: Annotated[str, typer.Option("--subgraph", "-g", help="Subgraph type to use")],
+        ) -> None:
+            """Add one or more documents to the shared EKG database.
+
+            Assumes the KG schema has already been created via 'cli kg create'.
+            Loads data from the key-value store and merges it into the existing graph.
+            Nodes with the same _name will be merged, preserving creation timestamps
+            and updating modification timestamps.
+
+            Examples:
+                # Add single document
+                cli kg add-doc --key fake_cnes_1 --subgraph opportunity
+
+                # Add multiple documents in one command
+                cli kg add-doc --key fake_cnes_1 --key cnes-venus-tma --subgraph opportunity
+            """
+            from genai_graph.core.graph_backend import (
+                create_backend_from_config,
+            )
+            from genai_graph.core.graph_documents import add_documents_to_graph
+            from genai_graph.core.graph_registry import get_subgraph
+
+            # Validate input
+            if not keys:
+                logger.error("At least one --key must be provided")
+                raise typer.Exit(1)
+
+            logger.info(f"Adding {len(keys)} document(s) to EKG using subgraph '{subgraph}'")
+
+            # Get subgraph implementation
+            try:
+                subgraph_impl = get_subgraph(subgraph)
+                logger.debug(f"Loaded subgraph implementation: {subgraph_impl.name}")
+            except ValueError as e:
+                logger.error(f"Failed to load subgraph '{subgraph}': {e}")
+                raise typer.Exit(1) from e
+
+            # Build schema (assumes schema tables already exist from 'kg create')
+            schema = subgraph_impl.build_schema()
+            logger.debug(f"Built schema: {len(schema.nodes)} node types, {len(schema.relations)} relationship types")
+            # Process documents
+            try:
+                backend = create_backend_from_config("default")
+                stats = add_documents_to_graph(keys, subgraph_impl, backend, schema)
+
+                # Log results
+                logger.info(
+                    f"Document processing complete: {stats.total_processed} processed, "
+                    f"{stats.total_failed} failed, {stats.nodes_created} nodes created, "
+                    f"{stats.relationships_created} relationships created"
+                )
+
+                if stats.total_processed == 0:
+                    logger.error("Failed to process any documents")
+                    raise typer.Exit(1)
+
+                if stats.total_failed > 0:
+                    logger.warning(f"{stats.total_failed} document(s) failed to process")
+
+                logger.success(f"Successfully added {stats.total_processed}/{len(keys)} document(s) to EKG")
+
+            except Exception as e:
+                logger.exception(f"Unexpected error during document ingestion: {e}")
                 raise typer.Exit(1) from e

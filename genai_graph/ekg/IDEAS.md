@@ -3,6 +3,10 @@
 
 # Graph from tables
 
+Add tha ability to  create sub-graphs from unormalized tables (typically Excel exports from a CRM or other Saas products ).  To do so, continue (and possibly correct) impmementation of /home/tcl/prj/genai-graph/genai_graph/ekg/schema/crm_export.py 
+
+
+
 We want to be create a graph from unnormalized table (typically Excel exports)
 "Atos Opportunity ID"	"Fiscal Period"	"Order entry (converted) Currency"	"Order entry (converted)"	"IRIS Account Name"	"Opportunity Name"	"Closing Date"	"Leading Profit Center: Profit Center Name"	"Status	"Reason"	"Item Order Entry (converted)" "Currency"	"Item Order Entry (converted)"	"Industry"	"Item Number"	"Client" "Leader"	"Close Month"	"Account Name"	"Product Business Line Code"	"Leading Profit Center: Country	Portfolio"	"Sub-Industry"	"Bid Budget (converted)" "Currency	Bid Budget (converted)"	"Item Business Line Name"
 

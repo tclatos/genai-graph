@@ -11,12 +11,12 @@ from typing import Any, Type
 from pydantic import BaseModel
 
 from genai_graph.core.graph_schema import GraphSchema
-from genai_graph.core.subgraph import PydanticSubgraphFactory
+from genai_graph.core.subgraph_factories import KvStoreBackedSubgraphFactory
 from genai_graph.ekg.baml_client.types import ReviewedOpportunity
 from genai_graph.ekg.schema.common_nodes import FileMetadata, get_common_nodes
 
 
-class ReviewedOpportunitySubgraph(PydanticSubgraphFactory, BaseModel):
+class ReviewedOpportunitySubgraph(KvStoreBackedSubgraphFactory, BaseModel):
     """Opportunity data subgraph implementation."""
 
     top_class: Type[BaseModel] = ReviewedOpportunity

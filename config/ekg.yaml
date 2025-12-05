@@ -1,22 +1,21 @@
 kg_configs:
   default:
-    subgraphs_factories:
-    - genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
-    - genai_graph.ekg.schema.architecture_doc:ArchitectureDocumentSubgraph
-    # - genai_graph.ekg.schema.another_schema:AnotherSubgraphFactory 
-        # db: sqlite:///path/to/another_database.db         
-    content:
-      - ReviewedOpportunity:
-          keys: [rainbow-cnes-venus-tma, rainbow-fake-cnes-1]
-      - ArchitectureDocument:
-          keys: [add-fake-cnes-1]
+    subgraphs:
+      - factory: genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
+        initial_load: [rainbow-cnes-venus-tma, rainbow-fake-cnes-1]
+      - factory: genai_graph.ekg.schema.architecture_doc:ArchitectureDocumentSubgraph
+        initial_load: [add-fake-cnes-1]
     agent:
       mcp_servers:
         - filesystem    
 
   simple:
     subgraphs:
-    - genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
-    content:
-      - ReviewedOpportunity:
-          keys: [rainbow-cnes-venus-tma]
+      - factory: genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
+        initial_load: [rainbow-cnes-venus-tma]
+      - factory: genai_graph.ekg.schema.crm_export:CrmExtractSubGraph
+        database: sqlite:///${paths.data_root}/ekg/crm_extract.db
+        files:
+          - ${paths.ekg_data}/misc/report1750429630460_SHORTEN.xlsx
+        pd_read_parameters: []
+        trigger: Opportunity 

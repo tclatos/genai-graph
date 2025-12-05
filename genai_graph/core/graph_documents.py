@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from genai_graph.core.graph_backend import GraphBackend
 from genai_graph.core.graph_schema import GraphSchema
-from genai_graph.core.subgraph import SubgraphFactory
+from genai_graph.core.subgraph_factories import SubgraphFactory
 
 
 @dataclass
@@ -124,7 +124,7 @@ def add_documents_to_graph(
     for key in keys:
         try:
             console.print(f"[cyan]Loading key {key} for subgraph {subgraph_impl.name}[/cyan]")
-            data = subgraph_impl.load_data(key)
+            data = subgraph_impl.get_struct_data_by_key(key)
             console.print(f"[cyan]Loaded? {bool(data)}[/cyan]")
             if not data:
                 stats.total_failed += 1

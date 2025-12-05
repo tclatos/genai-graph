@@ -7,19 +7,20 @@ from genai_graph.core.graph_schema import (
 )
 from genai_graph.core.subgraph_factories import TableBackedSubgraphFactory
 from genai_graph.ekg.baml_client.types import Customer, Opportunity, Person
-from genai_graph.ekg.schema.common_nodes import WinLoss, get_common_nodes
+from genai_graph.ekg.schema.common_nodes import FileMetadata, WinLoss, get_common_nodes
 
 
 class CrmExtract(BaseModel):
     opportunity: Opportunity
     lead: Person
     win_loss: WinLoss
+    metadata: dict | None = None
 
 
 class CrmExtractSubGraph(TableBackedSubgraphFactory, BaseModel):
     """Architecture document data subgraph implementation."""
 
-    top_class: Type[BaseModel] = CrmExtract
+    TOP_CLASS: Type[BaseModel] = CrmExtract
 
     def get_key_field(self) -> str:
         """Return the field name used as the unique key for data retrieval."""
@@ -41,15 +42,18 @@ class CrmExtractSubGraph(TableBackedSubgraphFactory, BaseModel):
             ),
             lead=Person(name=row.get("Client Leader", ""), p_role_="Client Leader", organization="Atos"),
             win_loss=WinLoss(
-                result=row.get("status", ""),
+                result=row.get("Status", ""),
                 reason=row.get("Reason", ""),
             ),
         )
 
     def build_schema(self) -> GraphSchema:
-        print("TO BE COMPLETED")
+        """Build the graph schema for CRM extract data.
 
+        Creates schema with Opportunity, Person, and WinLoss nodes and their relationships.
+        """
         from genai_graph.core.graph_schema import (
+            GraphNode,
             GraphRelation,
         )
         from genai_graph.ekg.baml_client.types import (
@@ -57,16 +61,37 @@ class CrmExtractSubGraph(TableBackedSubgraphFactory, BaseModel):
             Person,
         )
 
-        nodes = get_common_nodes() + []
+        # Use common nodes which includes Opportunity with WinLoss extra_classes
+        nodes = get_common_nodes() + [
+            GraphNode(
+                node_class=self.TOP_CLASS,
+                extra_classes=[FileMetadata],
+                name_from=lambda data, base: f"CRM:{data.get('opportunity', {}).get('name', 'unknown')}",
+                description="CRM extract root containing opportunity, lead, and win/loss data",
+            ),
+        ]
+
         relations = [
+            GraphRelation(
+                from_node=self.TOP_CLASS,
+                to_node=Opportunity,
+                name="CRM_INFO",
+                description="CRM extracted Information",
+            ),
             GraphRelation(
                 from_node=Opportunity,
                 to_node=Person,
                 name="LEAD_BY",
                 description="Account Sales Leader",
             ),
+            GraphRelation(
+                from_node=Opportunity,
+                to_node=Customer,
+                name="FOR_CUSTOMER",
+                description="Customer organization for this opportunity",
+            ),
         ]
-        return GraphSchema(root_model_class=self.top_class, nodes=nodes, relations=relations)
+        return GraphSchema(root_model_class=self.TOP_CLASS, nodes=nodes, relations=relations)
 
 
 # Atos Opportunity ID	Fiscal Period	Order entry (converted) Currency	Order entry (converted)	IRIS Account Name	Opportunity Name	Closing Date	Leading Profit Center: Profit Center Name	Status	Reason	Item Order Entry (converted) Currency	Item Order Entry (converted)	Industry	Item Number	Client Leader	Close Month	Account Name	Product Business Line Code	Leading Profit Center: Country	Portfolio	Sub-Industry	Bid Budget (converted) Currency	Bid Budget (converted)	Item Business Line Name

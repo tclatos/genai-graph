@@ -6,7 +6,7 @@ This is the only module that imports BAML client types.
 
 from __future__ import annotations
 
-from typing import Any, Type
+from typing import Type
 
 from pydantic import BaseModel
 
@@ -19,7 +19,7 @@ from genai_graph.ekg.schema.common_nodes import FileMetadata, get_common_nodes
 class ReviewedOpportunitySubgraph(KvStoreBackedSubgraphFactory, BaseModel):
     """Opportunity data subgraph implementation."""
 
-    top_class: Type[BaseModel] = ReviewedOpportunity
+    TOP_CLASS: Type[BaseModel] = ReviewedOpportunity
     kv_store_id: str = "default"
 
     def build_schema(self) -> GraphSchema:
@@ -51,12 +51,10 @@ class ReviewedOpportunitySubgraph(KvStoreBackedSubgraphFactory, BaseModel):
         nodes = get_common_nodes() + [
             # Root node
             GraphNode(
-                node_class=self.top_class,
+                node_class=self.TOP_CLASS,
                 extra_classes=[FileMetadata, FinancialMetrics, CompetitiveLandscape],
                 name_from=lambda data, base: "Rainbow:" + str(data.get("start_date")),
                 description="Root node containing the complete reviewed opportunity",
-                # Embedded fields are stored as MAP/STRUCT properties on the
-                # ReviewedOpportunity node.
             ),
             # Regular nodes - field paths auto-deduced
             GraphNode(
@@ -153,7 +151,7 @@ class ReviewedOpportunitySubgraph(KvStoreBackedSubgraphFactory, BaseModel):
                 description="Known competitors",
             ),
         ]
-        return GraphSchema(root_model_class=self.top_class, nodes=nodes, relations=relations)
+        return GraphSchema(root_model_class=self.TOP_CLASS, nodes=nodes, relations=relations)
 
     def get_sample_queries(self) -> list[str]:
         """Get list of sample Cypher queries for opportunity data."""
@@ -166,8 +164,8 @@ class ReviewedOpportunitySubgraph(KvStoreBackedSubgraphFactory, BaseModel):
             "MATCH (o:Opportunity)-[:HAS_CUSTOMER]->(c:Customer) RETURN o.name, c.name, c.segment",
         ]
 
-    def get_entity_name_from_data(self, data: Any) -> str:
-        """Extract a human-readable entity name from loaded data."""
-        if hasattr(data, "ReviewedOpportunity") and hasattr(data.opportunity, "name"):
-            return data.opportunity.name
-        return "Unknown Entity"
+    # def get_entity_name_from_data(self, data: Any) -> str:
+    #     """Extract a human-readable entity name from loaded data."""
+    #     if hasattr(data, "ReviewedOpportunity") and hasattr(data.opportunity, "name"):
+    #         return data.opportunity.name
+    #     return "Unknown Entity"

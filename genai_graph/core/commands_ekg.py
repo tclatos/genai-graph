@@ -105,9 +105,7 @@ class EkgCommands(CliTopCommand):
                     continue
 
                 factory_path = subgraph_cfg.get("factory")
-                keys = subgraph_cfg.get("initial_load", [])
-
-                if not factory_path or not keys:
+                if not factory_path:
                     continue
 
                 # Import the factory and get the subgraph instance
@@ -116,15 +114,25 @@ class EkgCommands(CliTopCommand):
                     if isinstance(imported, SubgraphFactory):
                         subgraph_impl = imported
                     elif isinstance(imported, type) and issubclass(imported, SubgraphFactory):
-                        # Instantiate the subgraph class with no arguments (uses defaults)
-                        subgraph_impl = imported()  # type: ignore[call-arg]
+                        # Prepare constructor kwargs from YAML config (excluding factory and initial_load)
+                        constructor_kwargs = {
+                            k: v for k, v in subgraph_cfg.items() if k not in ["factory", "initial_load", "trigger"]
+                        }
+                        # Instantiate the subgraph class with config parameters
+                        subgraph_impl = imported(**constructor_kwargs)  # type: ignore[call-arg]
                     else:
                         console.print(f"[red]❌ Factory {factory_path} is not a SubgraphFactory[/red]")
                         continue
                     console.print(f"[green]Loaded subgraph factory: {subgraph_impl.name}[/green]")
                 except Exception as e:
                     console.print(f"[red]❌ Failed to import factory {factory_path}: {e}[/red]")
+                    import traceback
+
+                    console.print(f"[red]{traceback.format_exc()}[/red]")
                     continue
+
+                # Register the subgraph in the registry for info/schema/export-html commands
+                subgraph_impl.register()
 
                 schema = subgraph_impl.build_schema()
                 try:
@@ -133,6 +141,19 @@ class EkgCommands(CliTopCommand):
                     _create_schema(backend, schema.nodes, schema.relations)
                 except Exception:
                     pass
+
+                # Get keys: either from initial_load or from table-backed factory
+                keys = subgraph_cfg.get("initial_load", [])
+                from genai_graph.core.subgraph_factories import TableBackedSubgraphFactory
+
+                if not keys and isinstance(subgraph_impl, TableBackedSubgraphFactory):
+                    # For table-backed factories, get all keys from database
+                    try:
+                        keys = subgraph_impl.get_all_keys()
+                        console.print(f"[cyan]Retrieved {len(keys)} keys from table-backed factory[/cyan]")
+                    except Exception as e:
+                        console.print(f"[red]Failed to get keys from table: {e}[/red]")
+                        keys = []
 
                 if keys:
                     try:
@@ -144,6 +165,9 @@ class EkgCommands(CliTopCommand):
                         total_docs_failed += stats.total_failed
                     except Exception as e:
                         console.print(f"[red]Ingestion error for {factory_path}: {e}[/red]")
+                        import traceback
+
+                        console.print(f"[red]{traceback.format_exc()}[/red]")
                         total_docs_failed += len(keys)
 
             console.print(f"Processed: {total_docs_processed} ok, {total_docs_failed} failed. Path: {db_path}")
@@ -508,6 +532,13 @@ class EkgCommands(CliTopCommand):
 
         @cli_app.command("info")
         def show_info(
+            config_name: Annotated[
+                str | None,
+                typer.Option(
+                    "--config",
+                    help="Name of the KG config to use from config/ekg.yaml (default: value of key 'kg_config')",
+                ),
+            ] = None,
             subgraphs: Annotated[
                 list[str],
                 typer.Option(
@@ -530,7 +561,12 @@ class EkgCommands(CliTopCommand):
             from genai_graph.core.graph_registry import GraphRegistry
             from genai_graph.core.graph_schema import _find_embedded_field_for_class
 
-            registry = GraphRegistry.get_instance()
+            # Set config if provided
+            if config_name:
+                global_config().set("kg_config", config_name)
+
+            # Create a fresh registry instance to ensure it loads with current config
+            registry = GraphRegistry()
             selected_subgraphs = subgraphs or registry.listsubgraphs()
 
             try:
@@ -764,6 +800,13 @@ class EkgCommands(CliTopCommand):
 
         @cli_app.command("export-html")
         def export_html(
+            config_name: Annotated[
+                str | None,
+                typer.Option(
+                    "--config",
+                    help="Name of the KG config to use from config/ekg.yaml (default: value of key 'kg_config')",
+                ),
+            ] = None,
             output_dir: Annotated[str, typer.Option("--output-dir", "-o", help="Output directory")] = "/tmp",
             open_browser: Annotated[bool, typer.Option("--open/--no-open", help="Open in browser")] = True,
             subgraphs: Annotated[
@@ -808,7 +851,12 @@ class EkgCommands(CliTopCommand):
             try:
                 from genai_graph.core.graph_registry import GraphRegistry
 
-                registry = GraphRegistry.get_instance()
+                # Set config if provided
+                if config_name:
+                    global_config().set("kg_config", config_name)
+
+                # Create a fresh registry instance
+                registry = GraphRegistry()
                 selected_subgraphs = subgraphs or registry.listsubgraphs()
 
                 with console.status("[bold green]Creating HTML visualization..."):
@@ -886,6 +934,13 @@ class EkgCommands(CliTopCommand):
 
         @cli_app.command("schema")
         def show_schema(
+            config_name: Annotated[
+                str | None,
+                typer.Option(
+                    "--config",
+                    help="Name of the KG config to use from config/ekg.yaml (default: value of key 'kg_config')",
+                ),
+            ] = None,
             subgraphs: Annotated[
                 list[str],
                 typer.Option(
@@ -903,21 +958,24 @@ class EkgCommands(CliTopCommand):
             """
 
             from genai_graph.core.graph_registry import GraphRegistry
-            from genai_graph.core.schema_doc_generator import generate_schema_description
 
             console.print(Panel("[bold cyan]Knowledge Graph Schema[/bold cyan]"))
 
             try:
-                registry = GraphRegistry.get_instance()
+                # Set config if provided
+                if config_name:
+                    global_config().set("kg_config", config_name)
+
+                # Create a fresh registry instance
+                registry = GraphRegistry()
                 selected_subgraphs = subgraphs or registry.listsubgraphs()
 
-                # Use combined-schema documentation when multiple (or zero)
-                # subgraphs are requested; for exactly one, keep the
-                # single-subgraph format.
-                if not selected_subgraphs or len(selected_subgraphs) > 1:
-                    desc = generate_schema_description(selected_subgraphs)
-                else:
-                    desc = generate_schema_description(selected_subgraphs[0])
+                # Always use combined schema path since we have the registry
+                schema = registry.build_combined_schema(selected_subgraphs)
+                from genai_graph.core.schema_doc_generator import _format_schema_description, _parse_baml_descriptions
+
+                baml_docs = _parse_baml_descriptions()
+                desc = _format_schema_description(schema=schema, baml_docs=baml_docs)
                 console.print(desc)
 
             except ValueError as e:

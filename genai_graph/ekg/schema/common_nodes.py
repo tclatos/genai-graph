@@ -48,19 +48,35 @@ class WinLoss(ExtraFields):
 
     @classmethod
     def get_data(cls, context: dict | None) -> Self | None:
-        """Return a fake win/loss struct for Opportunity nodes.
+        """Return win/loss struct for Opportunity nodes.
 
-        Uses `item_data` to try and extract an opportunity identifier to derive
-        deterministic fake values for testing.
+        Extracts win/loss data from the root model (e.g., CrmExtract) if available,
+        or from item_data directly, or generates deterministic fake values for testing.
         """
         if not context or not isinstance(context, dict):
             return None
 
-        item_data = context.get("item_data") or {}
-        # Try various fields to identify the opportunity
-        candidate = item_data.get("opportunity_id") or item_data.get("id") or item_data.get("name")
+        # First try to get win_loss from root model (e.g., CrmExtract containing Opportunity)
+        root_model = context.get("root_model")
+        if root_model and hasattr(root_model, "win_loss"):
+            win_loss = getattr(root_model, "win_loss", None)
+            if win_loss and hasattr(win_loss, "result"):
+                result = getattr(win_loss, "result", None)
+                reason = getattr(win_loss, "reason", None)
+                if result:
+                    return cls(result=result, reason=reason)
 
-        # Simple deterministic fake: hash the candidate and pick win/loss
+        # Second, try to get win_loss data from item_data (table-backed source)
+        item_data = context.get("item_data") or {}
+        if "win_loss" in item_data and isinstance(item_data["win_loss"], dict):
+            win_loss_dict = item_data["win_loss"]
+            result = win_loss_dict.get("result")
+            reason = win_loss_dict.get("reason")
+            if result:
+                return cls(result=result, reason=reason)
+
+        # Fallback: generate deterministic fake data for testing
+        candidate = item_data.get("opportunity_id") or item_data.get("id") or item_data.get("name")
         if candidate:
             h = abs(hash(str(candidate)))
             result = "win" if (h % 2 == 0) else "loss"

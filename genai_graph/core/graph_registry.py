@@ -80,9 +80,13 @@ class GraphRegistry(BaseModel):
                 # Already-instantiated Subgraph instance
                 if isinstance(imported, SubgraphFactory):
                     subgraph = imported
-                # Subgraph subclass – instantiate with defaults
+                # Subgraph subclass – instantiate with config parameters
                 elif isinstance(imported, type) and issubclass(imported, SubgraphFactory):
-                    subgraph = imported()
+                    # Prepare constructor kwargs from YAML config (excluding factory, initial_load, trigger)
+                    constructor_kwargs = {
+                        k: v for k, v in subgraph_cfg.items() if k not in ["factory", "initial_load", "trigger"]
+                    }
+                    subgraph = imported(**constructor_kwargs)  # type: ignore[call-arg]
                 else:
                     # Callable provider – may be a factory returning a Subgraph
                     # or a legacy register(registry) function.
@@ -101,7 +105,10 @@ class GraphRegistry(BaseModel):
                     subgraph.register(self)
 
             except Exception as ex:
+                import traceback
+
                 logger.warning(f"Cannot load subgraph provider {factory}: {ex}")
+                logger.debug(traceback.format_exc())
 
     @once
     def get_instance() -> "GraphRegistry":

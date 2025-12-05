@@ -73,13 +73,14 @@ def _has_metadata_map(root_class: Type[BaseModel], schema: GraphSchema) -> bool:
         origin = get_origin(ann)
         if origin is dict:
             return True
-        # Optional / Union[...] handling
+        # Optional / Union[...] handling (Python 3.9 style or 3.12+ UnionType)
         if origin is None and hasattr(ann, "__args__"):
             origin = get_origin(ann)
         if origin is None:
             return False
-        # If origin is Union, check args
-        if origin.__name__ == "Union" or origin is tuple:
+        # Check for Union (typing.Union) or UnionType (Python 3.12+ dict | None)
+        origin_name = getattr(origin, "__name__", "")
+        if origin_name in ("Union", "UnionType") or origin is tuple:
             for a in get_args(ann):
                 if a is dict:
                     return True
@@ -97,7 +98,7 @@ def add_documents_to_graph(
 
     Args:
         keys: list of keys to load via the subgraph implementation
-        subgraph_impl: subgraph module providing `load_data` and `get_entity_name_from_data`
+        subgraph_impl: subgraph module providing `load_data`
         backend: GraphBackend instance
         schema: GraphSchema instance
 

@@ -7,7 +7,7 @@ and solutions as nodes, and their relationships and purposes as edges.
 
 from __future__ import annotations
 
-from typing import Any, Type
+from typing import Type
 
 from pydantic import BaseModel
 
@@ -20,7 +20,7 @@ from genai_graph.ekg.schema.common_nodes import FileMetadata, get_common_nodes
 class ArchitectureDocumentSubgraph(KvStoreBackedSubgraphFactory, BaseModel):
     """Architecture document data subgraph implementation."""
 
-    top_class: Type[BaseModel] = SWArchitectureDocument
+    TOP_CLASS: Type[BaseModel] = SWArchitectureDocument
     kv_store_id: str = "default"
 
     @property
@@ -52,7 +52,7 @@ class ArchitectureDocumentSubgraph(KvStoreBackedSubgraphFactory, BaseModel):
         nodes = get_common_nodes() + [
             # Root node - the architecture document itself
             GraphNode(
-                node_class=self.top_class,
+                node_class=self.TOP_CLASS,
                 extra_classes=[FileMetadata],
                 name_from=lambda data, base: f"Architecture:{data.get('document_date', 'unknown')}",
                 description="Root node containing the complete architecture document with technical stack and solutions",
@@ -81,7 +81,7 @@ class ArchitectureDocumentSubgraph(KvStoreBackedSubgraphFactory, BaseModel):
         relations = [
             # Document to project
             GraphRelation(
-                from_node=SWArchitectureDocument,
+                from_node=self.TOP_CLASS,
                 to_node=Opportunity,
                 name="SOFWARE_ARCHITECURE",
                 description="Architecture document for the opportunity/project",
@@ -112,7 +112,7 @@ class ArchitectureDocumentSubgraph(KvStoreBackedSubgraphFactory, BaseModel):
             # Component to component relationships (dependencies/integration)
         ]
 
-        return GraphSchema(root_model_class=self.top_class, nodes=nodes, relations=relations)
+        return GraphSchema(root_model_class=self.TOP_CLASS, nodes=nodes, relations=relations)
 
     def get_sample_queries(self) -> list[str]:
         """Get list of sample Cypher queries for architecture data."""
@@ -131,10 +131,10 @@ class ArchitectureDocumentSubgraph(KvStoreBackedSubgraphFactory, BaseModel):
             ),
         ]
 
-    def get_entity_name_from_data(self, data: Any) -> str:
-        """Extract a human-readable entity name from loaded data."""
-        if hasattr(data, "opportunity") and hasattr(data.opportunity, "name"):
-            return f"Architecture: {data.opportunity.name}"
-        if hasattr(data, "document_date"):
-            return f"Architecture: {data.document_date}"
-        return "Architecture Document"
+    # def get_entity_name_from_data(self, data: Any) -> str:
+    #     """Extract a human-readable entity name from loaded data."""
+    #     if hasattr(data, "opportunity") and hasattr(data.opportunity, "name"):
+    #         return f"Architecture: {data.opportunity.name}"
+    #     if hasattr(data, "document_date"):
+    #         return f"Architecture: {data.document_date}"
+    #     return "Architecture Document"

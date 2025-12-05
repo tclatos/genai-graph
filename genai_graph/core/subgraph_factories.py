@@ -23,12 +23,13 @@ console = Console()
 class SubgraphFactory(ABC, BaseModel):
     """Abstract base class for subgraph implementations."""
 
-    top_class: Type[BaseModel]
+    # Class constant - must be overridden by subclasses
+    TOP_CLASS: Type[BaseModel]
 
     @property
     def name(self) -> str:
         """Name of the subgraph."""
-        return self.top_class.__name__
+        return self.TOP_CLASS.__name__
 
     @abstractmethod
     def get_struct_data_by_key(self, key: str) -> BaseModel | None:
@@ -58,9 +59,9 @@ class SubgraphFactory(ABC, BaseModel):
         """Get list of sample Cypher queries for this subgraph."""
         return []
 
-    def get_entity_name_from_data(self, data: Any) -> str:
-        """Extract a human-readable entity name from loaded data."""
-        return "Unknown Entity"
+    # def get_entity_name_from_data(self, data: Any) -> str:
+    #     """Extract a human-readable entity name from loaded data."""
+    #     return "Unknown Entity"
 
     def register(self, registry: Any = None) -> None:  # noqa: F821 "Optional[GraphRegistry]"
         """Register this subgraph implementation.
@@ -75,7 +76,7 @@ class SubgraphFactory(ABC, BaseModel):
 
 
 class KvStoreBackedSubgraphFactory(SubgraphFactory):
-    kv_store_id: str
+    kv_store_id: str = "default"
 
     def get_struct_data_by_key(self, key: str) -> BaseModel | None:
         """Load graph data from the key-value store.
@@ -87,7 +88,7 @@ class KvStoreBackedSubgraphFactory(SubgraphFactory):
             Top class instance or None if not found
         """
         try:
-            store = PydanticStore(kvstore_id=self.kv_store_id, model=self.top_class)
+            store = PydanticStore(kvstore_id=self.kv_store_id, model=self.TOP_CLASS)
             opportunity = store.load_object(key)
             return opportunity
         except Exception as e:
@@ -100,6 +101,16 @@ class TableBackedSubgraphFactory(SubgraphFactory):
     pd_read_parameters: dict[str, Any] = {}
 
     _db_engine: Engine | None = None
+
+    @property
+    def table_name(self) -> str:
+        """Derive table name from TOP_CLASS name in snake_case."""
+        import re
+
+        # Convert PascalCase to snake_case
+        name = self.TOP_CLASS.__name__
+        snake = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+        return snake
 
     @abstractmethod
     def mapper_function(self, row: dict[str, Any]) -> BaseModel | None:
@@ -274,7 +285,7 @@ class TableBackedSubgraphFactory(SubgraphFactory):
         if self._db_engine is None:
             raise RuntimeError("Database engine not initialized")
 
-        table_name = "crm_data"
+        table_name = self.table_name
         key_field = self.get_key_field()
 
         # Validate key field exists, check for null keys
@@ -367,12 +378,40 @@ class TableBackedSubgraphFactory(SubgraphFactory):
             logger.error(f"Failed to import dataframe to database: {str(e)}")
             raise
 
+    def get_all_keys(self) -> list[str]:
+        """Get all unique keys available in the database table.
+
+        Returns:
+            List of all unique key values from the table
+        """
+        if self._db_engine is None:
+            raise RuntimeError("Database engine not initialized")
+
+        table_name = self.table_name
+        key_field = self.get_key_field()
+
+        logger.debug("Retrieving all unique keys from database")
+
+        try:
+            query = text(f'SELECT DISTINCT "{key_field}" FROM {table_name} ORDER BY "{key_field}"')
+
+            with self._db_engine.connect() as conn:
+                results = conn.execute(query).fetchall()
+
+            keys = [str(row[0]) for row in results]
+            logger.info(f"Found {len(keys)} unique keys in database")
+            return keys
+
+        except Exception as e:
+            logger.error(f"Failed to retrieve keys from database: {str(e)}")
+            raise
+
     def get_struct_data_by_key(self, key: str) -> BaseModel | None:
         """Load data for the given key from the SQL database."""
         if self._db_engine is None:
             raise RuntimeError("Database engine not initialized")
 
-        table_name = "crm_data"
+        table_name = self.table_name
         key_field = self.get_key_field()
 
         logger.debug(f"Querying database for key: {key}")

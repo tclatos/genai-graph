@@ -11,11 +11,10 @@ kg_configs:
 
   simple:
     subgraphs:
-      - factory: genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
-        initial_load: [rainbow-cnes-venus-tma]
+      # - factory: genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
+      #   initial_load: [rainbow-cnes-venus-tma]
       - factory: genai_graph.ekg.schema.crm_export:CrmExtractSubGraph
-        database: sqlite:///${paths.data_root}/ekg/crm_extract.db
+        db_dsn: sqlite:///${paths.data_root}/ekg/crm_extract.db
         files:
           - ${paths.ekg_data}/misc/report1750429630460_SHORTEN.xlsx
-        pd_read_parameters: []
-        trigger: Opportunity 
+        pd_read_parameters: {} 

@@ -1,5 +1,9 @@
+
+default_kg_config: ${oc.env:KG_CONFIG,db_only}
+
+
 kg_configs:
-  default:
+  test1:
     subgraphs:
       - factory: genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
         initial_load: [rainbow-cnes-venus-tma, rainbow-fake-cnes-1]
@@ -10,6 +14,12 @@ kg_configs:
         - filesystem    
 
   simple:
+    subgraphs:
+      - factory: genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
+        initial_load: [rainbow-cnes-venus-tma]
+
+
+  db_only:
     subgraphs:
       # - factory: genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
       #   initial_load: [rainbow-cnes-venus-tma]

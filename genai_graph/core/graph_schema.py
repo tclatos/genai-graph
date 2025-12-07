@@ -504,26 +504,103 @@ class GraphSchema(BaseModel):
 
     def _deduce_relation_field_paths(self) -> None:
         """Auto-deduce field paths for all relationship configurations."""
+        from loguru import logger
+
         for relation_config in self.relations:
+            # Skip deduction if field paths are already explicitly provided
+            if relation_config.field_paths:
+                continue
+
             relation_config.field_paths = []
 
             # Find all possible paths between from_node and to_node
             from_node_paths = self._get_node_paths(relation_config.from_node)
             to_node_paths = self._get_node_paths(relation_config.to_node)
 
-            # Find logical connections
+            # Find all valid connections
+            candidate_paths = []
             for from_path in from_node_paths:
                 for to_path in to_node_paths:
                     if self._is_valid_relationship_path(from_path, to_path, relation_config):
-                        relation_config.field_paths.append((from_path, to_path))
+                        candidate_paths.append((from_path, to_path))
+
+            # Sort by path simplicity/directness - prefer direct parent-child relationships
+            candidate_paths.sort(key=lambda p: self._path_complexity_score(p[0], p[1]))
+
+            # Use the simplest path(s)
+            if candidate_paths:
+                relation_config.field_paths = [candidate_paths[0]]
+
+                # Warn if multiple valid paths exist
+                if len(candidate_paths) > 1:
+                    from_label = relation_config.from_node.__name__
+                    to_label = relation_config.to_node.__name__
+                    chosen = f"{candidate_paths[0][0] or '(root)'} → {candidate_paths[0][1] or '(root)'}"
+                    alternatives = "; ".join([f"{p[0] or '(root)'} → {p[1] or '(root)'}" for p in candidate_paths[1:]])
+                    logger.warning(
+                        f"Multiple valid paths found for {relation_config.name} ({from_label} → {to_label}). "
+                        f"Using: {chosen}. Alternatives: {alternatives}. "
+                        f"Specify field_paths=[...] explicitly if this is incorrect."
+                    )
 
     def _get_node_paths(self, node_class: type[BaseModel]) -> list[str]:
         """Get all field paths for a given node class."""
         node_config = next((n for n in self.nodes if n.node_class == node_class), None)
         return node_config.field_paths if node_config else []
 
+    def _path_complexity_score(self, from_path: str, to_path: str) -> tuple[int, int, int, int]:
+        """Calculate a complexity score for a relationship path.
+
+        Returns a tuple (path_depth, is_nested, nesting_depth, combined_length) where:
+        - path_depth: sum of path depths (fewer dots = simpler) - MOST IMPORTANT
+        - is_nested: 0 if sibling relationship, 1 if one is nested in the other
+        - nesting_depth: how deeply nested the relationship is
+        - combined_length: total character length
+
+        Lower scores are preferred (simpler, more direct paths).
+        The primary criterion is minimizing total path depth (preferring simple, direct fields).
+        """
+        # Calculate path depth (number of dots = nesting level) - PRIMARY CRITERION
+        from_depth = from_path.count(".") if from_path else 0
+        to_depth = to_path.count(".") if to_path else 0
+        path_depth = from_depth + to_depth
+
+        # Check if paths are siblings (share same parent) vs nested (one contains the other)
+        # Sibling relationships (e.g., "opportunity" → "lead") are simpler than nested ones
+        is_direct_child = to_path.startswith(from_path + ".") if from_path else False
+        is_direct_parent = from_path.startswith(to_path + ".") if to_path else False
+        is_nested = 1 if (is_direct_child or is_direct_parent) else 0
+
+        # Calculate nesting depth (how many levels deep the relationship goes)
+        # For siblings, this is the depth of their common parent
+        # For nested relationships, this is the depth of the deeper path
+        if is_nested:
+            nesting_depth = max(from_depth, to_depth)
+        else:
+            # For siblings, find common parent depth
+            from_parts = from_path.split(".") if from_path else []
+            to_parts = to_path.split(".") if to_path else []
+            common_len = 0
+            for i in range(min(len(from_parts), len(to_parts))):
+                if from_parts[i] == to_parts[i]:
+                    common_len = i + 1
+                else:
+                    break
+            nesting_depth = common_len
+
+        # Total length as final tiebreaker
+        combined_length = len(from_path) + len(to_path)
+
+        return (path_depth, is_nested, nesting_depth, combined_length)
+
     def _is_valid_relationship_path(self, from_path: str, to_path: str, relation_config: GraphRelation) -> bool:
-        """Check if a relationship path makes logical sense."""
+        """Check if a relationship path makes logical sense.
+
+        Valid relationships include:
+        1. From root to anything
+        2. Parent-child relationships (one path contains the other)
+        3. Sibling relationships (both are direct children of the same parent, including root)
+        """
         # Root to anything is valid
         if from_path == "":
             return True
@@ -532,7 +609,7 @@ class GraphSchema(BaseModel):
         if to_path.startswith(from_path + ".") or from_path.startswith(to_path + "."):
             return True
 
-        # Check if they share a common parent path
+        # Check if they share a common parent path (including root as parent)
         from_parts = from_path.split(".")
         to_parts = to_path.split(".")
 
@@ -544,8 +621,17 @@ class GraphSchema(BaseModel):
             else:
                 break
 
-        # They're related if they have at least one common parent
-        return common_len > 0
+        # They're siblings if:
+        # - They share the same parent (common_len > 0), OR
+        # - They're both direct children of root (both have depth 1, common_len = 0)
+        if common_len > 0:
+            return True
+
+        # Both are direct children of root (siblings at root level)
+        if len(from_parts) == 1 and len(to_parts) == 1:
+            return True
+
+        return False
 
     def _compute_excluded_fields(self) -> None:
         """Compute which fields should be excluded from each node based on relationships.

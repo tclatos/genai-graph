@@ -57,6 +57,37 @@ KV_STORE_ID = "file"
 GRAPH_DB_CONFIG = "default"
 
 
+def _get_kg_config_name(config_name: str | None) -> str:
+    """Get the KG config name to use, with proper fallback logic.
+
+    Sets the config in global_config if needed, and returns the effective config name.
+
+    Args:
+        config_name: Explicitly provided config name from CLI option
+
+    Returns:
+        The config name to use. Priority order:
+        1. Explicitly provided config_name
+        2. Value of 'default_kg_config' key from global config
+        3. Hardcoded fallback 'test1'
+    """
+    if config_name:
+        # User explicitly provided a config, set it
+        global_config().set("kg_config", config_name)
+        return config_name
+
+    # Get default from the new 'default_kg_config' key
+    default_from_config = global_config().get("default_kg_config")
+    if default_from_config:
+        # Set it so GraphRegistry can pick it up
+        global_config().set("kg_config", default_from_config)
+        return default_from_config
+
+    # Final fallback
+    global_config().set("kg_config", "test1")
+    return "test1"
+
+
 class EkgCommands(CliTopCommand):
     """Commands for interacting with a Knowledge Graph."""
 
@@ -85,9 +116,8 @@ class EkgCommands(CliTopCommand):
             )
             from genai_graph.core.graph_documents import add_documents_to_graph
 
-            if config_name:
-                global_config().set("kg_config", config_name)
-            cfg_name = config_name or global_config().get("kg_config", default="default")
+            # Get the effective config name using centralized logic
+            cfg_name = _get_kg_config_name(config_name)
             kg_cfg = global_config().get_dict(f"kg_configs.{cfg_name}")
 
             # Build registry (which reads subgraphs from YAML) and backend
@@ -248,12 +278,12 @@ class EkgCommands(CliTopCommand):
         def query_ekg(
             query: str = typer.Argument(help="query to execute"),
             config_name: Annotated[
-                str,
+                str | None,
                 typer.Option(
                     "--config",
-                    help="Name of the structured config to use from yaml config",
+                    help="Name of the KG config to use from config/ekg.yaml (default: value of key 'default_kg_config')",
                 ),
-            ] = "default",
+            ] = None,
             llm: Annotated[
                 str | None,
                 typer.Option(help="Name or tag of the LLM to use by BAML"),
@@ -275,6 +305,9 @@ class EkgCommands(CliTopCommand):
 
             try:
                 from genai_graph.core.graph_registry import GraphRegistry
+
+                # Get the effective config name using centralized logic
+                _get_kg_config_name(config_name)
 
                 # If no subgraphs are provided, use all registered ones
                 registry = GraphRegistry.get_instance()
@@ -561,9 +594,8 @@ class EkgCommands(CliTopCommand):
             from genai_graph.core.graph_registry import GraphRegistry
             from genai_graph.core.graph_schema import _find_embedded_field_for_class
 
-            # Set config if provided
-            if config_name:
-                global_config().set("kg_config", config_name)
+            # Get the effective config name using centralized logic
+            _get_kg_config_name(config_name)
 
             # Create a fresh registry instance to ensure it loads with current config
             registry = GraphRegistry()
@@ -597,6 +629,11 @@ class EkgCommands(CliTopCommand):
 
             # Database location info
             db_path = get_backend_storage_path_from_config("default")
+
+            # Get current KG config name
+            cfg_name = global_config().get("kg_config", default="(not set)")
+            default_kg_config = global_config().get("default_kg_config", default="(not set)")
+
             info_table = Table(title="Database Information")
             info_table.add_column("Property", style="cyan", no_wrap=True)
             info_table.add_column("Value", style="green")
@@ -605,9 +642,32 @@ class EkgCommands(CliTopCommand):
             info_table.add_row("Database Type", "Cypher Graph Database")
             info_table.add_row("Backend", "Cypher (via GraphBackend abstraction)")
             info_table.add_row("Storage", "Persistent File Storage")
+            info_table.add_row("Active KG Config", cfg_name)
+            info_table.add_row("Default KG Config", default_kg_config)
             info_table.add_row("Subgraph(s)", ", ".join(selected_subgraphs) if selected_subgraphs else "ALL")
 
             console.print(info_table)
+            console.print()
+
+            # Show subgraph factory details
+            console.print("[bold cyan]Subgraph Factories[/bold cyan]")
+            factory_table = Table(title="Registered Subgraph Factories")
+            factory_table.add_column("Name", style="cyan", no_wrap=True)
+            factory_table.add_column("Type", style="yellow")
+            factory_table.add_column("Module", style="dim")
+
+            for subgraph_name in selected_subgraphs:
+                try:
+                    from genai_graph.core.graph_registry import get_subgraph
+
+                    subgraph_factory = get_subgraph(subgraph_name)
+                    factory_type = type(subgraph_factory).__name__
+                    factory_module = type(subgraph_factory).__module__
+                    factory_table.add_row(subgraph_name, factory_type, factory_module)
+                except ValueError:
+                    factory_table.add_row(subgraph_name, "[red]Not Found[/red]", "")
+
+            console.print(factory_table)
             console.print()
 
             # Get schema information
@@ -744,13 +804,23 @@ class EkgCommands(CliTopCommand):
             rel_mapping_table.add_column("Relationship", style="cyan", no_wrap=True)
             rel_mapping_table.add_column("From → To", style="green")
             rel_mapping_table.add_column("Meaning", style="yellow")
+            rel_mapping_table.add_column("Field Paths", style="magenta")
 
             # Get relationship labels from the combined schema
             for relation in schema.relations:
                 rel_type = relation.name
                 direction = f"{relation.from_node.__name__} → {relation.to_node.__name__}"
                 meaning = relation.description or ""
-                rel_mapping_table.add_row(rel_type, direction, meaning)
+
+                # Format field paths for display
+                if relation.field_paths:
+                    paths_display = "\n".join(
+                        [f"{fp[0] or '(root)'} → {fp[1] or '(root)'}" for fp in relation.field_paths]
+                    )
+                else:
+                    paths_display = "[dim](none)[/dim]"
+
+                rel_mapping_table.add_row(rel_type, direction, meaning, paths_display)
 
             console.print(rel_mapping_table)
 
@@ -851,9 +921,8 @@ class EkgCommands(CliTopCommand):
             try:
                 from genai_graph.core.graph_registry import GraphRegistry
 
-                # Set config if provided
-                if config_name:
-                    global_config().set("kg_config", config_name)
+                # Get the effective config name using centralized logic
+                _get_kg_config_name(config_name)
 
                 # Create a fresh registry instance
                 registry = GraphRegistry()
@@ -949,6 +1018,14 @@ class EkgCommands(CliTopCommand):
                     help="Subgraph(s) to display schema for; default is all registered",
                 ),
             ] = [],
+            with_enums: Annotated[
+                bool,
+                typer.Option(
+                    "--with-enums/--no-enums",
+                    help="Include or exclude enumerations in the schema output (default: include)",
+                    show_default=True,
+                ),
+            ] = True,
         ) -> None:
             """Display knowledge graph schema as used in LLM context.
 
@@ -962,9 +1039,8 @@ class EkgCommands(CliTopCommand):
             console.print(Panel("[bold cyan]Knowledge Graph Schema[/bold cyan]"))
 
             try:
-                # Set config if provided
-                if config_name:
-                    global_config().set("kg_config", config_name)
+                # Get the effective config name using centralized logic
+                _get_kg_config_name(config_name)
 
                 # Create a fresh registry instance
                 registry = GraphRegistry()
@@ -975,7 +1051,7 @@ class EkgCommands(CliTopCommand):
                 from genai_graph.core.schema_doc_generator import _format_schema_description, _parse_baml_descriptions
 
                 baml_docs = _parse_baml_descriptions()
-                desc = _format_schema_description(schema=schema, baml_docs=baml_docs)
+                desc = _format_schema_description(schema=schema, baml_docs=baml_docs, print_enums=with_enums)
                 console.print(desc)
 
             except ValueError as e:

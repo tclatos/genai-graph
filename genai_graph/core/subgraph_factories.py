@@ -189,6 +189,8 @@ class TableBackedSubgraphFactory(SubgraphFactory):
         if self._db_engine is None:
             raise RuntimeError("Database engine not initialized")
 
+        table_name = self.table_name
+
         # Get the row count that will be deleted
         query = text("SELECT row_count FROM imported_files WHERE file_path = :file_path")
         with self._db_engine.connect() as conn:
@@ -197,9 +199,16 @@ class TableBackedSubgraphFactory(SubgraphFactory):
                 old_row_count = result[0]
                 logger.info(f"Deleting {old_row_count} rows from previous import of {file_path}")
 
-        # Note: We can't track which rows came from which file without additional metadata
-        # For now, we'll just log a warning. In production, you'd want to track file_source in crm_data table
-        logger.warning("File-level data deletion not implemented - will attempt upsert on import")
+        # Delete all data from the table (simple approach: delete everything since we only have one file typically)
+        # In multi-file scenarios, you'd want to track file_source column for selective deletion
+        delete_sql = text(f"DELETE FROM {table_name}")
+        delete_tracking_sql = text("DELETE FROM imported_files WHERE file_path = :file_path")
+
+        with self._db_engine.connect() as conn:
+            result = conn.execute(delete_sql)
+            conn.execute(delete_tracking_sql, {"file_path": str(file_path)})
+            conn.commit()
+            logger.info(f"Deleted {result.rowcount} rows from table '{table_name}' for reimport")
 
     def _record_import(self, file_path: UPath, checksum: str, row_count: int) -> None:
         """Record file import in tracking table."""
@@ -340,14 +349,22 @@ class TableBackedSubgraphFactory(SubgraphFactory):
                             for col in df.columns:
                                 if col != key_field:
                                     param_name = (
-                                        col.replace(" ", "_").replace("(", "").replace(")", "").replace(":", "_")
+                                        col.replace(" ", "_")
+                                        .replace("(", "")
+                                        .replace(")", "")
+                                        .replace(":", "_")
+                                        .replace("-", "_")
                                     )
                                     set_parts.append(f'"{col}" = :{param_name}')
                                     param_map[param_name] = row[col]
 
                             # Add key field to params
                             key_param_name = (
-                                key_field.replace(" ", "_").replace("(", "").replace(")", "").replace(":", "_")
+                                key_field.replace(" ", "_")
+                                .replace("(", "")
+                                .replace(")", "")
+                                .replace(":", "_")
+                                .replace("-", "_")
                             )
                             param_map[key_param_name] = key_value
 

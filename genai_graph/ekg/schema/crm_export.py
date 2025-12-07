@@ -28,9 +28,8 @@ class CrmExtractSubGraph(TableBackedSubgraphFactory, BaseModel):
 
     def mapper_function(self, row: dict[str, Any]) -> CrmExtract | None:
         """Map database row to CrmExtract model."""
-        from devtools import debug
+        from devtools import debug  # noqa: F401
 
-        debug(row)
         return CrmExtract(
             opportunity=Opportunity(
                 opportunity_id=str(row.get("Atos Opportunity ID", "")),
@@ -66,7 +65,7 @@ class CrmExtractSubGraph(TableBackedSubgraphFactory, BaseModel):
             GraphNode(
                 node_class=self.TOP_CLASS,
                 extra_classes=[FileMetadata],
-                name_from=lambda data, base: f"CRM:{data.get('opportunity', {}).get('name', 'unknown')}",
+                name_from=lambda data, base: f"{base}",
                 description="CRM extract root containing opportunity, lead, and win/loss data",
             ),
         ]
@@ -115,7 +114,7 @@ if __name__ == "__main__":
 
     # Test 1: Create subgraph and load data
     console.print("\n[bold blue]Test 1:[/bold blue] Creating CrmExtractSubGraph and loading data...")
-    sg = CrmExtractSubGraph(db_dsn="sqlite:////tmp/mydatabase.db", files=[test_file])
+    sg = CrmExtractSubGraph(db_dsn="sqlite:////tmp/mydatabase2.db", files=[test_file])
     console.print("[green]✓[/green] CrmExtractSubGraph created successfully")
 
     # Test 2: Query existing data

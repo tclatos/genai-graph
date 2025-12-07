@@ -265,7 +265,7 @@ def _get_relation_properties(node_class: Any, baml_docs: dict[str, Any]) -> list
     return properties
 
 
-def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -> str:
+def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any], print_enums: bool = True) -> str:
     """Format schema as a compact, token-efficient description.
 
     Output format:
@@ -432,27 +432,28 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any]) -
     lines.append(f"{root_name} → [relation] → [Target] // Relationships originating from the root entity")
 
     # Add enumerations section
-    if baml_docs["enums"]:
-        lines.extend(["### Enumerations", ""])
+    if print_enums:
+        if baml_docs["enums"]:
+            lines.extend(["### Enumerations", ""])
 
-        for enum_name in sorted(baml_docs["enums"].keys()):
-            enum_values = baml_docs["enums"][enum_name]
-            enum_desc = baml_docs["classes"].get(enum_name, "")
+            for enum_name in sorted(baml_docs["enums"].keys()):
+                enum_values = baml_docs["enums"][enum_name]
+                enum_desc = baml_docs["classes"].get(enum_name, "")
 
-            if enum_desc:
-                lines.append(f"{enum_name} // {enum_desc}")
-            else:
-                lines.append(f"{enum_name}")
-
-            # List enum values
-            for value_name in sorted(enum_values.keys()):
-                value_desc = enum_values[value_name]
-                if value_desc:
-                    lines.append(f"  {value_name} // {value_desc}")
+                if enum_desc:
+                    lines.append(f"{enum_name} // {enum_desc}")
                 else:
-                    lines.append(f"  {value_name}")
+                    lines.append(f"{enum_name}")
 
-            lines.append("")
+                # List enum values
+                for value_name in sorted(enum_values.keys()):
+                    value_desc = enum_values[value_name]
+                    if value_desc:
+                        lines.append(f"  {value_name} // {value_desc}")
+                    else:
+                        lines.append(f"  {value_name}")
+
+                lines.append("")
 
     return "\n".join(lines)
 

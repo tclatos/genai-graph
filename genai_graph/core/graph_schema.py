@@ -20,6 +20,7 @@ from typing import (
     no_type_check,
 )
 
+from loguru import logger
 from pydantic import BaseModel, PrivateAttr, model_validator
 
 
@@ -883,45 +884,26 @@ class GraphSchema(BaseModel):
 
     def print_schema_summary(self) -> None:
         """Print a summary of the deduced schema configuration."""
-        from rich.console import Console
-        from rich.panel import Panel
-        from rich.table import Table
+        logger.debug(f"Graph Schema Summary for {self.root_model_class.__name__}")
 
-        console = Console()
-
-        console.print(Panel(f"[bold cyan]Graph Schema Summary for {self.root_model_class.__name__}[/bold cyan]"))
-
-        # Nodes table
-        nodes_table = Table(title="Node Configurations")
-        nodes_table.add_column("Class", style="cyan")
-        nodes_table.add_column("Key Field", style="magenta")
-        nodes_table.add_column("Field Paths", style="green")
-        nodes_table.add_column("Excluded Fields", style="yellow")
-
+        # Nodes
+        logger.debug("Node Configurations:")
         for node in self.nodes:
             paths_str = ", ".join(node.field_paths) if node.field_paths else "ROOT"
             excluded_str = ", ".join(sorted(node.excluded_fields)) if node.excluded_fields else "None"
-            nodes_table.add_row(node.node_class.__name__, node.key, paths_str, excluded_str)
+            logger.debug(f"  {node.node_class.__name__}: key={node.key}, paths={paths_str}, excluded={excluded_str}")
 
-        console.print(nodes_table)
-
-        # Relations table
-        relations_table = Table(title="Relationship Configurations")
-        relations_table.add_column("Name", style="cyan")
-        relations_table.add_column("From → To", style="magenta")
-        relations_table.add_column("Field Path Pairs", style="green")
-
+        # Relations
+        logger.debug("Relationship Configurations:")
         for relation in self.relations:
             from_to = f"{relation.from_node.__name__} → {relation.to_node.__name__}"
             paths_str = (
                 "; ".join([f"{fp} → {tp}" for fp, tp in relation.field_paths]) if relation.field_paths else "None"
             )
-            relations_table.add_row(relation.name, from_to, paths_str)
-
-        console.print(relations_table)
+            logger.debug(f"  {relation.name}: {from_to}, paths={paths_str}")
 
         # Warnings
         if self._warnings:
-            console.print("\n[bold red]Warnings:[/bold red]")
+            logger.warning("Schema warnings:")
             for warning in self._warnings:
-                console.print(f"⚠️  {warning}")
+                logger.warning(f"  {warning}")

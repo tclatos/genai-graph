@@ -23,6 +23,7 @@ from genai_graph.core.graph_backend import GraphBackend
 
 if TYPE_CHECKING:
     pass
+from loguru import logger
 from rich.console import Console
 
 console = Console()
@@ -221,7 +222,7 @@ def merge_node_in_graph(
             df = result.get_as_df()
 
             if df.empty:
-                console.print(f"[yellow]Warning: CREATE returned no ID for {node_type}[/yellow]")
+                logger.warning(f"CREATE returned no ID for {node_type}")
                 return True, ""
 
             node_id = str(df.iloc[0]["id"])
@@ -230,9 +231,9 @@ def merge_node_in_graph(
     except Exception as e:
         import traceback as tb
 
-        console.print(f"[red]Error merging {node_type} node:[/red] {e}")
-        console.print(f"[dim]Node data: {node_data.get(merge_on_field, 'unknown')}[/dim]")
-        console.print("[red]" + tb.format_exc() + "[/red]")
+        logger.error(f"Error merging {node_type} node: {e}")
+        logger.error(f"Node data: {node_data.get(merge_on_field, 'unknown')}")
+        logger.error(tb.format_exc())
         raise
 
 
@@ -264,7 +265,7 @@ def merge_nodes_batch(
         if not node_list:
             continue
 
-        console.print(f"[cyan]Merging {len(node_list)} {node_type} nodes...[/cyan]")
+        logger.debug(f"Merging {len(node_list)} {node_type} nodes...")
 
         type_stats = {"created": 0, "matched": 0, "total": len(node_list)}
 
@@ -291,8 +292,6 @@ def merge_nodes_batch(
                 id_mapping[(node_type, original_id)] = merged_id
 
         stats[node_type] = type_stats
-        console.print(
-            f"[green]  ✓ {node_type}: {type_stats['created']} created, {type_stats['matched']} matched[/green]"
-        )
+        logger.debug(f"  {node_type}: {type_stats['created']} created, {type_stats['matched']} matched")
 
     return stats, id_mapping

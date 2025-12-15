@@ -49,7 +49,7 @@ from rich.table import Table
 
 from genai_graph.core.subgraph_factories import SubgraphFactory
 
-# Initialize Rich console
+# Initialize Rich console (used by other commands)
 console = Console()
 
 # Configuration constants
@@ -151,14 +151,14 @@ class EkgCommands(CliTopCommand):
                         # Instantiate the subgraph class with config parameters
                         subgraph_impl = imported(**constructor_kwargs)  # type: ignore[call-arg]
                     else:
-                        console.print(f"[red]❌ Factory {factory_path} is not a SubgraphFactory[/red]")
+                        logger.error(f"Factory {factory_path} is not a SubgraphFactory")
                         continue
-                    console.print(f"[green]Loaded subgraph factory: {subgraph_impl.name}[/green]")
+                    logger.info(f"Loaded subgraph factory: {subgraph_impl.name}")
                 except Exception as e:
-                    console.print(f"[red]❌ Failed to import factory {factory_path}: {e}[/red]")
+                    logger.error(f"Failed to import factory {factory_path}: {e}")
                     import traceback
 
-                    console.print(f"[red]{traceback.format_exc()}[/red]")
+                    logger.error(traceback.format_exc())
                     continue
 
                 # Register the subgraph in the registry for info/schema/export-html commands
@@ -180,27 +180,27 @@ class EkgCommands(CliTopCommand):
                     # For table-backed factories, get all keys from database
                     try:
                         keys = subgraph_impl.get_all_keys()
-                        console.print(f"[cyan]Retrieved {len(keys)} keys from table-backed factory[/cyan]")
+                        logger.info(f"Retrieved {len(keys)} keys from table-backed factory")
                     except Exception as e:
-                        console.print(f"[red]Failed to get keys from table: {e}[/red]")
+                        logger.warning(f"Failed to get keys from table: {e}")
                         keys = []
 
                 if keys:
                     try:
                         stats = add_documents_to_graph(keys, subgraph_impl, backend, schema)
-                        console.print(
-                            f"[magenta]Ingest stats: processed={stats.total_processed} failed={stats.total_failed} nodes={stats.nodes_created} rels={stats.relationships_created}[/magenta]"
+                        logger.info(
+                            f"Ingest stats: processed={stats.total_processed} failed={stats.total_failed} nodes={stats.nodes_created} rels={stats.relationships_created}"
                         )
                         total_docs_processed += stats.total_processed
                         total_docs_failed += stats.total_failed
                     except Exception as e:
-                        console.print(f"[red]Ingestion error for {factory_path}: {e}[/red]")
+                        logger.error(f"Ingestion error for {factory_path}: {e}")
                         import traceback
 
-                        console.print(f"[red]{traceback.format_exc()}[/red]")
+                        logger.error(traceback.format_exc())
                         total_docs_failed += len(keys)
 
-            console.print(f"Processed: {total_docs_processed} ok, {total_docs_failed} failed. Path: {db_path}")
+            logger.info(f"Processed: {total_docs_processed} ok, {total_docs_failed} failed. Path: {db_path}")
 
         @cli_app.command("delete")
         def delete_ekg(

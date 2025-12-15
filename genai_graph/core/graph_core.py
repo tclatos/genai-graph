@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Iterable, NamedTuple
+from typing import Any, Dict, NamedTuple
 
+from loguru import logger
 from pydantic import BaseModel
 from rich.console import Console
 
@@ -9,6 +10,18 @@ from genai_graph.core.extra_fields_utils import apply_extra_fields
 from genai_graph.core.graph_backend import GraphBackend, create_in_memory_backend
 from genai_graph.core.graph_merge import merge_nodes_batch
 from genai_graph.core.graph_schema import GraphNode, GraphRelation, GraphSchema, _find_embedded_field_for_class
+
+
+class NodeRecord(NamedTuple):
+    """Structured representation of a graph node.
+
+    Attributes:
+        node_id: Unique identifier for the node.
+        properties: Node properties dictionary.
+    """
+
+    node_id: str
+    properties: dict[str, Any]
 
 
 class RelationshipRecord(NamedTuple):
@@ -131,7 +144,7 @@ def restart_database() -> GraphBackend:
     """
 
     backend = create_in_memory_backend()
-    console.print("[yellow]🔄 Database restarted - all tables cleared[/yellow]")
+    logger.debug("Database restarted - all tables cleared")
     return backend
 
 
@@ -179,17 +192,15 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
 
             # Validate that the embedded field exists on the parent model
             if field_name not in parent_model_fields:
-                console.print(
-                    f"[yellow]Warning: embedded field '{field_name}' is not defined on {parent_name}[/yellow]"
-                )
+                logger.warning(f"Embedded field '{field_name}' is not defined on {parent_name}")
                 continue
 
             # Ensure we can introspect the embedded class
             embedded_model_fields = getattr(embedded_class, "model_fields", None)
             if embedded_model_fields is None:
-                console.print(
-                    f"[yellow]Warning: embedded class {embedded_class!r} for field '{field_name}' "
-                    f"on {parent_name} has no model_fields; skipping STRUCT generation[/yellow]"
+                logger.warning(
+                    f"Embedded class {embedded_class!r} for field '{field_name}' "
+                    f"on {parent_name} has no model_fields; skipping STRUCT generation"
                 )
                 continue
 
@@ -200,9 +211,9 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
                 struct_parts.append(f"{emb_field_name} {kuzu_type}")
 
             if not struct_parts:
-                console.print(
-                    f"[yellow]Warning: embedded class {embedded_class.__name__} for field "
-                    f"'{field_name}' on {parent_name} has no fields; skipping[/yellow]"
+                logger.warning(
+                    f"Embedded class {embedded_class.__name__} for field "
+                    f"'{field_name}' on {parent_name} has no fields; skipping"
                 )
                 continue
 
@@ -291,7 +302,7 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
 
         fields_str = ", ".join(fields)
         create_sql = f"CREATE NODE TABLE IF NOT EXISTS {table_name}({fields_str}, PRIMARY KEY({key_field}))"
-        console.print(f"[cyan]Creating node table:[/cyan] {create_sql}")
+        logger.debug(f"Creating node table: {create_sql}")
         backend.execute(create_sql)
         created_tables.add(table_name)
 
@@ -317,7 +328,7 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
         else:
             create_rel_sql = f"CREATE REL TABLE IF NOT EXISTS {rel_name}(FROM {from_table} TO {to_table})"
 
-        console.print(f"[cyan]Creating relationship table:[/cyan] {create_rel_sql}")
+        logger.debug(f"Creating relationship table: {create_rel_sql}")
         backend.execute(create_rel_sql)
 
 
@@ -571,7 +582,7 @@ def load_graph_data(
     # We now merge on the unified _dedup_key field so that deduplication
     # semantics are driven entirely by GraphNode.deduplication_key
     # (or name_from when that is not set).
-    console.print("[bold]Merging nodes into graph...[/bold]")
+    logger.debug("Merging nodes into graph...")
     _merge_stats, id_mapping = merge_nodes_batch(
         conn=backend,
         nodes_dict=nodes_dict,
@@ -618,10 +629,10 @@ def load_graph_data(
     # could use MERGE for relationships as well, matching on (from_node, to_node, rel_type)
     # and optionally updating edge properties.
 
-    console.print(f"[bold]Creating {len(normalised_rels)} relationships...[/bold]")
+    logger.debug(f"Creating {len(normalised_rels)} relationships...")
     edge_props_count = sum(1 for r in normalised_rels if r.properties)
     if edge_props_count > 0:
-        console.print(f"[cyan]  {edge_props_count} relationships have properties[/cyan]")
+        logger.debug(f"  {edge_props_count} relationships have properties")
 
     relationships_created = 0
     for rel in normalised_rels:
@@ -665,10 +676,10 @@ def load_graph_data(
             backend.execute(match_sql)
             relationships_created += 1
         except Exception as e:
-            console.print(f"[red]Error creating {rel.name} relationship:[/red] {e}")
-            console.print(f"[dim]SQL: {match_sql}[/dim]")
+            logger.error(f"Error creating {rel.name} relationship: {e}")
+            logger.error(f"SQL: {match_sql}")
 
-    console.print(f"[green]✓ Created {relationships_created} relationships[/green]")
+    logger.debug(f"Created {relationships_created} relationships")
 
 
 # Orchestration
@@ -697,15 +708,15 @@ def create_graph(
         raise ValueError("create_graph now only accepts GraphSchema objects. Please update your configuration.")
 
     schema = schema_config
-    console.print("[green]Using GraphSchema format[/green]")
+    logger.debug("Using GraphSchema format")
 
     # Print schema summary
     try:
         schema.print_schema_summary()
     except Exception:
-        console.print(f"[yellow]Schema with {len(schema.nodes)} nodes and {len(schema.relations)} relations[/yellow]")
+        logger.debug(f"Schema with {len(schema.nodes)} nodes and {len(schema.relations)} relations")
 
-    console.print("[bold]Creating database schema...[/bold]")
+    logger.debug("Creating database schema...")
 
     # Prepare nodes with computed is_list flags
     for node_config in schema.nodes:
@@ -749,48 +760,17 @@ def create_graph(
             relation_config._from_field_path = None  # type: ignore
             relation_config._to_field_path = None  # type: ignore
 
-    console.print("[cyan]Creating database tables...[/cyan]")
+    logger.debug("Creating database tables...")
     create_schema(backend, schema.nodes, schema.relations)
 
-    console.print("[cyan]Extracting and loading data...[/cyan]")
+    logger.debug("Extracting and loading data...")
     nodes_dict, relationships = extract_graph_data(model, schema.nodes, schema.relations, source_key=source_key)
 
     load_graph_data(backend, nodes_dict, relationships)
 
-    console.print("\n[bold green]Graph creation complete![/bold green]")
+    logger.debug("Graph creation complete")
     total_nodes = sum(len(node_list) for node_list in nodes_dict.values())
-    console.print(f"[green]Total nodes:[/green] {total_nodes}")
-    console.print(f"[green]Total relationships:[/green] {len(relationships)}")
+    logger.debug(f"Total nodes: {total_nodes}")
+    logger.debug(f"Total relationships: {len(relationships)}")
 
     return nodes_dict, relationships
-
-
-def build_visualization_nodes(nodes_dict: dict[str, list[dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:
-    """Build a flat (id, properties) list suitable for HTML visualizers.
-
-    The returned node IDs are taken from each record's ``id`` field when
-    present; a synthetic value is generated as a fallback.
-    """
-    flattened: list[tuple[str, dict[str, Any]]] = []
-    for node_type, items in nodes_dict.items():
-        for item in items:
-            node_id_val = item.get("id")
-            node_id = str(node_id_val) if node_id_val is not None else f"{node_type}_{uuid.uuid4()}"
-            flattened.append((node_id, item))
-    return flattened
-
-
-def build_visualization_links_from_relationships(
-    relationships: Iterable[RelationshipRecord],
-) -> list[tuple[str, str, str, dict[str, Any]]]:
-    """Convert :class:`RelationshipRecord` instances into HTML link tuples.
-
-    Returns a list of ``(from_id, to_id, name, properties)`` tuples that can
-    be consumed by visualization helpers without knowing about
-    :class:`RelationshipRecord` internals.
-    """
-    links: list[tuple[str, str, str, dict[str, Any]]] = []
-    for rel in relationships:
-        props = dict(rel.properties or {})
-        links.append((rel.from_id, rel.to_id, rel.name, props))
-    return links

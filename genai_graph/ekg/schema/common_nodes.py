@@ -56,6 +56,9 @@ class WinLoss(ExtraFields):
         if not context or not isinstance(context, dict):
             return None
 
+        from devtools import debug  # noqa: F401
+
+        #        debug(context)
         # First try to get win_loss from root model (e.g., CrmExtract containing Opportunity)
         root_model = context.get("root_model")
         if root_model and hasattr(root_model, "win_loss"):

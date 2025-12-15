@@ -19,7 +19,7 @@ import uuid
 from typing import Any, Iterable
 
 from genai_graph.core.graph_backend import GraphBackend
-from genai_graph.core.graph_core import RelationshipRecord
+from genai_graph.core.graph_core import NodeRecord, RelationshipRecord
 
 # Import new schema types
 
@@ -158,7 +158,7 @@ def _fetch_graph_data(
     connection: GraphBackend,
     node_configs: list | None = None,
     relation_configs: list | None = None,
-) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
+) -> tuple[list[NodeRecord], list[RelationshipRecord]]:
     """Fetch all nodes and edges from the graph database via the provided connection/backend.
 
     Args:
@@ -167,12 +167,12 @@ def _fetch_graph_data(
         relation_configs: Optional list of relation configurations (legacy or new format)
 
     Returns:
-        The function returns two lists:
-        - nodes: list of (node_id, properties_dict)
-        - edges: list of (source_id, target_id, relationship_name, properties_dict)
+        Tuple of (nodes, relationships) where:
+        - nodes: list of NodeRecord instances
+        - relationships: list of RelationshipRecord instances
     """
-    nodes: list[tuple[str, dict]] = []
-    edges: list[tuple[str, str, str, dict]] = []
+    nodes: list[NodeRecord] = []
+    relationships: list[RelationshipRecord] = []
 
     # Optional filtering based on provided node / relation configs
     allowed_node_labels: set[str] | None = None
@@ -279,7 +279,7 @@ def _fetch_graph_data(
                     if kuzu_id:
                         uuid_to_node_data[kuzu_id] = {"uuid": node_uuid, "type": table_name, "node_dict": node_dict}
 
-                    nodes.append((node_uuid, node_dict))
+                    nodes.append(NodeRecord(node_id=node_uuid, properties=node_dict))
 
             except Exception as e:
                 print(f"Error fetching nodes from {table_name}: {e}")
@@ -343,7 +343,20 @@ def _fetch_graph_data(
 
                 # Only add if we have valid UUIDs for both nodes
                 if src_uuid and dst_uuid:
-                    edges.append((src_uuid, dst_uuid, rel_type, edge_props))
+                    # Extract node types for RelationshipRecord
+                    src_type = uuid_to_node_data[src_kuzu_id]["type"] if src_kuzu_id in uuid_to_node_data else "Unknown"
+                    dst_type = uuid_to_node_data[dst_kuzu_id]["type"] if dst_kuzu_id in uuid_to_node_data else "Unknown"
+
+                    relationships.append(
+                        RelationshipRecord(
+                            from_type=src_type,
+                            from_id=src_uuid,
+                            to_type=dst_type,
+                            to_id=dst_uuid,
+                            name=rel_type,
+                            properties=edge_props,
+                        )
+                    )
 
         except Exception as e:
             print(f"Error fetching relationships: {e}")
@@ -359,7 +372,7 @@ def _fetch_graph_data(
         print(f"Error in _fetch_graph_data: {e}")
         return [], []
 
-    return nodes, edges
+    return nodes, relationships
 
 
 def generate_html(
@@ -383,31 +396,32 @@ def generate_html(
     Returns:
         The HTML content as a string.
     """
-    nodes_data, edges_data = _fetch_graph_data(connection, node_configs, relation_configs)
+    nodes_data, relationships_data = _fetch_graph_data(connection, node_configs, relation_configs)
 
     # Build visualization model using generic color assignment
 
     nodes_list: list[dict[str, Any]] = []
-    for node_id, node_info in nodes_data:
-        node_info = dict(node_info)  # shallow copy
-        node_info["id"] = str(node_id)
+    for node_record in nodes_data:
+        node_info = dict(node_record.properties)  # shallow copy
+        node_info["id"] = str(node_record.node_id)
         node_type = node_info.get("type", "Unknown")
         node_info["color"] = _get_node_color(node_type, custom_colors)
-        node_info["name"] = node_info.get("name", str(node_id))
+        node_info["name"] = node_info.get("name", str(node_record.node_id))
         # Trim noisy timestamp fields if present
         node_info.pop("updated_at", None)
         node_info.pop("created_at", None)
         nodes_list.append(node_info)
 
     links_list: list[dict[str, Any]] = []
-    for source, target, relation, edge_info in edges_data:
-        source_s = str(source)
-        target_s = str(target)
+    for rel_record in relationships_data:
+        source_s = str(rel_record.from_id)
+        target_s = str(rel_record.to_id)
+        relation = rel_record.name
+        edge_info = rel_record.properties or {}
 
         # Extract weight variations
         all_weights: dict[str, float] = {}
         primary_weight: float | None = None
-        edge_info = edge_info or {}
 
         if "weight" in edge_info:
             try:
@@ -765,27 +779,34 @@ class KnowledgeGraphHTMLVisualizer:
 
     def generate_html(
         self,
-        nodes: list[tuple[str, dict]],
+        nodes: list[NodeRecord] | list[tuple[str, dict]],
         links: Iterable[RelationshipRecord] | Iterable[tuple[str, str, str, dict[str, Any]]],
     ) -> str:
         """Generate HTML visualization from node and link data.
 
         Args:
-            nodes: List of (node_id, properties_dict) tuples
-            links: Iterable of :class:`RelationshipRecord` or
-                (source_id, target_id, relationship_name, properties_dict) tuples.
+            nodes: List of NodeRecord instances or (node_id, properties_dict) tuples (legacy)
+            links: Iterable of RelationshipRecord instances or
+                (source_id, target_id, relationship_name, properties_dict) tuples (legacy)
 
         Returns:
             HTML content as string
         """
         # Convert to the format expected by the HTML template
         nodes_list: list[dict[str, Any]] = []
-        for node_id, node_info in nodes:
-            node_info = dict(node_info)  # shallow copy
-            node_info["id"] = str(node_id)
+        for node in nodes:
+            # Support both NodeRecord and legacy tuples
+            if isinstance(node, NodeRecord):
+                node_info = dict(node.properties)
+                node_id = str(node.node_id)
+            else:
+                node_id, node_info = node
+                node_info = dict(node_info)
+
+            node_info["id"] = node_id
             node_type = node_info.get("type", "Unknown")
             node_info["color"] = _get_node_color(node_type, self.custom_colors)
-            node_info["name"] = node_info.get("name", str(node_id))
+            node_info["name"] = node_info.get("name", node_id)
             # Trim noisy timestamp fields if present
             node_info.pop("updated_at", None)
             node_info.pop("created_at", None)

@@ -18,6 +18,7 @@ Behavior:
 from dataclasses import dataclass
 from typing import List, Type
 
+from loguru import logger
 from pydantic import BaseModel
 
 from genai_graph.core.graph_backend import GraphBackend
@@ -119,14 +120,11 @@ def add_documents_to_graph(
             f"Subgraph root model '{root_class.__name__}' must expose a 'metadata' map field (dict or Optional[dict])"
         )
 
-    from rich.console import Console
-
-    console = Console()
     for key in keys:
         try:
-            console.print(f"[cyan]Loading key {key} for subgraph {subgraph_impl.name}[/cyan]")
+            logger.debug(f"Loading key {key} for subgraph {subgraph_impl.name}")
             data = subgraph_impl.get_struct_data_by_key(key)
-            console.print(f"[cyan]Loaded? {bool(data)}[/cyan]")
+            logger.debug(f"Loaded? {bool(data)}")
             if not data:
                 stats.total_failed += 1
                 continue

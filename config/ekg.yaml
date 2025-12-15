@@ -1,6 +1,7 @@
 
 default_kg_config: ${oc.env:KG_CONFIG,db_only}
 
+schemas_root: genai_graph.ekg.schema
 
 kg_configs:
   test1:
@@ -23,8 +24,22 @@ kg_configs:
     subgraphs:
       # - factory: genai_graph.ekg.schema.rainbow_review:ReviewedOpportunitySubgraph
       #   initial_load: [rainbow-cnes-venus-tma]
-      - factory: genai_graph.ekg.schema.crm_export:CrmExtractSubGraph
+      - factory: ${schemas_root}.crm_export:CrmExtractSubGraph
         db_dsn: sqlite:///${paths.data_root}/ekg/crm_extract.db
         files:
           - ${paths.ekg_data}/misc/report1750429630460_SHORTEN.xlsx
         pd_read_parameters: {} 
+
+  simple_with_db:
+    subgraphs:
+      - factory: ${schemas_root}.rainbow_review:ReviewedOpportunitySubgraph
+        initial_load: [rainbow-cnes-venus-tma]
+      - factory: ${schemas_root}.crm_export:CrmExtractSubGraph
+        db_dsn: sqlite:///${paths.data_root}/ekg/crm_extract.db
+        files:
+          - ${paths.ekg_data}/misc/report1750429630460_SHORTEN.xlsx
+        pd_read_parameters: {} 
+        
+        pull: 
+          merge_on: Oportunity.opportunity_id
+          db_field: "Atos Opportunity ID" 

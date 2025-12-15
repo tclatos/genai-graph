@@ -4,9 +4,6 @@ __pycache__/
 *$py.class
 *.so
 
-# C extensions
-*.so
-
 # Distribution / packaging
 .Python
 build/
@@ -49,26 +46,6 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff
-instance/
-.webassets-cache
-
-# Scrapy stuff
-.scrapy
-
-# Sphinx documentation
-docs/_build/
 
 # PyBuilder
 .pybuilder/
@@ -208,3 +185,6 @@ DEEPAGENTS_README.md
 # Temporary/working directories
 xtrash/
 src/wip/low_level/
+
+# to make github happy
+config/baseline.yaml

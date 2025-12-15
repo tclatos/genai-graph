@@ -29,6 +29,17 @@ from rich.console import Console
 console = Console()
 
 
+def _should_update_value(value: Any) -> bool:
+    """Return True when a value should overwrite an existing node property."""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() != ""
+    if isinstance(value, (list, dict)):
+        return len(value) > 0
+    return True
+
+
 def _format_value_for_cypher(value: Any) -> str:
     """Format a Python value for use in Cypher-like queries.
 
@@ -200,11 +211,35 @@ def merge_node_in_graph(
                     current_list.append(new_name)
                     updated_alternates = current_list
 
-            # Build SET clause dynamically
+            # Build SET clause dynamically. On matches, update non-empty
+            # properties from the incoming node_data so later sources (e.g. DB
+            # pulls) can take precedence over earlier ones.
             set_clauses = [f"n._updated_at = '{timestamp}'"]
+
             if updated_alternates is not None:
                 alternates_formatted = _format_value_for_cypher(updated_alternates)
                 set_clauses.append(f"n.alternate_names = {alternates_formatted}")
+
+            excluded_update_fields = {
+                "id",
+                "name",
+                "created_at",
+                "updated_at",
+                "dedup_key",
+                "_created_at",
+                "_updated_at",
+                "_name",
+                "_dedup_key",
+                "alternate_names",
+            }
+
+            for key, value in node_data.items():
+                if key in excluded_update_fields:
+                    continue
+                if not _should_update_value(value):
+                    continue
+                formatted = _format_value_for_cypher(value)
+                set_clauses.append(f"n.{key} = {formatted}")
 
             set_sql = ", ".join(set_clauses)
             update_query = dedent_ws(f"""

@@ -48,47 +48,30 @@ class WinLoss(ExtraFields):
 
     @classmethod
     def get_data(cls, context: dict | None) -> Self | None:
-        """Return win/loss struct for Opportunity nodes.
-
-        Extracts win/loss data from the root model (e.g., CrmExtract) if available,
-        or from item_data directly, or generates deterministic fake values for testing.
-        """
+        """Return win/loss data when available in the source model."""
         if not context or not isinstance(context, dict):
             return None
 
-        from devtools import debug  # noqa: F401
-
-        #        debug(context)
-        # First try to get win_loss from root model (e.g., CrmExtract containing Opportunity)
+        # Prefer win_loss from the root model (e.g. CrmExtract).
         root_model = context.get("root_model")
-        if root_model and hasattr(root_model, "win_loss"):
+        if root_model is not None and hasattr(root_model, "win_loss"):
             win_loss = getattr(root_model, "win_loss", None)
-            if win_loss and hasattr(win_loss, "result"):
+            if win_loss is not None and hasattr(win_loss, "result"):
                 result = getattr(win_loss, "result", None)
                 reason = getattr(win_loss, "reason", None)
                 if result:
-                    return cls(result=result, reason=reason)
+                    return cls(result=str(result), reason=str(reason) if reason else None)
 
-        # Second, try to get win_loss data from item_data (table-backed source)
+        # Fallback: accept already-materialised win_loss from item_data.
         item_data = context.get("item_data") or {}
-        if "win_loss" in item_data and isinstance(item_data["win_loss"], dict):
+        if isinstance(item_data, dict) and "win_loss" in item_data and isinstance(item_data["win_loss"], dict):
             win_loss_dict = item_data["win_loss"]
             result = win_loss_dict.get("result")
             reason = win_loss_dict.get("reason")
             if result:
-                return cls(result=result, reason=reason)
+                return cls(result=str(result), reason=str(reason) if reason else None)
 
-        # Fallback: generate deterministic fake data for testing
-        candidate = item_data.get("opportunity_id") or item_data.get("id") or item_data.get("name")
-        if candidate:
-            h = abs(hash(str(candidate)))
-            result = "win" if (h % 2 == 0) else "loss"
-            reason = "Simulated outcome for testing"
-        else:
-            result = "unknown"
-            reason = None
-
-        return cls(result=result, reason=reason)
+        return None
 
 
 def get_common_nodes() -> list[GraphNode]:

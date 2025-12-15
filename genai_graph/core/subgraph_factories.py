@@ -1,6 +1,7 @@
 """ """
 
 import hashlib
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Type
@@ -20,11 +21,27 @@ from genai_graph.core.graph_schema import (
 console = Console()
 
 
+class PullConfig(BaseModel):
+    """Configuration for pulling structured data from a DB-backed subgraph.
+
+    Attributes:
+        merge_on: Node type + field name (e.g. "Opportunity.opportunity_id")
+            that triggers a lookup in the DB.
+        db_field: Name of the DB column to query on. This may be the original
+            Excel header or a SQL-compliant renamed column.
+    """
+
+    merge_on: str
+    db_field: str
+
+
 class SubgraphFactory(ABC, BaseModel):
     """Abstract base class for subgraph implementations."""
 
     # Class constant - must be overridden by subclasses
     TOP_CLASS: Type[BaseModel]
+
+    pull: PullConfig | None = None
 
     @property
     def name(self) -> str:
@@ -105,12 +122,68 @@ class TableBackedSubgraphFactory(SubgraphFactory):
     @property
     def table_name(self) -> str:
         """Derive table name from TOP_CLASS name in snake_case."""
-        import re
-
         # Convert PascalCase to snake_case
         name = self.TOP_CLASS.__name__
         snake = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
         return snake
+
+    def _normalize_column_name(self, name: str) -> str:
+        """Normalise a column name to aid fuzzy matching.
+
+        This helps when the `db_field` value comes from an Excel header that
+        may have been renamed to be SQL-compliant.
+        """
+        return re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+
+    def resolve_db_field_name(self, db_field: str) -> str:
+        """Resolve a configured DB field name to an actual table column name."""
+        if self._db_engine is None:
+            raise RuntimeError("Database engine not initialized")
+
+        table_name = self.table_name
+        with self._db_engine.connect() as conn:
+            rows = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+
+        cols = [str(r[1]) for r in rows]  # PRAGMA: (cid, name, type, ...)
+        if not cols:
+            raise ValueError(f"No columns found for table '{table_name}'")
+
+        # Exact match
+        if db_field in cols:
+            return db_field
+
+        # Case-insensitive match
+        for col in cols:
+            if col.lower() == db_field.lower():
+                return col
+
+        # Normalised match
+        target = self._normalize_column_name(db_field)
+        for col in cols:
+            if self._normalize_column_name(col) == target:
+                return col
+
+        available = ", ".join(cols)
+        raise ValueError(f"Unknown db_field '{db_field}' for table '{table_name}'. Available: {available}")
+
+    def get_struct_data_by_field(self, field_name: str, value: str) -> BaseModel | None:
+        """Load data by an arbitrary DB column name instead of the key field."""
+        if self._db_engine is None:
+            raise RuntimeError("Database engine not initialized")
+
+        resolved = self.resolve_db_field_name(field_name)
+        table_name = self.table_name
+
+        query = text(f'SELECT * FROM {table_name} WHERE "{resolved}" = :value')
+        with self._db_engine.connect() as conn:
+            result = conn.execute(query, {"value": value}).fetchone()
+
+        if result is None:
+            logger.debug(f"No data found for {table_name}.{resolved}={value}")
+            return None
+
+        row_dict = dict(result._mapping)
+        return self.mapper_function(row_dict)
 
     @abstractmethod
     def mapper_function(self, row: dict[str, Any]) -> BaseModel | None:

@@ -47,6 +47,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.table import Table
 
+from genai_graph.core.graph_schema import GraphSchema
 from genai_graph.core.subgraph_factories import SubgraphFactory
 
 # Initialize Rich console (used by other commands)
@@ -130,6 +131,10 @@ class EkgCommands(CliTopCommand):
             total_docs_processed = 0
             total_docs_failed = 0
 
+            loaded: list[tuple[dict, SubgraphFactory, GraphSchema]] = []
+
+            # Pass 1: instantiate + register all subgraphs so pull-based ingestion
+            # can reference DB-backed subgraphs even when they appear later in YAML.
             for subgraph_cfg in subgraphs:
                 if not isinstance(subgraph_cfg, dict):
                     continue
@@ -138,21 +143,19 @@ class EkgCommands(CliTopCommand):
                 if not factory_path:
                     continue
 
-                # Import the factory and get the subgraph instance
                 try:
                     imported = import_from_qualified(factory_path)
                     if isinstance(imported, SubgraphFactory):
                         subgraph_impl = imported
                     elif isinstance(imported, type) and issubclass(imported, SubgraphFactory):
-                        # Prepare constructor kwargs from YAML config (excluding factory and initial_load)
                         constructor_kwargs = {
                             k: v for k, v in subgraph_cfg.items() if k not in ["factory", "initial_load", "trigger"]
                         }
-                        # Instantiate the subgraph class with config parameters
                         subgraph_impl = imported(**constructor_kwargs)  # type: ignore[call-arg]
                     else:
                         logger.error(f"Factory {factory_path} is not a SubgraphFactory")
                         continue
+
                     logger.info(f"Loaded subgraph factory: {subgraph_impl.name}")
                 except Exception as e:
                     logger.error(f"Failed to import factory {factory_path}: {e}")
@@ -161,7 +164,6 @@ class EkgCommands(CliTopCommand):
                     logger.error(traceback.format_exc())
                     continue
 
-                # Register the subgraph in the registry for info/schema/export-html commands
                 subgraph_impl.register()
 
                 schema = subgraph_impl.build_schema()
@@ -172,12 +174,23 @@ class EkgCommands(CliTopCommand):
                 except Exception:
                     pass
 
-                # Get keys: either from initial_load or from table-backed factory
+                loaded.append((subgraph_cfg, subgraph_impl, schema))
+
+            # Pass 2: ingest documents
+            from genai_graph.core.subgraph_factories import TableBackedSubgraphFactory
+
+            for subgraph_cfg, subgraph_impl, schema in loaded:
+                factory_path = subgraph_cfg.get("factory", "<unknown>")
+
+                # For table-backed subgraphs configured with `pull`, do not
+                # load all rows by default. They act as an on-demand source.
+                pull_cfg = getattr(subgraph_impl, "pull", None)
                 keys = subgraph_cfg.get("initial_load", [])
-                from genai_graph.core.subgraph_factories import TableBackedSubgraphFactory
+                if not keys and pull_cfg and isinstance(subgraph_impl, TableBackedSubgraphFactory):
+                    logger.info(f"Skipping automatic ingestion for pull-only subgraph: {subgraph_impl.name}")
+                    continue
 
                 if not keys and isinstance(subgraph_impl, TableBackedSubgraphFactory):
-                    # For table-backed factories, get all keys from database
                     try:
                         keys = subgraph_impl.get_all_keys()
                         logger.info(f"Retrieved {len(keys)} keys from table-backed factory")

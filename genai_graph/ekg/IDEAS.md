@@ -1,19 +1,6 @@
 # Ideas around evolution of the Tk and Bleuprint
 
 
-# Graph from tables
-
-Today there are 2 ways to create subgraphs : from Pydantic objects generated from BAML (through KvStoreBackedSubgraphFactory), 
-and from Pydantic objects created from a database row (through TableBackedSubgraphFactory). 
-We want to merge both, but by including database noded only if there's similar or connectd exiting BAML nodes (to avoid having too many orphan nodes from the DB in the graph).
-To do so, I've introduced in the KG config (ekg.yaml) the field "pull", where "merge_on" is the name of the node type and key that trigger the search in the DB when they are created, and "db_field" the name of the matching file in the database from where the node should be constructed.
-When merging the nodes, the database should have preminence, ie if fields are set in both source, the one from the db should prevail. 
-
-You can test with "export KG_CONFIG="simple_with_db"; cli kg delete -f ; cli kg create ; cli kg info" . The outcome shoule be : 
-- Only the row associated with  9001130534 should be loaded, and the associed nodes created
-- The Opportunity node should be merged. 
-- The 'WinLoss' embedded field in Opportunity should be the one taken from the DB. (you can remove its current get_data class method, that is obsolete)
-
 
 ## Better HTML visualisation
 

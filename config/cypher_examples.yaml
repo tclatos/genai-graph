@@ -1,0 +1,51 @@
+# Example Cypher queries for interactive KG visualization
+# These queries will be available in the selectbox for easy access
+
+queries:
+  - name: "All Graph"
+    description: "Show all nodes and relationships"
+    cypher: "MATCH (n)-[r]->(m) RETURN *"
+    
+  - name: "All Nodes (No Relationships)"
+    description: "Show all nodes without relationships"
+    cypher: "MATCH (n) RETURN n LIMIT 100"
+    
+  - name: "Node Types Count"
+    description: "Count nodes by type"
+    cypher: "MATCH (n) RETURN labels(n)[0] AS NodeType, count(n) AS Count ORDER BY Count DESC"
+    
+  - name: "Relationship Types Count"
+    description: "Count relationships by type"
+    cypher: "MATCH ()-[r]->() RETURN type(r) AS RelType, count(r) AS Count ORDER BY Count DESC"
+    
+  - name: "Opportunities with Customers"
+    description: "Show opportunities and their customers"
+    cypher: "MATCH (o:Opportunity)-[r:HAS_CUSTOMER]->(c:Customer) RETURN o, r, c LIMIT 50"
+    
+  - name: "Opportunities with Competitors"
+    description: "Show opportunities and their competitors"
+    cypher: "MATCH (o:Opportunity)-[r:HAS_COMPETITOR]->(comp:Competitor) RETURN o, r, comp LIMIT 50"
+    
+  - name: "Technology Stack"
+    description: "Show technology relationships"
+    cypher: "MATCH (tech:Technology)-[r]-(n) RETURN tech, r, n LIMIT 50"
+    
+  - name: "People and Organizations"
+    description: "Show people connected to organizations"
+    cypher: "MATCH (p:Person)-[r]-(org) WHERE labels(org)[0] IN ['Organization', 'Customer', 'Partner'] RETURN p, r, org LIMIT 50"
+    
+  - name: "Recent Documents"
+    description: "Show recently added documents and their connections"
+    cypher: "MATCH (n) WHERE n._created_at IS NOT NULL RETURN n ORDER BY n._created_at DESC LIMIT 30"
+    
+  - name: "High Degree Nodes"
+    description: "Find nodes with most connections"
+    cypher: "MATCH (n)-[r]-() RETURN n, count(r) AS degree ORDER BY degree DESC LIMIT 20"
+    
+  - name: "Path Between Types"
+    description: "Find shortest paths between two node types (modify as needed)"
+    cypher: "MATCH p=shortestPath((a:Opportunity)-[*..4]-(b:Technology)) RETURN p LIMIT 10"
+    
+  - name: "Nodes with Properties"
+    description: "Show nodes with all their properties"
+    cypher: "MATCH (n) RETURN n, properties(n) LIMIT 30"

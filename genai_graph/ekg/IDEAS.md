@@ -1,10 +1,18 @@
 # Ideas around evolution of the Tk and Bleuprint
 
-
+## Better warnings
+ sometile warnings_list.append(), sometime logger.warning... 
 
 ## Better HTML visualisation
 
-- User can select the types of nodes and relationsips
+- Create a Streamlit page to display interactivelly the KG. Take inspiration from genai_graph/webapp/pages/demos/reAct_agent.py.
+The graph can be displayed using the streamlit HTML widdget and the outcome of generate_html in genai_graph/core/graph_html.
+However, we want to be able to select parts of the graph.  To do so, provide an editable selecbox with a Cypher query that can be modified.  Default is MATCH (n)-[r]->(m) RETURN *  to get all the graph, but provide other in the selecbox other classical examples of Cypher queries.  Such examples are in a config YAML file that is loaded.
+Also, the result of the Cyper query can be displayed in a table, in another streamlit table.
+
+Additionaly, provide a text input for text-2-cypher : it call genai_graph/core/text2cypher.py, then display and execute the generated Cypher query (whose result is either displayed as graph or as table)
+
+You can update generate_html, and possibly the CLI command "export-html" to keep it work.
 
 - Use G.V()
 

@@ -76,9 +76,6 @@ fmt: ## Format code with ruff
 	uv run ruff format .
 	uv run ruff check --select I --fix .
 
-lint: ## Lint code with ruff
-	uv run ruff check --fix genai_graph
-
 test: ## Run all tests
 	uv run pytest tests/unit_tests/ tests/integration_tests/ -v
 
@@ -116,7 +113,7 @@ rebase: ## Sync local repo with remote one (changes are stashed before!)
 	uv sync --upgrade-package genai-tk
 
 lint: ## Run Ruff an all Python files to format fix imports
-	ruff check --select I --fix
+	ruff check --select I --fix genai_graph
 	ruff format
 
 
@@ -205,3 +202,11 @@ chrome:  ## Start docker Chromium
 	--shm-size="1gb" --restart unless-stopped \
 	lscr.io/linuxserver/chromium:latest
 	xdg-open localhost:3000
+
+
+kuzu-explorer:  ## Start KuzuDB explorer
+	docker run --rm -p 8000:8000 \
+		-v /home/tcl/kuzu:/database  \
+		-e KUZU_FILE=ekg_database.db \
+		--rm kuzudb/explorer:latest \
+	& chrome http://localhost:8000

@@ -261,7 +261,8 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
 
         # Add metadata fields first
         fields.append("id STRING")  # UUID primary key
-        fields.append("_name STRING")  # Human-readable name from name_from
+        fields.append("name STRING")  # Node name from name_from (user-chosen)
+        fields.append("_original_name STRING")  # Original Pydantic 'name' field if it existed
         fields.append("_created_at STRING")  # ISO timestamp
         fields.append("_updated_at STRING")  # ISO timestamp
         # Unified deduplication key used for MERGE semantics
@@ -426,8 +427,12 @@ def extract_graph_data(
                 # Generate UUID for id
                 item_data["id"] = str(uuid.uuid4())
 
-                # Get _name from name_from using get_name_value
-                item_data["_name"] = node_info.get_name_value(item_data, node_type)
+                # Preserve original 'name' field if it exists
+                if "name" in item_data:
+                    item_data["_original_name"] = item_data["name"]
+
+                # Set 'name' from name_from using get_name_value (user-chosen node name)
+                item_data["name"] = node_info.get_name_value(item_data, node_type)
 
                 # Filter out excluded fields to avoid complex data issues
                 if node_info.excluded_fields:
@@ -459,8 +464,8 @@ def extract_graph_data(
                 if dedup_str:
                     item_data["_dedup_key"] = dedup_str
                 else:
-                    # Fallback: use _name, or the generated id as a last resort
-                    fallback = item_data.get("_name") or item_data["id"]
+                    # Fallback: use name, or the generated id as a last resort
+                    fallback = item_data.get("name") or item_data["id"]
                     dedup_str = str(fallback)
                     item_data["_dedup_key"] = dedup_str
 

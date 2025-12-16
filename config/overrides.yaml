@@ -10,7 +10,7 @@ ekg_local:
   :env:
     BAML_LOG: "warn"
 
-  kg_config: default
+  kg_config: ${oc.env:KG_CONFIG,db_only}
 
   llm:
     models:

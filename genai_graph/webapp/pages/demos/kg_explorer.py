@@ -61,7 +61,7 @@ def load_cypher_examples() -> list[dict]:
 def initialize_session_state() -> None:
     """Initialize session state variables."""
     if "cypher_query" not in sss:
-        sss.cypher_query = "MATCH (n)-[r]->(m) RETURN * LIMIT 50"
+        sss.cypher_query = "MATCH (n)-[r]->(m) RETURN * LIMIT 200"
     if "query_result" not in sss:
         sss.query_result = None
     if "generated_cypher" not in sss:
@@ -115,7 +115,6 @@ def main() -> None:
         backend = create_backend_from_config(GRAPH_DB_CONFIG)
         if not backend:
             st.error("❌ No Knowledge Graph database found")
-            st.info("💡 Add data first using: `cli kg add --key <opportunity_key>`")
             return
     except Exception as e:
         st.error(f"Failed to connect to database: {e}")

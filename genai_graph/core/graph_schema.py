@@ -172,14 +172,18 @@ class GraphNode(BaseModel):
         return "id"
 
     def get_name_value(self, data: dict[str, Any], node_type: str) -> str:
-        """Get the _name value for a node instance.
+        """Get the node name value for a node instance.
+
+        This computes the node name based on the ``name_from`` configuration.
+        This becomes the primary 'name' field in the graph. Any original Pydantic
+        'name' field is preserved as '_original_name'.
 
         Args:
             data: Node data dictionary
             node_type: Name of the node type
 
         Returns:
-            Name value as string
+            Node name value as string
         """
 
         if isinstance(self.name_from, str):
@@ -198,7 +202,7 @@ class GraphNode(BaseModel):
         """Get the value used for deduplication for a node instance.
 
         When ``deduplication_key`` is not set, this falls back to the
-        computed ``_name`` so that all downstream components can always
+        computed ``name`` so that all downstream components can always
         rely on a single canonical dedup value.
         """
 

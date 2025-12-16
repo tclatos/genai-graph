@@ -36,14 +36,14 @@ def _get_node_raw_name(node_dict: dict[str, Any], node_type: str) -> str:
     Returns:
         Raw name for the node (no truncation)
     """
-    # PRIORITY 1: Check for our custom _name field first
-    if "_name" in node_dict and node_dict["_name"] is not None:
-        value = str(node_dict["_name"]).strip()
+    # PRIORITY 1: Check for the 'name' field (user-chosen node name)
+    if "name" in node_dict and node_dict["name"] is not None:
+        value = str(node_dict["name"]).strip()
         if value:
             return value
 
     # PRIORITY 2: Common name fields to check in order of preference
-    name_fields = ["name", "title", "description", "label", "id"]
+    name_fields = ["title", "description", "label", "_original_name", "id"]
 
     for field in name_fields:
         if field in node_dict and node_dict[field] is not None:
@@ -53,7 +53,7 @@ def _get_node_raw_name(node_dict: dict[str, Any], node_type: str) -> str:
 
     # PRIORITY 3: If no name field found, use the first non-empty string field
     for key, value in node_dict.items():
-        if isinstance(value, str) and value.strip() and key not in ["type", "id", "_name"]:
+        if isinstance(value, str) and value.strip() and key not in ["type", "id", "name"]:
             return str(value)
 
     # Fallback to node type
@@ -613,9 +613,9 @@ def _fetch_graph_data(
                     if isinstance(node_obj, dict):
                         # Handle dictionary-based results (most common)
                         for key, val in node_obj.items():
-                            # Keep metadata fields like _name, _created_at, _updated_at
+                            # Keep metadata fields like _created_at, _updated_at, _original_name
                             # but skip Kuzu internal fields like _id, _label
-                            if key in ("_name", "_created_at", "_updated_at"):
+                            if key in ("_created_at", "_updated_at", "_original_name"):
                                 node_dict[key] = str(val).strip() if str(val).strip() else str(val)
                             elif not key.startswith("_") and val is not None:
                                 node_dict[key] = str(val).strip() if str(val).strip() else str(val)
@@ -929,7 +929,7 @@ def generate_html_from_cypher(
                 # Extract properties (same logic as _fetch_graph_data)
                 node_dict = {}
                 for key, val in node_obj.items():
-                    if key in ("_name", "_created_at", "_updated_at"):
+                    if key in ("_created_at", "_updated_at", "_original_name"):
                         node_dict[key] = str(val).strip() if str(val).strip() else str(val)
                     elif not key.startswith("_") and val is not None:
                         node_dict[key] = str(val).strip() if str(val).strip() else str(val)

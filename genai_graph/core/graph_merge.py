@@ -117,7 +117,7 @@ def build_merge_query(
     # Query 1: Check if node exists and get its id plus current naming info
     check_query = dedent_ws(f"""
         MATCH (n:{node_type} {{{merge_on_field}: {merge_value_formatted}}})
-        RETURN n.{key_field} as id, n._created_at as created_at, n._name as name, n.alternate_names as alternate_names
+        RETURN n.{key_field} as id, n._created_at as created_at, n.name as name, n.alternate_names as alternate_names
         LIMIT 1
         """)
 
@@ -125,10 +125,10 @@ def build_merge_query(
     # Query 2b: Create new node with all properties
     # We'll return a template that the caller will use based on check results
 
-    # Metadata fields from the Pydantic model that are renamed with _ prefix in the schema
-    # These should be excluded since they're already in node_data with the _ prefix
-    # For example: "name" -> "_name", "created_at" -> "_created_at"
-    excluded_metadata_fields = {"name", "created_at", "updated_at", "dedup_key"}
+    # Metadata fields that are handled separately in the schema
+    # Original 'name' is preserved as '_original_name', and 'name' is set from name_from
+    # For example: "created_at" -> "_created_at", "updated_at" -> "_updated_at"
+    excluded_metadata_fields = {"created_at", "updated_at", "dedup_key"}
 
     # Build properties for CREATE
     create_props = []
@@ -152,7 +152,7 @@ def merge_node_in_graph(
     conn: GraphBackend,
     node_type: str,
     node_data: dict[str, Any],
-    merge_on_field: str = "_name",
+    merge_on_field: str = "name",
 ) -> tuple[bool, str]:
     """Merge a single node into the graph database.
 
@@ -193,7 +193,7 @@ def merge_node_in_graph(
             existing_name = row.get("name")
             existing_alternates = row.get("alternate_names")
 
-            new_name = node_data.get("_name")
+            new_name = node_data.get("name")
             updated_alternates = None
 
             # Only track alternate names when the new name is different from the
@@ -228,7 +228,7 @@ def merge_node_in_graph(
                 "dedup_key",
                 "_created_at",
                 "_updated_at",
-                "_name",
+                "_original_name",
                 "_dedup_key",
                 "alternate_names",
             }

@@ -57,7 +57,7 @@ class GraphRegistry(BaseModel):
           :func:`register_subgraph` manually.
         """
         # Load subgraph providers from YAML config (config/ekg.yaml)
-        cfg_name = global_config().get("kg_config", default="default")
+        cfg_name = global_config().get("kg_config", default=global_config().get("default_kg_config", default="db_only"))
 
         # Get subgraphs: [{factory: "module:Class", initial_load: [...]}, ...]
         try:

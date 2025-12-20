@@ -23,6 +23,8 @@ from typing import (
 from loguru import logger
 from pydantic import BaseModel, PrivateAttr, model_validator
 
+from genai_graph.core.kg_context import KgContext
+
 
 class ExtraFields(BaseModel, ABC):
     @classmethod
@@ -310,7 +312,7 @@ class GraphSchema(BaseModel):
         self._deduce_node_field_paths()
         self._deduce_relation_field_paths()
         self._compute_excluded_fields()
-        self._validate_coherence()
+        self._validate_coherence(context=None)  # Context not available during model validation
         return self
 
     def _build_model_field_map(self) -> None:
@@ -542,11 +544,13 @@ class GraphSchema(BaseModel):
                     to_label = relation_config.to_node.__name__
                     chosen = f"{candidate_paths[0][0] or '(root)'} → {candidate_paths[0][1] or '(root)'}"
                     alternatives = "; ".join([f"{p[0] or '(root)'} → {p[1] or '(root)'}" for p in candidate_paths[1:]])
-                    logger.warning(
+                    warning_msg = (
                         f"Multiple valid paths found for {relation_config.name} ({from_label} → {to_label}). "
                         f"Using: {chosen}. Alternatives: {alternatives}. "
                         f"Specify field_paths=[...] explicitly if this is incorrect."
                     )
+                    # Store in _warnings list so it gets picked up by validate_with_context
+                    self._warnings.append(warning_msg)
 
     def _get_node_paths(self, node_class: type[BaseModel]) -> list[str]:
         """Get all field paths for a given node class."""
@@ -686,8 +690,12 @@ class GraphSchema(BaseModel):
             node_config.excluded_fields = excluded_fields
 
     @no_type_check  # Avoid type-checking *ANY* methods or attributes of this class.
-    def _validate_coherence(self) -> None:
-        """Validate that the schema configuration is coherent with the Pydantic model."""
+    def _validate_coherence(self, context: KgContext | None = None) -> None:
+        """Validate that the schema configuration is coherent with the Pydantic model.
+
+        Args:
+            context: Optional KgContext for collecting warnings
+        """
         warnings_list = []
 
         # Check that all referenced classes in relationships have node configurations
@@ -790,8 +798,13 @@ class GraphSchema(BaseModel):
                         f"{annotation!r}; expected {embedded_class.__name__} or Optional[{embedded_class.__name__}]"
                     )
 
-        # Store warnings
-        self._warnings = warnings_list
+        # Extend warnings (don't replace, to preserve warnings from path deduction)
+        self._warnings.extend(warnings_list)
+
+        # Add warnings to context if provided
+        if context:
+            for warning_msg in warnings_list:
+                context.add_warning(f"Schema validation: {warning_msg}")
 
         # Emit warnings
         for warning_msg in warnings_list:
@@ -800,6 +813,22 @@ class GraphSchema(BaseModel):
     def get_warnings(self) -> list[str]:
         """Get all validation warnings."""
         return self._warnings.copy()
+
+    def validate_with_context(self, context: KgContext) -> None:
+        """Re-run coherence validation and collect warnings into context.
+
+        This method allows re-validating the schema after initial construction
+        to collect warnings into a KgContext object.
+
+        Args:
+            context: KgContext for collecting warnings
+        """
+        # First add any warnings accumulated during schema construction (e.g., from path deduction)
+        for warning_msg in self._warnings:
+            context.add_warning(f"Schema: {warning_msg}")
+        
+        # Then run coherence validation which may add more warnings
+        self._validate_coherence(context=context)
 
     def index_fields_in_vector_store(self, model_instance: BaseModel, embeddings_store_config: str) -> None:
         """Index specified fields from model instance in a vector store.

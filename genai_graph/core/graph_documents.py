@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from genai_graph.core.graph_backend import GraphBackend
 from genai_graph.core.graph_schema import GraphSchema
+from genai_graph.core.kg_context import KgContext
 from genai_graph.core.subgraph_factories import SubgraphFactory
 
 
@@ -108,8 +109,17 @@ def _apply_pull_subgraphs(
     nodes_dict: dict[str, list[dict[str, object]]],
     pulled: set[tuple[str, str]],
     source_key: str,
+    context: KgContext | None = None,
 ) -> None:
-    """Pull DB-backed subgraphs on-demand based on configured triggers."""
+    """Pull DB-backed subgraphs on-demand based on configured triggers.
+
+    Args:
+        backend: GraphBackend instance
+        nodes_dict: Dictionary of nodes by type
+        pulled: Set of already pulled (subgraph_name, value) tuples
+        source_key: Source key for provenance
+        context: Optional KgContext for collecting warnings
+    """
     from genai_graph.core.graph_core import create_graph
     from genai_graph.core.graph_registry import GraphRegistry
     from genai_graph.core.subgraph_factories import TableBackedSubgraphFactory
@@ -160,12 +170,17 @@ def _apply_pull_subgraphs(
                 model=db_model,
                 schema_config=db_schema,
                 source_key=f"pull:{subgraph.name}:{source_key}",
+                context=context,
             )
             pulled.add(cache_key)
 
 
 def add_documents_to_graph(
-    keys: List[str], subgraph_impl: SubgraphFactory, backend: GraphBackend, schema: GraphSchema
+    keys: List[str],
+    subgraph_impl: SubgraphFactory,
+    backend: GraphBackend,
+    schema: GraphSchema,
+    context: KgContext | None = None,
 ) -> DocumentStats:
     """Add one or more documents to the knowledge graph.
 
@@ -174,6 +189,7 @@ def add_documents_to_graph(
         subgraph_impl: subgraph module providing `load_data`
         backend: GraphBackend instance
         schema: GraphSchema instance
+        context: Optional KgContext for collecting warnings
 
     Returns:
         DocumentStats instance summarising processing results
@@ -188,9 +204,10 @@ def add_documents_to_graph(
 
     # Validate presence of metadata map field (allow Optional[dict])
     if not _has_metadata_map(root_class, schema):
-        raise ValueError(
-            f"Subgraph root model '{root_class.__name__}' must expose a 'metadata' map field (dict or Optional[dict])"
-        )
+        msg = f"Subgraph root model '{root_class.__name__}' must expose a 'metadata' map field (dict or Optional[dict])"
+        if context:
+            context.add_warning(msg)
+        raise ValueError(msg)
 
     pulled: set[tuple[str, str]] = set()
 
@@ -204,12 +221,12 @@ def add_documents_to_graph(
                 continue
 
             # create_graph will attach source_key into the extracted root nodes
-            nodes_dict, relationships = create_graph(backend, data, schema, source_key=key)
+            nodes_dict, relationships = create_graph(backend, data, schema, source_key=key, context=context)
 
             # On-demand pull: DB-backed subgraphs can enrich the graph once a
             # matching node exists (avoids orphan nodes from bulk DB loads).
             try:
-                _apply_pull_subgraphs(backend, nodes_dict, pulled, source_key=key)
+                _apply_pull_subgraphs(backend, nodes_dict, pulled, source_key=key, context=context)
             except Exception:
                 pass
 
@@ -220,7 +237,10 @@ def add_documents_to_graph(
             stats.relationships_created += rels_created
             stats.total_processed += 1
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to process key {key}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             stats.total_failed += 1
             continue
 

@@ -43,12 +43,6 @@ from genai_tk.main.cli import CliTopCommand
 from genai_tk.utils.config_mngr import global_config, import_from_qualified
 from loguru import logger
 from rich.console import Console
-from rich.panel import Panel
-from rich.prompt import Confirm
-from rich.table import Table
-
-from genai_graph.core.graph_schema import GraphSchema
-from genai_graph.core.subgraph_factories import SubgraphFactory
 
 # Initialize Rich console (used by other commands)
 console = Console()
@@ -116,10 +110,16 @@ class EkgCommands(CliTopCommand):
                 get_backend_storage_path_from_config,
             )
             from genai_graph.core.graph_documents import add_documents_to_graph
+            from genai_graph.core.graph_schema import GraphSchema
+            from genai_graph.core.kg_context import KgContext
+            from genai_graph.core.subgraph_factories import SubgraphFactory
 
             # Get the effective config name using centralized logic
             cfg_name = _get_kg_config_name(config_name)
             kg_cfg = global_config().get_dict(f"kg_configs.{cfg_name}")
+
+            # Create context for collecting warnings
+            context = KgContext(config_name=cfg_name, config_dict=kg_cfg)
 
             # Build registry (which reads subgraphs from YAML) and backend
             backend = create_backend_from_config("default")
@@ -170,7 +170,9 @@ class EkgCommands(CliTopCommand):
                 try:
                     from genai_graph.core.graph_core import create_schema as _create_schema
 
-                    _create_schema(backend, schema.nodes, schema.relations)
+                    _create_schema(backend, schema.nodes, schema.relations, context)
+                    # Validate schema with context to collect warnings
+                    schema.validate_with_context(context)
                 except Exception:
                     pass
 
@@ -200,7 +202,7 @@ class EkgCommands(CliTopCommand):
 
                 if keys:
                     try:
-                        stats = add_documents_to_graph(keys, subgraph_impl, backend, schema)
+                        stats = add_documents_to_graph(keys, subgraph_impl, backend, schema, context)
                         logger.info(
                             f"Ingest stats: processed={stats.total_processed} failed={stats.total_failed} nodes={stats.nodes_created} rels={stats.relationships_created}"
                         )
@@ -215,6 +217,19 @@ class EkgCommands(CliTopCommand):
 
             logger.info(f"Processed: {total_docs_processed} ok, {total_docs_failed} failed. Path: {db_path}")
 
+            # Display collected warnings
+            warnings = context.get_warnings()
+            if warnings:
+                from rich.panel import Panel
+
+                console.print("\n")
+                console.print(Panel.fit("[bold yellow]⚠️  Warnings[/bold yellow]", border_style="yellow"))
+                for idx, warning in enumerate(warnings, 1):
+                    console.print(f"  [yellow]{idx}.[/yellow] {warning}")
+                console.print("")
+            else:
+                console.print("[green]✓ No warnings[/green]")
+
         @cli_app.command("delete")
         def delete_ekg(
             force: Annotated[bool, typer.Option("--force", "-f", help="Skip confirmation prompts")] = False,
@@ -224,6 +239,8 @@ class EkgCommands(CliTopCommand):
             Safely removes the shared database directory after confirmation.
             All opportunity data will be lost.
             """
+
+            from rich.prompt import Confirm
 
             from genai_graph.core.graph_backend import (
                 create_backend_from_config,
@@ -317,6 +334,8 @@ class EkgCommands(CliTopCommand):
             from genai_graph.core.text2cypher import query_kg
 
             try:
+                from rich.table import Table
+
                 from genai_graph.core.graph_registry import GraphRegistry
 
                 # Get the effective config name using centralized logic
@@ -372,7 +391,7 @@ class EkgCommands(CliTopCommand):
                     "-s",
                     help="Start an interactive chat session with the EKG agent",
                 ),
-            ] = False,
+            ] = True,
             llm: Annotated[
                 str | None,
                 typer.Option(
@@ -511,6 +530,9 @@ class EkgCommands(CliTopCommand):
             considered.
             """
 
+            from rich.panel import Panel
+            from rich.table import Table
+
             from genai_graph.core.graph_backend import (
                 create_backend_from_config,
             )
@@ -599,6 +621,9 @@ class EkgCommands(CliTopCommand):
             Shows comprehensive information about the EKG database including
             node/relationship counts, schema details, and semantic mapping.
             """
+
+            from rich.panel import Panel
+            from rich.table import Table
 
             from genai_graph.core.graph_backend import (
                 create_backend_from_config,
@@ -906,6 +931,9 @@ class EkgCommands(CliTopCommand):
             Creates an interactive D3.js visualization of the EKG database
             and saves it to the specified output directory.
             """
+            from rich.panel import Panel
+            from rich.table import Table
+
             from genai_graph.core.graph_backend import create_backend_from_config
             from genai_graph.core.graph_html import generate_html_visualization
 
@@ -1047,6 +1075,8 @@ class EkgCommands(CliTopCommand):
             designed to provide context to LLMs for generating correct Cypher queries.
             """
 
+            from rich.panel import Panel
+
             from genai_graph.core.graph_registry import GraphRegistry
 
             console.print(Panel("[bold cyan]Knowledge Graph Schema[/bold cyan]"))
@@ -1103,6 +1133,7 @@ class EkgCommands(CliTopCommand):
             )
             from genai_graph.core.graph_documents import add_documents_to_graph
             from genai_graph.core.graph_registry import get_subgraph
+            from genai_graph.core.kg_context import KgContext
 
             # Validate input
             if not keys:
@@ -1110,6 +1141,9 @@ class EkgCommands(CliTopCommand):
                 raise typer.Exit(1)
 
             logger.info(f"Adding {len(keys)} document(s) to EKG using subgraph '{subgraph}'")
+
+            # Create context for collecting warnings
+            context = KgContext(config_name=subgraph, config_dict={})
 
             # Get subgraph implementation
             try:
@@ -1125,7 +1159,7 @@ class EkgCommands(CliTopCommand):
             # Process documents
             try:
                 backend = create_backend_from_config("default")
-                stats = add_documents_to_graph(keys, subgraph_impl, backend, schema)
+                stats = add_documents_to_graph(keys, subgraph_impl, backend, schema, context)
 
                 # Log results
                 logger.info(
@@ -1142,6 +1176,17 @@ class EkgCommands(CliTopCommand):
                     logger.warning(f"{stats.total_failed} document(s) failed to process")
 
                 logger.success(f"Successfully added {stats.total_processed}/{len(keys)} document(s) to EKG")
+
+                # Display warnings if any
+                warnings = context.get_warnings()
+                if warnings:
+                    from rich.panel import Panel
+
+                    console.print("\n")
+                    console.print(Panel.fit("[bold yellow]⚠️  Warnings[/bold yellow]", border_style="yellow"))
+                    for idx, warning in enumerate(warnings, 1):
+                        console.print(f"  [yellow]{idx}.[/yellow] {warning}")
+                    console.print("")
 
             except Exception as e:
                 logger.exception(f"Unexpected error during document ingestion: {e}")

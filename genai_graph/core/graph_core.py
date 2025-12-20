@@ -10,6 +10,7 @@ from genai_graph.core.extra_fields_utils import apply_extra_fields
 from genai_graph.core.graph_backend import GraphBackend, create_in_memory_backend
 from genai_graph.core.graph_merge import merge_nodes_batch
 from genai_graph.core.graph_schema import GraphNode, GraphRelation, GraphSchema, _find_embedded_field_for_class
+from genai_graph.core.kg_context import KgContext
 
 
 class NodeRecord(NamedTuple):
@@ -151,7 +152,9 @@ def restart_database() -> GraphBackend:
 # Schema
 
 
-def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list[GraphRelation]) -> None:
+def create_schema(
+    backend: GraphBackend, nodes: list[GraphNode], relations: list[GraphRelation], context: KgContext | None = None
+) -> None:
     """Create node and relationship tables in the graph database (idempotent).
 
     Creates CREATE NODE TABLE IF NOT EXISTS and CREATE REL TABLE IF NOT EXISTS statements
@@ -160,9 +163,10 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
     Embedded nodes have their fields merged into parent tables.
 
     Args:
-        conn: Kuzu database connection
+        backend: GraphBackend instance
         nodes: List of GraphNode objects
         relations: List of GraphRelationConfig objects
+        context: Optional KgContext for collecting warnings
     """
     # TODO: Handle schema evolution by detecting new node or relationship types dynamically
     # and creating missing tables on the fly. This would allow adding new document types
@@ -192,16 +196,22 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
 
             # Validate that the embedded field exists on the parent model
             if field_name not in parent_model_fields:
-                logger.warning(f"Embedded field '{field_name}' is not defined on {parent_name}")
+                warning_msg = f"Embedded field '{field_name}' is not defined on {parent_name}"
+                logger.warning(warning_msg)
+                if context:
+                    context.add_warning(warning_msg)
                 continue
 
             # Ensure we can introspect the embedded class
             embedded_model_fields = getattr(embedded_class, "model_fields", None)
             if embedded_model_fields is None:
-                logger.warning(
+                warning_msg = (
                     f"Embedded class {embedded_class!r} for field '{field_name}' "
                     f"on {parent_name} has no model_fields; skipping STRUCT generation"
                 )
+                logger.warning(warning_msg)
+                if context:
+                    context.add_warning(warning_msg)
                 continue
 
             # Build STRUCT(field1 TYPE, field2 TYPE, ...) definition
@@ -211,10 +221,13 @@ def create_schema(backend: GraphBackend, nodes: list[GraphNode], relations: list
                 struct_parts.append(f"{emb_field_name} {kuzu_type}")
 
             if not struct_parts:
-                logger.warning(
+                warning_msg = (
                     f"Embedded class {embedded_class.__name__} for field "
                     f"'{field_name}' on {parent_name} has no fields; skipping"
                 )
+                logger.warning(warning_msg)
+                if context:
+                    context.add_warning(warning_msg)
                 continue
 
             struct_type = f"STRUCT({', '.join(struct_parts)})"
@@ -570,6 +583,7 @@ def load_graph_data(
     backend: GraphBackend,
     nodes_dict: dict[str, list[dict[str, Any]]],
     relationships: list[RelationshipRecord] | list[tuple[Any, ...]],
+    context: KgContext | None = None,
 ) -> None:
     """Load nodes and relationships into the graph database using MERGE semantics.
 
@@ -577,10 +591,10 @@ def load_graph_data(
     and updating _updated_at on matches. Relationships are created using MATCH + CREATE.
 
     Args:
-        conn: Kuzu database connection
+        backend: GraphBackend instance
         nodes_dict: Dictionary mapping node types to list of node data dicts
         relationships: List of relationship tuples
-        nodes: List of GraphNode objects
+        context: Optional KgContext for collecting warnings
     """
 
     # Merge nodes using MERGE statements (creates new or updates existing).
@@ -592,6 +606,7 @@ def load_graph_data(
         conn=backend,
         nodes_dict=nodes_dict,
         merge_on_field="_dedup_key",
+        context=context,
     )
 
     # Normalise relationships into RelationshipRecord instances so that
@@ -696,6 +711,7 @@ def create_graph(
     model: BaseModel,
     schema_config: GraphSchema,
     source_key: str | None = None,
+    context: KgContext | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[RelationshipRecord]]:
     """Create a knowledge graph from a Pydantic model in the configured graph database.
 
@@ -703,7 +719,8 @@ def create_graph(
         backend: Graph database backend
         model: Root instance to convert
         schema_config: GraphSchema object with node and relationship configurations
-        relations: Ignored (kept for compatibility)
+        source_key: Optional source key for provenance tracking
+        context: Optional KgContext for collecting warnings
 
     Returns:
         nodes_dict and relationships that were used to populate the graph
@@ -771,7 +788,7 @@ def create_graph(
     logger.debug("Extracting and loading data...")
     nodes_dict, relationships = extract_graph_data(model, schema.nodes, schema.relations, source_key=source_key)
 
-    load_graph_data(backend, nodes_dict, relationships)
+    load_graph_data(backend, nodes_dict, relationships, context)
 
     logger.debug("Graph creation complete")
     total_nodes = sum(len(node_list) for node_list in nodes_dict.values())

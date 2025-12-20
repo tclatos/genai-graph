@@ -1,32 +1,17 @@
-"""Generic graph node merging utilities for incremental knowledge graph construction.
+"""Merge nodes and relationships into the graph database.
 
-This module provides utilities to merge nodes into a Kuzu graph database using pure
-Cypher MERGE statements. It supports incremental addition of documents by merging
-nodes based on a configurable key field (default: _name) and preserving creation
-timestamps while updating modification timestamps.
-
-The merging strategy follows these principles:
-- Nodes are matched by a merge_on_field (default: _name)
-- On first creation, all properties plus _created_at and _updated_at are set
-- On subsequent matches, only _updated_at is refreshed
-- No APOC dependencies - uses pure Cypher only
+This module provides utilities for adding nodes and edges to the graph,
+handling automatic merging based on key fields (typically 'name').
 """
 
-from __future__ import annotations
-
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from genai_tk.core.prompts import dedent_ws
+from loguru import logger
 
 from genai_graph.core.graph_backend import GraphBackend
-
-if TYPE_CHECKING:
-    pass
-from loguru import logger
-from rich.console import Console
-
-console = Console()
+from genai_graph.core.kg_context import KgContext
 
 
 def _should_update_value(value: Any) -> bool:
@@ -153,6 +138,7 @@ def merge_node_in_graph(
     node_type: str,
     node_data: dict[str, Any],
     merge_on_field: str = "name",
+    context: KgContext | None = None,
 ) -> tuple[bool, str]:
     """Merge a single node into the graph database.
 
@@ -163,8 +149,8 @@ def merge_node_in_graph(
         conn: Graph database connection (kuzu.Connection or similar)
         node_type: Node label/type
         node_data: Node properties dictionary
-        schema_config: Optional schema configuration
         merge_on_field: Field to match nodes on
+        context: Optional KgContext for collecting warnings
 
     Returns:
         Tuple of (was_created: bool, node_id: str)
@@ -257,7 +243,10 @@ def merge_node_in_graph(
             df = result.get_as_df()
 
             if df.empty:
-                logger.warning(f"CREATE returned no ID for {node_type}")
+                warning_msg = f"CREATE returned no ID for {node_type}"
+                logger.warning(warning_msg)
+                if context:
+                    context.add_warning(warning_msg)
                 return True, ""
 
             node_id = str(df.iloc[0]["id"])
@@ -276,6 +265,7 @@ def merge_nodes_batch(
     conn: GraphBackend,
     nodes_dict: dict[str, list[dict[str, Any]]],
     merge_on_field: str = "_name",
+    context: KgContext | None = None,
 ) -> tuple[dict[str, dict[str, int]], dict[tuple[str, str], str]]:
     """Merge multiple nodes into the graph database in batch.
 
@@ -314,6 +304,7 @@ def merge_nodes_batch(
                 node_type=node_type,
                 node_data=node_data,
                 merge_on_field=merge_on_field,
+                context=context,
             )
 
             # Update statistics

@@ -1,7 +1,10 @@
 # Ideas around evolution of the Tk and Bleuprint
 
 ## Better warnings
- sometile warnings_list.append(), sometime logger.warning... 
+
+Improve warnings message during graph creation: sometime there's call to logger.warning(), other time there's call to  warnings_list.append(). The last approach is the right one, and should be generalized to all involved modules. 
+So collect warnigs along all the KG creation process, and display them nicely and the end in the top 'kg create' CLI command. Pass on object with these list of warnigs allog the process chain. Use it also to pass information that might be usefull, like the name of the KG configuration and associated dict. 
+
 
 ## Better HTML visualisation
 

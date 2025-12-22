@@ -52,7 +52,7 @@ KV_STORE_ID = "file"
 GRAPH_DB_CONFIG = "default"
 
 
-def _get_kg_config_name(config_name: str | None) -> str:
+def get_kg_config_name(config_name: str | None) -> str:
     """Get the KG config name to use, with proper fallback logic.
 
     Sets the config in global_config if needed, and returns the effective config name.
@@ -64,7 +64,7 @@ def _get_kg_config_name(config_name: str | None) -> str:
         The config name to use. Priority order:
         1. Explicitly provided config_name
         2. Value of 'default_kg_config' key from global config
-        3. Hardcoded fallback 'test1'
+        3. Hardcoded fallback 'default'
     """
     if config_name:
         # User explicitly provided a config, set it
@@ -79,7 +79,7 @@ def _get_kg_config_name(config_name: str | None) -> str:
         return default_from_config
 
     # Final fallback
-    global_config().set("kg_config", "test1")
+    global_config().set("kg_config", "default")
     return "test1"
 
 
@@ -115,7 +115,7 @@ class EkgCommands(CliTopCommand):
             from genai_graph.core.subgraph_factories import SubgraphFactory
 
             # Get the effective config name using centralized logic
-            cfg_name = _get_kg_config_name(config_name)
+            cfg_name = get_kg_config_name(config_name)
             kg_cfg = global_config().get_dict(f"kg_configs.{cfg_name}")
 
             # Create context for collecting warnings
@@ -339,7 +339,7 @@ class EkgCommands(CliTopCommand):
                 from genai_graph.core.graph_registry import GraphRegistry
 
                 # Get the effective config name using centralized logic
-                _get_kg_config_name(config_name)
+                get_kg_config_name(config_name)
 
                 # If no subgraphs are provided, use all registered ones
                 registry = GraphRegistry.get_instance()
@@ -633,7 +633,7 @@ class EkgCommands(CliTopCommand):
             from genai_graph.core.graph_schema import _find_embedded_field_for_class
 
             # Get the effective config name using centralized logic
-            _get_kg_config_name(config_name)
+            get_kg_config_name(config_name)
 
             # Create a fresh registry instance to ensure it loads with current config
             registry = GraphRegistry()
@@ -963,7 +963,7 @@ class EkgCommands(CliTopCommand):
                 from genai_graph.core.graph_registry import GraphRegistry
 
                 # Get the effective config name using centralized logic
-                _get_kg_config_name(config_name)
+                get_kg_config_name(config_name)
 
                 # Create a fresh registry instance
                 registry = GraphRegistry()
@@ -1083,7 +1083,7 @@ class EkgCommands(CliTopCommand):
 
             try:
                 # Get the effective config name using centralized logic
-                _get_kg_config_name(config_name)
+                get_kg_config_name(config_name)
 
                 # Create a fresh registry instance
                 registry = GraphRegistry()

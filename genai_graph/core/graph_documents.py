@@ -240,6 +240,7 @@ def add_documents_to_graph(
         except Exception as e:
             logger.error(f"Failed to process key {key}: {e}")
             import traceback
+
             logger.debug(traceback.format_exc())
             stats.total_failed += 1
             continue

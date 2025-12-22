@@ -826,7 +826,7 @@ class GraphSchema(BaseModel):
         # First add any warnings accumulated during schema construction (e.g., from path deduction)
         for warning_msg in self._warnings:
             context.add_warning(f"Schema: {warning_msg}")
-        
+
         # Then run coherence validation which may add more warnings
         self._validate_coherence(context=context)
 

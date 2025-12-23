@@ -12,13 +12,13 @@ import os
 from typing import Any
 
 import cocoindex
-import numpy as np
 from dotenv import load_dotenv
 from genai_tk.utils.config_mngr import global_config
-from numpy.typing import NDArray
 from pgvector.psycopg import register_vector
 from psycopg.sql import SQL, Identifier
 from psycopg_pool import ConnectionPool
+
+from .text_embedding_flow import get_text_embedding_flow, set_embedding_config, text_to_embedding
 
 # Global state for connection pooling
 _connection_pool: ConnectionPool | None = None
@@ -57,114 +57,6 @@ def setup_database(database_url: str) -> None:
     print("Database setup complete: pgvector extension enabled")
 
 
-# Module-level configuration for embedding
-_embedding_config = {
-    "api_type": "openai",
-    "model": "text-embedding-3-small",
-}
-
-
-def set_embedding_config(api_type: str = "openai", model: str = "text-embedding-3-small") -> None:
-    """Set the embedding configuration for the module."""
-    global _embedding_config
-    _embedding_config = {"api_type": api_type, "model": model}
-
-
-@cocoindex.transform_flow()
-def text_to_embedding(
-    text: cocoindex.DataSlice[str],
-) -> cocoindex.DataSlice[NDArray[np.float32]]:
-    """
-    Embed the text using configured model.
-    This is a shared logic between indexing and querying.
-
-    Args:
-        text: Text to embed
-
-    Returns:
-        Embedded vectors
-    """
-    # Map string api_type to enum
-    api_type = _embedding_config.get("api_type", "openai")
-    model = _embedding_config.get("model", "text-embedding-3-small")
-    api_type_enum = cocoindex.LlmApiType.OPENAI if api_type.lower() == "openai" else cocoindex.LlmApiType.OPENAI
-
-    return text.transform(
-        cocoindex.functions.EmbedText(
-            api_type=api_type_enum,
-            model=model,
-        )
-    )
-
-
-def create_text_embedding_flow(config: dict[str, Any]):
-    """
-    Create and configure a text embedding flow based on configuration.
-
-    Args:
-        config: Configuration dictionary with keys:
-            - source.path: Root path for document indexing
-            - source.included_patterns: List of file patterns to include
-            - chunking.chunk_size: Size of text chunks
-            - chunking.chunk_overlap: Overlap between chunks
-            - chunking.language: Language for chunking (e.g., 'markdown')
-            - embedding.api_type: API type for embedding
-            - embedding.model: Model name
-
-    Returns:
-        Configured FlowDef object
-    """
-
-    @cocoindex.flow_def(name="TextEmbedding")
-    def text_embedding_flow(flow_builder: cocoindex.FlowBuilder, data_scope: cocoindex.DataScope) -> None:
-        """
-        Define a flow that embeds text into a vector database.
-        """
-        # Extract configuration with defaults
-        source_path = config.get("source", {}).get("path", ".")
-        included_patterns = config.get("source", {}).get("included_patterns", ["*.md"])
-        chunk_size = config.get("chunking", {}).get("chunk_size", 2000)
-        chunk_overlap = config.get("chunking", {}).get("chunk_overlap", 500)
-        language = config.get("chunking", {}).get("language", "markdown")
-
-        data_scope["documents"] = flow_builder.add_source(
-            cocoindex.sources.LocalFile(path=source_path, included_patterns=included_patterns),
-        )
-
-        doc_embeddings = data_scope.add_collector()
-
-        with data_scope["documents"].row() as doc:
-            doc["chunks"] = doc["content"].transform(
-                cocoindex.functions.SplitRecursively(),
-                language=language,
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-            )
-
-            with doc["chunks"].row() as chunk:
-                chunk["embedding"] = text_to_embedding(chunk["text"])
-                doc_embeddings.collect(
-                    filename=doc["filename"],
-                    location=chunk["location"],
-                    text=chunk["text"],
-                    embedding=chunk["embedding"],
-                )
-
-        doc_embeddings.export(
-            "doc_embeddings",
-            cocoindex.targets.Postgres(),
-            primary_key_fields=["filename", "location"],
-            vector_indexes=[
-                cocoindex.VectorIndexDef(
-                    field_name="embedding",
-                    metric=cocoindex.VectorSimilarityMetric.COSINE_SIMILARITY,
-                )
-            ],
-        )
-
-    return text_embedding_flow
-
-
 def update_vector_store(config: dict[str, Any], database_url: str) -> dict[str, Any]:
     """
     Update the vector store with documents from the configured source.
@@ -185,8 +77,8 @@ def update_vector_store(config: dict[str, Any], database_url: str) -> dict[str, 
         model=config.get("embedding", {}).get("model", "text-embedding-3-small"),
     )
 
-    # Create the flow
-    flow = create_text_embedding_flow(config)
+    # Get the flow
+    flow = get_text_embedding_flow(config)
 
     # Setup and update the flow
     print("\nSetting up indexing flow...")
@@ -237,11 +129,13 @@ def search_vector_store(
         model=config.get("embedding", {}).get("model", "text-embedding-3-small"),
     )
 
-    # Create the flow to get table name
-    flow = create_text_embedding_flow(config)
+    # Get the flow to get table name
+    flow = get_text_embedding_flow(config)
 
     # Get the table name for the export target
     table_name = cocoindex.utils.get_target_default_name(flow, "doc_embeddings")
+    # CocoIndex creates tables with lowercase names, so we need to lowercase it
+    table_name = table_name.lower()
 
     # Evaluate the transform flow with the input query to get the embedding
     query_vector = text_to_embedding.eval(query)

@@ -1,5 +1,18 @@
 # Ideas around evolution of the Tk and Bleuprint
 
+# Better outcome
+
+We want to improve the organisation of the generated KG. To do so :
+- create one folder per KG configuration.  The folder root name should be taken from a key that you should add in config/ekg.yaml 
+- put in that folder :  
+    1/ the kuzu database file. Its path is currently set in file ovveride.yaml ( ${paths.data_root}/kuzu/ekg_database.db). Also update that file and related logic 
+    2/ the generated HTML (currently set as  base_dir / "exports"  in tasks.py)
+- also add the warnings generated when running the 'kg graph' command, and other outcomes of the command
+- update all commands in scratchpad/cocoindex/commands_ekg.py .   (Ncote that kg agent and kg cypher are still in a previous version)
+- test
+I suggest you create a file and a class to manage such outcomes.  Try to mutualize code and have someting clean and ease to maintain and upgrade.
+
+
 
 ## Better HTML visualisation
 

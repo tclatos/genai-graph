@@ -48,20 +48,41 @@ def create_kg_flow(
 
     if delete_first:
         logger.info("Deleting existing backend before KG creation")
-        delete_backend_task.submit()
+        delete_backend_task.submit("default", config_name)
 
     cfg_name, kg_cfg = resolve_config_task.submit(config_name).result()
 
     context = KgContext(config_name=cfg_name, config_dict=kg_cfg)
 
-    backend = initialize_backend_task.submit().result()
-    db_path = get_backend_storage_path_from_config("default")
+    # Initialize outcome manager and log start
+    from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
+
+    outcome_manager = get_kg_outcome_manager(cfg_name)
+    outcome_manager.log_outcome("create_kg", "started", "Starting KG creation flow")
+
+    backend = initialize_backend_task.submit("default", cfg_name).result()
+    db_path = get_backend_storage_path_from_config("default", cfg_name)
 
     bundles = load_factories_task.submit(kg_cfg, context).result()
     bundles = create_schema_task.submit(bundles, backend, context).result()
 
     stats = ingest_subgraphs_task.submit(bundles, backend, context).result()
-    warnings = summarize_warnings_task.submit(context).result()
+    warnings = summarize_warnings_task.submit(context, cfg_name).result()
+
+    # Log completion outcome
+    outcome_status = "warning" if warnings else "success"
+    outcome_manager.log_outcome(
+        "create_kg",
+        outcome_status,
+        f"KG creation completed with {stats.total_processed} docs processed",
+        details={
+            "processed": stats.total_processed,
+            "failed": stats.total_failed,
+            "nodes_created": stats.nodes_created,
+            "relationships_created": stats.relationships_created,
+            "warning_count": len(warnings),
+        },
+    )
 
     # Create a markdown artifact summarizing the run
     summary_lines: list[str] = [
@@ -99,6 +120,11 @@ def create_kg_flow(
     html_result = None
     if export_html:
         html_result = export_html_task.submit(cfg_name, backend).result()
+        outcome_manager.log_outcome(
+            "export_html",
+            "success",
+            f"HTML exported to {html_result.output_path}",
+        )
 
     return KgRunResult(
         config_name=cfg_name,

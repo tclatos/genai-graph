@@ -384,14 +384,16 @@ def create_in_memory_backend() -> GraphBackend:
     return backend
 
 
-def create_backend_from_config(config_key: str = "default") -> GraphBackend:
+def create_backend_from_config(config_key: str = "default", kg_config_name: str | None = None) -> GraphBackend:
     """Create a graph backend from YAML configuration.
 
     Reads configuration from global_config()["graph_db"][config_key] and creates
-    the appropriate backend with connection parameters.
+    the appropriate backend with connection parameters. If kg_config_name is provided,
+    uses the KG outcome manager to determine the database path.
 
     Args:
         config_key: Key in graph_db config section
+        kg_config_name: Optional KG configuration name for organized output folders
 
     Returns:
         Connected GraphBackend instance
@@ -410,7 +412,15 @@ def create_backend_from_config(config_key: str = "default") -> GraphBackend:
 
     if not backend_type:
         raise ValueError(f"Missing 'type' in graph_db config for '{config_key}'")
-    if not connection_path:
+
+    # Use KG outcome manager for path if kg_config_name is provided
+    if kg_config_name and backend_type.lower() == "kuzu":
+        from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
+
+        manager = get_kg_outcome_manager(kg_config_name)
+        connection_path = str(manager.db_path)
+        manager.ensure_directories()
+    elif not connection_path:
         raise ValueError(f"Missing 'path' in graph_db config for '{config_key}'")
 
     # Create backend instance
@@ -435,19 +445,28 @@ def create_backend_from_config(config_key: str = "default") -> GraphBackend:
     return backend
 
 
-def get_backend_storage_path_from_config(config_key: str = "default") -> Path:
+def get_backend_storage_path_from_config(config_key: str = "default", kg_config_name: str | None = None) -> Path:
     """Return the filesystem path used by the configured graph backend.
 
     This helper reads the same configuration used by create_backend_from_config
-    and returns the resolved ``path`` as a Path instance.
+    and returns the resolved ``path`` as a Path instance. If kg_config_name is provided,
+    uses the KG outcome manager to determine the path.
 
     Args:
         config_key: Key in the ``graph_db`` config section.
+        kg_config_name: Optional KG configuration name for organized output folders
 
     Returns:
         Path to the backend storage location.
     """
     from genai_tk.utils.config_mngr import global_config
+
+    # Use KG outcome manager if kg_config_name is provided
+    if kg_config_name:
+        from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
+
+        manager = get_kg_outcome_manager(kg_config_name)
+        return manager.db_path
 
     config = global_config()
     graph_db_config = config.get("graph_db", {})
@@ -463,18 +482,20 @@ def get_backend_storage_path_from_config(config_key: str = "default") -> Path:
     return Path(connection_path)
 
 
-def delete_backend_storage_from_config(config_key: str = "default") -> None:
+def delete_backend_storage_from_config(config_key: str = "default", kg_config_name: str | None = None) -> None:
     """Delete on-disk storage for the configured graph backend if it exists.
 
     This is primarily used by CLI commands (e.g. ``cli kg delete``) to drop the
-    entire knowledge graph database in a backend-agnostic way.
+    entire knowledge graph database in a backend-agnostic way. If kg_config_name is
+    provided, uses the KG outcome manager to determine the path.
 
     Args:
         config_key: Key in the ``graph_db`` config section.
+        kg_config_name: Optional KG configuration name for organized output folders
     """
     import shutil
 
-    db_path = get_backend_storage_path_from_config(config_key)
+    db_path = get_backend_storage_path_from_config(config_key, kg_config_name)
 
     if not db_path.exists():
         return

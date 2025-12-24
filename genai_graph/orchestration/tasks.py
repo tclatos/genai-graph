@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from genai_tk.utils.config_mngr import global_config, import_from_qualified
+from genai_tk.utils.config_mngr import import_from_qualified
 from loguru import logger
 from prefect import get_run_logger, task
 from pydantic import BaseModel
@@ -96,18 +96,22 @@ def resolve_config_task(config_name: str | None) -> tuple[str, dict[str, Any]]:
 
 
 @task
-def initialize_backend_task(config_key: str = "default") -> GraphBackend:
+def initialize_backend_task(config_key: str = "default", kg_config_name: str | None = None) -> GraphBackend:
     """Create and return the graph backend instance.
 
     The flow is expected to run with a single-process task runner so that the
     embedded Kuzu backend is never accessed concurrently from multiple
     processes.
+
+    Args:
+        config_key: Key in graph_db config section
+        kg_config_name: Optional KG configuration name for organized output folders
     """
 
     logger_pf = get_run_logger()
 
-    backend = create_backend_from_config(config_key)
-    db_path = get_backend_storage_path_from_config(config_key)
+    backend = create_backend_from_config(config_key, kg_config_name)
+    db_path = get_backend_storage_path_from_config(config_key, kg_config_name)
 
     logger_pf.info("Initialized backend '%s' at path '%s'", config_key, db_path)
     return backend
@@ -275,11 +279,16 @@ def ingest_subgraphs_task(
 
 
 @task
-def delete_backend_task(config_key: str = "default") -> None:
-    """Delete the knowledge graph backend storage for a given config key."""
+def delete_backend_task(config_key: str = "default", kg_config_name: str | None = None) -> None:
+    """Delete the knowledge graph backend storage for a given config key.
+
+    Args:
+        config_key: Key in graph_db config section
+        kg_config_name: Optional KG configuration name for organized output folders
+    """
 
     logger_pf = get_run_logger()
-    path = get_backend_storage_path_from_config(config_key)
+    path = get_backend_storage_path_from_config(config_key, kg_config_name)
 
     if path.exists():
         logger_pf.info(
@@ -287,7 +296,7 @@ def delete_backend_task(config_key: str = "default") -> None:
             path,
             config_key,
         )
-        delete_backend_storage_from_config(config_key)
+        delete_backend_storage_from_config(config_key, kg_config_name)
     else:
         logger_pf.info(
             "No backend storage found at '%s' for config '%s'",
@@ -302,20 +311,27 @@ def export_html_task(
     backend: GraphBackend,
     output_dir: Path | None = None,
 ) -> HtmlExportResult:
-    """Export an HTML visualization of the current KG and return its path."""
+    """Export an HTML visualization of the current KG and return its path.
+
+    Args:
+        config_name: Name of the KG configuration
+        backend: The graph backend to export from
+        output_dir: Optional custom output directory (if None, uses KG outcome manager)
+    """
 
     logger_pf = get_run_logger()
 
     if output_dir is None:
-        # Default: use a subdirectory under the configured ekg data path
-        cfg = global_config()
-        ekg_data = cfg.get("paths.ekg_data") or cfg.get("paths.data_root")
-        base_dir = Path(ekg_data or ".")
-        output_dir = base_dir / "exports"
+        # Use KG outcome manager for organized output
+        from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+        manager = get_kg_outcome_manager(config_name)
+        destination = manager.get_html_export_path()
+    else:
+        # Custom output directory
+        output_dir.mkdir(parents=True, exist_ok=True)
+        destination = output_dir / f"{config_name}_graph.html"
 
-    destination = output_dir / f"{config_name}_graph.html"
     generate_html(backend, destination_file_path=str(destination))
     logger_pf.info("Exported KG HTML visualization to '%s'", destination)
 
@@ -323,16 +339,30 @@ def export_html_task(
 
 
 @task
-def summarize_warnings_task(context: KgContext) -> list[str]:
-    """Return collected warnings from the KG context."""
+def summarize_warnings_task(context: KgContext, config_name: str | None = None) -> list[str]:
+    """Return collected warnings from the KG context and log them if config_name provided.
+
+    Args:
+        context: The KG context containing warnings
+        config_name: Optional KG configuration name to log warnings to file
+    """
 
     logger_pf = get_run_logger()
     warnings = context.get_warnings()
+
     if warnings:
         logger_pf.warning(
             "KG creation completed with %d warning(s)",
             len(warnings),
         )
+
+        # Log warnings to file if config_name is provided
+        if config_name:
+            from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
+
+            manager = get_kg_outcome_manager(config_name)
+            manager.log_warnings(warnings)
     else:
         logger_pf.info("KG creation completed with no warnings")
+
     return warnings

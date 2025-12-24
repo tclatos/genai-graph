@@ -50,7 +50,7 @@ ekg_local:
   graph_db: 
     default:
       type: kuzu
-      path: ${paths.data_root}/kuzu/ekg_database.db
+      path: ${paths.data_root}/kg_outputs/default/default/kuzu/ekg_database.db
     neo4j_local:
       type: neo4j
       path: neo4j://localhost

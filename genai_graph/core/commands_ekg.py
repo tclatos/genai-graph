@@ -205,9 +205,12 @@ class EkgCommands(CliTopCommand):
                 )
             )
 
+            # Get KG config name
+            kg_config_name = _get_kg_config_name(config_name)
+
             # Connect to backend and gather DB-level details
             try:
-                backend = create_backend_from_config(GRAPH_DB_CONFIG)
+                backend = create_backend_from_config(GRAPH_DB_CONFIG, kg_config_name)
             except Exception as exc:  # pragma: no cover - defensive
                 import traceback as tb
 
@@ -216,7 +219,7 @@ class EkgCommands(CliTopCommand):
                 console.print(f"[red]❌ Unable to connect to EKG backend: {exc}[/red]")
                 raise typer.Exit(1) from exc
 
-            db_path = get_backend_storage_path_from_config(GRAPH_DB_CONFIG)
+            db_path = get_backend_storage_path_from_config(GRAPH_DB_CONFIG, kg_config_name)
             cfg = global_config()
             active_cfg = cfg.get("kg_config", default="(not set)")
             default_kg = cfg.get("default_kg_config", default="(not set)")
@@ -235,6 +238,44 @@ class EkgCommands(CliTopCommand):
 
             console.print(info_table)
             console.print("")
+
+            # Show KG outcome manager info
+            from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
+
+            outcome_manager = get_kg_outcome_manager(kg_config_name)
+            outcome_info = outcome_manager.get_info()
+
+            if outcome_info.get("exists"):
+                outcome_table = Table(title="KG Outputs & Outcomes")
+                outcome_table.add_column("Category", style="cyan", no_wrap=True)
+                outcome_table.add_column("Details", style="green")
+
+                outcome_table.add_row("Base Path", outcome_info["base_path"])
+
+                if outcome_info.get("database"):
+                    db_info = outcome_info["database"]
+                    outcome_table.add_row(
+                        "Database Size",
+                        f"{db_info['size_mb']:.2f} MB",
+                    )
+
+                if outcome_info.get("html_exports"):
+                    html_info = outcome_info["html_exports"]
+                    outcome_table.add_row(
+                        "HTML Exports",
+                        f"{html_info['count']} file(s): {', '.join(html_info['files'])}",
+                    )
+
+                if outcome_info.get("outcomes"):
+                    out_info = outcome_info["outcomes"]
+                    outcome_table.add_row("Logged Outcomes", f"{out_info['count']} events")
+
+                if outcome_info.get("warnings"):
+                    warn_info = outcome_info["warnings"]
+                    outcome_table.add_row("Logged Warnings", f"{warn_info['count']} warnings")
+
+                console.print(outcome_table)
+                console.print("")
 
             # Subgraph factories
             console.print("[bold cyan]Subgraph Factories[/bold cyan]")
@@ -296,9 +337,7 @@ class EkgCommands(CliTopCommand):
 
                     for node_type in sorted(node_tables):
                         try:
-                            result_df = backend.execute(
-                                f"MATCH (n:{node_type}) RETURN count(n) as count"
-                            ).get_as_df()
+                            result_df = backend.execute(f"MATCH (n:{node_type}) RETURN count(n) as count").get_as_df()
                             count = result_df.iloc[0]["count"]
                             node_stats_table.add_row(node_type, str(count))
                         except Exception as exc:  # pragma: no cover - defensive
@@ -382,9 +421,7 @@ class EkgCommands(CliTopCommand):
                 meaning = relation.description or ""
 
                 if relation.field_paths:
-                    paths_display = "\n".join(
-                        f"{fp or '(root)'} → {tp or '(root)'}" for fp, tp in relation.field_paths
-                    )
+                    paths_display = "\n".join(f"{fp or '(root)'} → {tp or '(root)'}" for fp, tp in relation.field_paths)
                 else:
                     paths_display = "[dim](none)[/dim]"
 
@@ -486,5 +523,299 @@ class EkgCommands(CliTopCommand):
 
         # TODO: other commands (delete, export-html, query) can be
         # migrated to Prefect-based flows in a similar fashion if needed.
+        @cli_app.command("agent")
+        def agent(
+            input: Annotated[
+                str | None,
+                typer.Option(
+                    "--input",
+                    "-i",
+                    help="Input query or '-' to read from stdin",
+                ),
+            ] = None,
+            chat: Annotated[
+                bool,
+                typer.Option(
+                    "--chat",
+                    "-s",
+                    help="Start an interactive chat session with the EKG agent",
+                ),
+            ] = True,
+            llm: Annotated[
+                str | None,
+                typer.Option(
+                    "--llm",
+                    "-m",
+                    help="LLM identifier (ID or tag) to use; default comes from configuration",
+                ),
+            ] = None,
+            mcp: Annotated[
+                list[str],
+                typer.Option(
+                    "--mcp",
+                    help="MCP server names to connect to (e.g. playwright, filesystem, ..)",
+                ),
+            ] = [],
+            subgraphs: Annotated[
+                list[str],
+                typer.Option(
+                    "--subgraph",
+                    "-g",
+                    help="Subgraph(s) whose combined schema is used to instruct the agent (default: all)",
+                ),
+            ] = [],
+            debug: Annotated[
+                bool,
+                typer.Option(
+                    "--debug",
+                    "-d",
+                    help="Display generated Cypher queries before execution",
+                ),
+            ] = False,
+            lc_verbose: Annotated[
+                bool,
+                typer.Option(
+                    "--verbose",
+                    "-v",
+                    help="Enable LangChain verbose mode",
+                ),
+            ] = False,
+            lc_debug: Annotated[
+                bool,
+                typer.Option(
+                    "--debug-lc",
+                    help="Enable LangChain debug mode",
+                ),
+            ] = False,
+        ) -> None:
+            """Run an EKG-aware LangChain ReAct agent over the knowledge graph.
 
-        
+            The agent answers questions about enterprise data and can call a
+            Cypher execution tool to query the graph when needed.
+
+            Examples:
+                uv run cli kg agent -i "List the names of all competitors"
+                uv run cli kg agent --chat
+                uv run cli kg agent --mcp filesystem -i "List recent EKG exports on disk"
+            """
+            import asyncio
+            import sys
+
+            from genai_tk.cli.langchain_agent import (
+                run_langchain_agent_direct,
+                run_langchain_agent_shell,
+            )
+            from genai_tk.extra.agents.langchain_setup import setup_langchain
+
+            from genai_graph.core.ekg_agent import (
+                build_ekg_agent_system_prompt,
+                create_ekg_cypher_tool,
+            )
+            from genai_graph.core.graph_registry import GraphRegistry
+
+            registry = GraphRegistry.get_instance()
+            selected_subgraphs = subgraphs or registry.listsubgraphs()
+
+            if not selected_subgraphs:
+                console.print("[red]❌ No subgraphs are currently registered.[/red]")
+                raise typer.Exit(1)
+
+            setup_langchain(llm, lc_debug, lc_verbose)
+
+            system_prompt = build_ekg_agent_system_prompt(selected_subgraphs)
+            ekg_tool = create_ekg_cypher_tool(
+                backend_config=GRAPH_DB_CONFIG,
+                console=console,
+                debug=debug,
+            )
+
+            if chat:
+                # Interactive chat mode using the shared LangChain shell
+                asyncio.run(
+                    run_langchain_agent_shell(
+                        llm,
+                        tools=[ekg_tool],
+                        mcp_server_names=mcp,
+                        system_prompt=system_prompt,
+                    )
+                )
+            else:
+                # Handle input from --input parameter or stdin
+                if not input and not sys.stdin.isatty():
+                    input = sys.stdin.read()
+                if not input or len(input.strip()) < 3:
+                    console.print("[red]❌ Input parameter or something in stdin is required[/red]")
+                    raise typer.Exit(1)
+
+                # Reuse the common ReAct helper from genai-tk
+                asyncio.run(
+                    run_langchain_agent_direct(
+                        input.strip(),
+                        llm_id=llm,
+                        mcp_server_names=mcp,
+                        additional_tools=[ekg_tool],
+                        pre_prompt=system_prompt,
+                    )
+                )
+
+        @cli_app.command("cypher")
+        def cypher(
+            query: str = typer.Argument(help="Cypher query to execute"),
+            subgraphs: Annotated[
+                list[str],
+                typer.Option(
+                    "--subgraph",
+                    "-g",
+                    help="Subgraph(s) whose combined context is being queried (default: all)",
+                ),
+            ] = [],
+        ) -> None:
+            """Execute Cypher queries on the EKG database.
+
+            The selected subgraphs are currently used for informational
+            purposes only (the Cypher query is executed as-is), but the
+            default follows the same semantics as other commands: when
+            ``--subgraph`` is omitted, all registered subgraphs are
+            considered.
+            """
+
+            from rich.panel import Panel
+            from rich.table import Table
+
+            from genai_graph.core.graph_backend import (
+                create_backend_from_config,
+            )
+            from genai_graph.core.graph_registry import GraphRegistry
+
+            # Get KG config name
+            kg_config_name = _get_kg_config_name(config_name)
+
+            registry = GraphRegistry.get_instance()
+            selected_subgraphs = subgraphs or registry.listsubgraphs()
+            subgraph_label = ", ".join(selected_subgraphs) if selected_subgraphs else "<none>"
+
+            console.print(
+                Panel(f"[bold cyan]Querying EKG Database[/bold cyan]\n[dim]Subgraphs: {subgraph_label}[/dim]")
+            )
+
+            # Get database connection
+            backend = create_backend_from_config(GRAPH_DB_CONFIG, kg_config_name)
+            if not backend:
+                console.print("[red]❌ No EKG database found[/red]")
+                console.print("[yellow]💡 Add data first: [bold]cli kg add --key <data_key>[/bold][/yellow]")
+                raise typer.Exit(1)
+
+            def execute_query(cypher_query: str) -> None:
+                """Execute a single Cypher query and display results."""
+                if not cypher_query.strip():
+                    return
+
+                try:
+                    console.print(f"[dim]Executing: {cypher_query}[/dim]")
+                    result = backend.execute(cypher_query)
+                    df = result.get_as_df()
+
+                    if df.empty:
+                        console.print("[yellow]Query returned no results[/yellow]")
+                        return
+
+                    # Create a Rich table for results
+                    table = Table(title=f"Query Results ({len(df)} rows)")
+
+                    # Add columns
+                    for col in df.columns:
+                        table.add_column(str(col), style="cyan")
+
+                    # Add rows (limit to first 20 for readability)
+                    max_rows = 20
+                    for i, (_, row) in enumerate(df.iterrows()):
+                        if i >= max_rows:
+                            table.add_row(*["..." for _ in df.columns])
+                            break
+                        table.add_row(*[str(val) for val in row])
+
+                    console.print(table)
+
+                    if len(df) > max_rows:
+                        console.print(f"[dim]Showing first {max_rows} of {len(df)} results[/dim]")
+
+                except Exception as e:
+                    import traceback as tb
+
+                    console.print(f"[red]❌ Query error: {e}[/red]")
+                    console.print("[red]" + tb.format_exc() + "[/red]")
+
+            # Execute single query if provided
+            if query:
+                execute_query(query)
+                return
+
+        @cli_app.command("query")
+        def query_ekg(
+            query: str = typer.Argument(help="query to execute"),
+            config_name: Annotated[
+                str | None,
+                typer.Option(
+                    "--config",
+                    help="Name of the KG config to use from config/ekg.yaml (default: value of key 'default_kg_config')",
+                ),
+            ] = None,
+            llm: Annotated[
+                str | None,
+                typer.Option(help="Name or tag of the LLM to use by BAML"),
+            ] = None,
+            subgraphs: Annotated[
+                list[str],
+                typer.Option(
+                    "--subgraph",
+                    "-g",
+                    help="Subgraph(s) whose combined schema is used for text-to-Cypher (default: all)",
+                ),
+            ] = [],
+        ) -> None:
+            """Execute queries in natural language (Text-2-Cypher) on the EKG database.
+
+            ex:  List the names of all competitors for opportunities created after January 1, 2012."""
+
+            from genai_graph.core.text2cypher import query_kg
+
+            try:
+                from rich.table import Table
+
+                from genai_graph.core.graph_registry import GraphRegistry
+
+                # Get the effective config name using centralized logic
+                get_kg_config_name(config_name)
+
+                # If no subgraphs are provided, use all registered ones
+                registry = GraphRegistry.get_instance()
+                selected_subgraphs = subgraphs or registry.listsubgraphs()
+
+                df = query_kg(query, subgraphs=selected_subgraphs, llm_id=llm)
+
+                if df.empty:
+                    console.print("[yellow]Query returned no results[/yellow]")
+                    return
+
+                # Create a Rich table for results
+                table = Table(title="Query Results")
+                for col in df.columns:
+                    table.add_column(str(col), style="cyan")
+                MAX_ROWS = 20
+                for i, (_, row) in enumerate(df.iterrows()):
+                    if i >= MAX_ROWS:
+                        table.add_row(*["..." for _ in df.columns])
+                        break
+                    table.add_row(*[str(val) for val in row])
+                console.print(table)
+
+                if len(df) > MAX_ROWS:
+                    console.print(f"[dim]Showing first {MAX_ROWS} of {len(df)} results[/dim]")
+
+            except Exception as e:
+                import traceback as tb
+
+                logger.error(f"Failed to process query: {e}")
+                console.print(f"[red]❌ Query error: {e}[/red]")
+                console.print("[red]" + tb.format_exc() + "[/red]")
+                return

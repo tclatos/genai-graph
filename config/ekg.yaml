@@ -1,6 +1,5 @@
 
 default_kg_config: ${oc.env:KG_CONFIG,db_only}
-
 schemas_root: genai_graph.ekg.schema
 
 kg_configs:
@@ -60,42 +59,3 @@ kg_configs:
     agent:
       mcp_servers:
         - filesystem
-
-# ETL configurations for vector store and document processing
-etl_configs:
-  default:
-    # CocoIndex vector store configuration
-    cocoindex:
-      # Database URL for PostgreSQL with pgvector
-      database_url: ${paths.postgres}
-      
-      # Source files configuration
-      source:
-        # Root path for document indexing
-        path: ${oc.env:HOME}/prj/genai-tk
-        # File patterns to include
-        included_patterns:
-          - "*.md"
-          - "docs/*.md"
-        # File patterns to exclude
-        excluded_patterns:
-          - ".venv/**"
-          - ".git/**"
-          - "**/__pycache__/**"
-          - "**/node_modules/**"
-      
-      # Text processing parameters
-      chunking:
-        chunk_size: 2000
-        chunk_overlap: 500
-        language: markdown
-      
-      # Embedding model configuration
-      embedding:
-        api_type: openai  # or other supported types
-        model: text-embedding-3-small
-      
-      # Query configuration
-      search:
-        top_k: 5
-        similarity_metric: cosine   

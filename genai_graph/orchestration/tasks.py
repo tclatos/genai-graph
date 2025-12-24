@@ -13,9 +13,10 @@ from typing import Any
 from genai_tk.utils.config_mngr import global_config, import_from_qualified
 from loguru import logger
 from prefect import get_run_logger, task
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from genai_graph.core.graph_backend import (
+    GraphBackend,
     create_backend_from_config,
     delete_backend_storage_from_config,
     get_backend_storage_path_from_config,
@@ -23,16 +24,9 @@ from genai_graph.core.graph_backend import (
 from genai_graph.core.graph_core import create_schema as core_create_schema
 from genai_graph.core.graph_documents import DocumentStats, add_documents_to_graph
 from genai_graph.core.graph_html import generate_html
+from genai_graph.core.graph_schema import GraphSchema
 from genai_graph.core.kg_context import KgContext
 from genai_graph.core.subgraph_factories import SubgraphFactory, TableBackedSubgraphFactory
-
-
-class BackendHandle(BaseModel):
-    """Lightweight handle for a graph backend and its storage path."""
-
-    config_key: str = Field(default="default")
-    db_path: Path
-    backend: Any
 
 
 class SubgraphBundle(BaseModel):
@@ -41,7 +35,7 @@ class SubgraphBundle(BaseModel):
     config: dict[str, Any]
     factory: SubgraphFactory
     # Schema type is kept as Any to avoid circular imports in type checkers
-    schema_obj: Any | None = None
+    schema_obj: GraphSchema | None = None
 
 
 class HtmlExportResult(BaseModel):
@@ -55,7 +49,7 @@ class KgRunResult(BaseModel):
     """Aggregated result of a KG creation run."""
 
     config_name: str
-    backend: BackendHandle
+    db_path: Path
     stats: DocumentStats
     warnings: list[str]
     html_export: HtmlExportResult | None = None
@@ -102,10 +96,10 @@ def resolve_config_task(config_name: str | None) -> tuple[str, dict[str, Any]]:
 
 
 @task
-def initialize_backend_task(config_key: str = "default") -> BackendHandle:
-    """Create the graph backend and return its handle.
+def initialize_backend_task(config_key: str = "default") -> GraphBackend:
+    """Create and return the graph backend instance.
 
-    The flow is expected to run with a sequential task runner so that the
+    The flow is expected to run with a single-process task runner so that the
     embedded Kuzu backend is never accessed concurrently from multiple
     processes.
     """
@@ -116,7 +110,7 @@ def initialize_backend_task(config_key: str = "default") -> BackendHandle:
     db_path = get_backend_storage_path_from_config(config_key)
 
     logger_pf.info("Initialized backend '%s' at path '%s'", config_key, db_path)
-    return BackendHandle(config_key=config_key, db_path=db_path, backend=backend)
+    return backend
 
 
 @task
@@ -164,7 +158,11 @@ def load_factories_task(kg_cfg: dict[str, Any], context: KgContext) -> list[Subg
 
 
 @task
-def create_schema_task(bundles: list[SubgraphBundle], backend: Any, context: KgContext) -> list[SubgraphBundle]:
+def create_schema_task(
+    bundles: list[SubgraphBundle],
+    backend: GraphBackend,
+    context: KgContext,
+) -> list[SubgraphBundle]:
     """Create graph schema for all loaded subgraphs (Pass 1)."""
 
     logger_pf = get_run_logger()
@@ -197,7 +195,7 @@ def create_schema_task(bundles: list[SubgraphBundle], backend: Any, context: KgC
 @task
 def ingest_subgraphs_task(
     bundles: list[SubgraphBundle],
-    backend: Any,
+    backend: GraphBackend,
     context: KgContext,
 ) -> DocumentStats:
     """Ingest documents for all configured subgraphs (Pass 2)."""
@@ -242,6 +240,7 @@ def ingest_subgraphs_task(
             continue
 
         try:
+            assert schema is not None, "Schema must be created before ingestion"
             stats = add_documents_to_graph(keys, subgraph_impl, backend, schema, context)
             logger_pf.info(
                 "Ingest stats for %s: processed=%d failed=%d nodes=%d rels=%d",
@@ -298,7 +297,11 @@ def delete_backend_task(config_key: str = "default") -> None:
 
 
 @task
-def export_html_task(config_name: str, backend: Any, output_dir: Path | None = None) -> HtmlExportResult:
+def export_html_task(
+    config_name: str,
+    backend: GraphBackend,
+    output_dir: Path | None = None,
+) -> HtmlExportResult:
     """Export an HTML visualization of the current KG and return its path."""
 
     logger_pf = get_run_logger()

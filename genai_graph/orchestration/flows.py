@@ -6,6 +6,7 @@ from prefect import flow, get_run_logger
 from prefect.artifacts import create_markdown_artifact
 from prefect.task_runners import ThreadPoolTaskRunner
 
+from genai_graph.core.graph_backend import get_backend_storage_path_from_config
 from genai_graph.core.kg_context import KgContext
 from genai_graph.orchestration.tasks import (
     KgRunResult,
@@ -19,11 +20,13 @@ from genai_graph.orchestration.tasks import (
     summarize_warnings_task,
 )
 
-
 # Kuzu is an embedded database; we must avoid multi-process execution.
 # A single-worker thread pool keeps all access in one process while still
 # going through Prefect's task infrastructure.
-@flow(name="create_kg_flow", task_runner=ThreadPoolTaskRunner(max_workers=1))
+# TODO : Revisit !!
+
+
+@flow(name="create_kg_flow", task_runner=ThreadPoolTaskRunner(max_workers=1))  # type: ignore[call-overload]
 def create_kg_flow(
     config_name: str | None = None,
     delete_first: bool = False,
@@ -51,12 +54,13 @@ def create_kg_flow(
 
     context = KgContext(config_name=cfg_name, config_dict=kg_cfg)
 
-    backend_handle = initialize_backend_task.submit().result()
+    backend = initialize_backend_task.submit().result()
+    db_path = get_backend_storage_path_from_config("default")
 
     bundles = load_factories_task.submit(kg_cfg, context).result()
-    bundles = create_schema_task.submit(bundles, backend_handle.backend, context).result()  # type: ignore[name-defined]
+    bundles = create_schema_task.submit(bundles, backend, context).result()
 
-    stats = ingest_subgraphs_task.submit(bundles, backend_handle.backend, context).result()
+    stats = ingest_subgraphs_task.submit(bundles, backend, context).result()
     warnings = summarize_warnings_task.submit(context).result()
 
     # Create a markdown artifact summarizing the run
@@ -64,7 +68,7 @@ def create_kg_flow(
         "# KG Creation Summary",
         "",
         f"**Config name:** `{cfg_name}`",
-        f"**DB path:** `{backend_handle.db_path}`",
+        f"**DB path:** `{db_path}`",
         "",
         "## Document statistics",
         f"- Processed: {stats.total_processed}",
@@ -94,11 +98,11 @@ def create_kg_flow(
 
     html_result = None
     if export_html:
-        html_result = export_html_task.submit(cfg_name, backend_handle.backend).result()
+        html_result = export_html_task.submit(cfg_name, backend).result()
 
     return KgRunResult(
         config_name=cfg_name,
-        backend=backend_handle,
+        db_path=db_path,
         stats=stats,
         warnings=warnings,
         html_export=html_result,

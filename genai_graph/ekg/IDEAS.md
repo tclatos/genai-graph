@@ -23,11 +23,6 @@
 - Use LangChain Midlewares to print tool calls in Streamlit (like in CLI)
 
 
-# UI for Graph Query
-Create a Streamlit page to  visualize the KG, and run queries on it (either in natural language, or in Cypher).
-Look at CLI commmands in /home/tcl/prj/genai-graph/genai_graph/core/commands_ekg.py (query_ekg, cypher, export_html).
-Vizualize HTML as in /home/tcl/prj/genai-blueprint/genai_blueprint/webapp/pages/demos/cognee_KG.py
-
 # Doc  Manager
 Create a repository "doc_manager" with files to manage docs (import, export, index, ...).
 The backend is a relational database, handled by SQLAlchemy .

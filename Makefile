@@ -91,7 +91,7 @@ check: fmt lint test ## Run format, lint, and test sequentially
 ##############################
 ##  GenAI Blueprint related commands
 ##############################
-.PHONY: fast_api langserve webapp 
+.PHONY: fast_api langserve webapp prefect-server prefect-server-bg prefect-server-stop 
 fast-api: ## langsLauch FastAPI server localy
 	uvicorn $(FASTAPI_ENTRY_POINT) --reload
 
@@ -100,6 +100,34 @@ langserve: ## Lauch langserve app
 
 webapp: ## Launch Streamlit app
 	PYTHONPATH=$(DEV_PYTHONPATH) uv run streamlit run "$(STREAMLIT_ENTRY_POINT)"
+
+prefect-server: ## Start Prefect server (opens in VS Code terminal or background)
+	@echo "Starting Prefect server..."
+	@prefect config set PREFECT_API_URL=http://127.0.0.1:4200/api
+	@if command -v code >/dev/null 2>&1; then \
+		echo "Opening new VS Code terminal for Prefect server..."; \
+		code -r . && sleep 1; \
+		echo "Please run this command in the new terminal: cd ~/prj/genai-graph && prefect server start"; \
+		echo "Or use: make prefect-server-bg to start in background"; \
+	else \
+		echo "Starting Prefect server in background..."; \
+		cd ~/prj/genai-graph && nohup prefect server start > prefect-server.log 2>&1 & \
+		echo "Prefect server started in background. PID: $$!"; \
+		echo "Check prefect-server.log for output"; \
+		echo "To stop: pkill -f 'prefect server start'"; \
+	fi
+
+prefect-server-bg: ## Start Prefect server in background
+	@echo "Starting Prefect server in background..."
+	@prefect config set PREFECT_API_URL=http://127.0.0.1:4200/api
+	@cd ~/prj/genai-graph && nohup prefect server start > prefect-server.log 2>&1 & \
+	echo "Prefect server started. PID: $$!"; \
+	echo "Logs: tail -f prefect-server.log"; \
+	echo "Stop: pkill -f 'prefect server start'"
+
+prefect-server-stop: ## Stop Prefect server
+	@echo "Stopping Prefect server..."
+	@pkill -f 'prefect server start' && echo "Prefect server stopped." || echo "No Prefect server process found."
 
 
 ##############################

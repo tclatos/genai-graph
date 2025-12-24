@@ -22,15 +22,14 @@ dependencies = [
     "beartype>=0.21.0",         # Run time type checking
     "baml-py>=0.209.0",
     "langchain-classic>=1.0.0",
-    "psycopg2-binary>=2.9.11",
     # "gpt-researcher>=0.13.3",
     "baml-cli>=0.1.0",
     "pandas>=2.3.3",
     "langchain-litellm>=0.3.2",
     "case-converter>=1.2.0",
-    "cocoindex>=0.3.19",
-    "pgvector>=0.4.2",
+   # "pgvector>=0.4.2",
     "psycopg[binary, pool]>=3.3.2",
+    "prefect>=3.6.7",
 ]
 
 [project.urls]

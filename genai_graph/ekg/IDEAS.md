@@ -1,40 +1,5 @@
 # Ideas around evolution of the Tk and Bleuprint
 
-## cocoindex
-
-Make genai_graph/etl/cocoindex_start.py   compatible with our CLI system :  complete genai_graph/core/commands_etl.py so the command 'etl update'  update the vector store with the provided content, and 'etl query' do the search. 
-Refactor cocoindex_start.py with focus on reusability. 
-
-----
-
-I want to strengthen the injection pipeline to create a KG, and make it more generic and extendable.
-To do so, I want you to use the 'cocoindex' solution  to develop a workflow that is equivalet to 
-current commands: 'export KG_CONFIG="test1_with_db"; cli kg delete -f ; cli kg create ; cli kg export-html' 
-
-ie, a workflow that reads a configuration, create or update a KG and create extra files such as HTML exports.
-
-Keep the old commands and configuration running while we are not confidznt with cocoindex, but mark them as obsolte to ease
-their removal later.
-
-Update the YAML configuration (create new) to fit better to cocoindex model  (cocoindex.sources.LocalFile).  Replace the Make other changes if needed.  
-
-Create the relevant cocoindex sources, flows etc (using annotation), by taking pieces of code from current CLI commmands.
-You don't need to provide compatibility, and you can remove or comments these commands.
-The name of the main workflow is the name of the selected configuration. 
-
-Create a new command group 'etl' that will replace partly the commands in 'kg".  The first command to implement could be 'etc update config_name", that call  cocoindex updating feature ("one-time update), but you can add more. 
-Provide a cocoindex way to display generated warnings. 
-
-Don't hesitate to refactor existing code if needed.
-Put all new source code in the 'etl' directory.
-
-Cocoindex documentation can be accessed using Context7 or browsing the doc: https://cocoindex.io/docs/getting_started/quickstart 
-
-The examples /home/tcl/prj/genai-graph/genai_graph/etl/cocoindex_start.py  works, so you can take it as basis to access the required Postrgres database, seti
-
-
-
-
 
 ## Better HTML visualisation
 

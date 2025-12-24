@@ -18,7 +18,7 @@ from pgvector.psycopg import register_vector
 from psycopg.sql import SQL, Identifier
 from psycopg_pool import ConnectionPool
 
-from .text_embedding_flow import get_text_embedding_flow, set_embedding_config, text_to_embedding
+from .text_embedding_flow import configure_and_get_flow, text_to_embedding
 
 # Global state for connection pooling
 _connection_pool: ConnectionPool | None = None
@@ -71,14 +71,8 @@ def update_vector_store(config: dict[str, Any], database_url: str) -> dict[str, 
     # Setup database with pgvector extension
     setup_database(database_url)
 
-    # Set embedding configuration
-    set_embedding_config(
-        api_type=config.get("embedding", {}).get("api_type", "openai"),
-        model=config.get("embedding", {}).get("model", "text-embedding-3-small"),
-    )
-
-    # Get the flow
-    flow = get_text_embedding_flow(config)
+    # Configure and get the flow
+    flow = configure_and_get_flow(config)
 
     # Setup and update the flow
     print("\nSetting up indexing flow...")
@@ -123,14 +117,8 @@ def search_vector_store(
     if top_k is None:
         top_k = config.get("search", {}).get("top_k", 5)
 
-    # Set embedding configuration
-    set_embedding_config(
-        api_type=config.get("embedding", {}).get("api_type", "openai"),
-        model=config.get("embedding", {}).get("model", "text-embedding-3-small"),
-    )
-
-    # Get the flow to get table name
-    flow = get_text_embedding_flow(config)
+    # Configure and get the flow to get table name
+    flow = configure_and_get_flow(config)
 
     # Get the table name for the export target
     table_name = cocoindex.utils.get_target_default_name(flow, "doc_embeddings")

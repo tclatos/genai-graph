@@ -77,6 +77,12 @@ etl_configs:
         included_patterns:
           - "*.md"
           - "docs/*.md"
+        # File patterns to exclude
+        excluded_patterns:
+          - ".venv/**"
+          - ".git/**"
+          - "**/__pycache__/**"
+          - "**/node_modules/**"
       
       # Text processing parameters
       chunking:

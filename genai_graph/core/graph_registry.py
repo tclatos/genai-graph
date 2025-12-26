@@ -10,12 +10,13 @@ from __future__ import annotations
 import typing
 from typing import Any
 
-from genai_tk.utils.config_mngr import global_config, import_from_qualified
+from genai_tk.utils.config_mngr import import_from_qualified
 from genai_tk.utils.singleton import once
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from genai_graph.core.graph_schema import GraphSchema
+from genai_graph.core.kg_manager import get_kg_manager
 from genai_graph.core.subgraph_factories import SubgraphFactory
 
 if typing.TYPE_CHECKING:
@@ -56,14 +57,15 @@ class GraphRegistry(BaseModel):
           compatibility and is responsible for calling
           :func:`register_subgraph` manually.
         """
-        # Load subgraph providers from YAML config (config/ekg.yaml)
-        cfg_name = global_config().get("kg_config", default=global_config().get("default_kg_config", default="db_only"))
+        # Load subgraph providers for the active KG profile via KgManager
+        manager = get_kg_manager()
+        # Ensure manager is activated at least once; if not, this will
+        # select the default profile from ekg.yaml.
+        manager.activate(profile=manager.profile)
+        profile_cfg = manager.get_profile_dict()
 
         # Get subgraphs: [{factory: "module:Class", initial_load: [...]}, ...]
-        try:
-            subgraphs = global_config().get_list(f"kg_configs.{cfg_name}.subgraphs")
-        except Exception:
-            subgraphs = []
+        subgraphs = profile_cfg.get("subgraphs", []) or []
 
         # Extract and import factory classes
         for subgraph_cfg in subgraphs:

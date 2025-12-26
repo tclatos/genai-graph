@@ -13,15 +13,19 @@ from functools import lru_cache
 from typing import Any, get_args, get_origin
 
 from genai_graph.core.graph_registry import GraphRegistry, get_subgraph
-from genai_graph.core.graph_schema import GraphSchema, _find_embedded_field_for_class
+from genai_graph.core.graph_schema import GraphSchema, find_embedded_field_for_class
 
 
-def generate_schema_description(subgraphs: str | list[str]) -> str:
+def generate_schema_description(subgraphs: str | list[str], print_enums: bool = True) -> str:
     """Generate a compact, token-efficient LLM description of the graph schema.
 
     This unified function accepts either a single subgraph name (string)
     or a list of subgraph names. Passing an empty list means "all registered"
     subgraphs (delegated to `GraphRegistry.build_combined_schema`).
+
+    Args:
+        subgraphs: Single subgraph name or list of names. Empty list means all.
+        print_enums: Whether to include enumeration types in the output (default: True).
 
     Examples:
         ```python
@@ -30,6 +34,9 @@ def generate_schema_description(subgraphs: str | list[str]) -> str:
 
         # Combined (multiple or empty list = all)
         description = generate_schema_description(["ReviewedOpportunity", "ArchitectureDocument"])
+
+        # Without enums
+        description = generate_schema_description("ReviewedOpportunity", print_enums=False)
         ```
     """
     baml_docs = _parse_baml_descriptions()
@@ -39,12 +46,12 @@ def generate_schema_description(subgraphs: str | list[str]) -> str:
         subgraph_impl = get_subgraph(subgraphs)
         subgraph_impl.build_schema()
         schema = _load_schema(subgraphs)
-        return _format_schema_description(schema=schema, baml_docs=baml_docs)
+        return format_schema_description(schema=schema, baml_docs=baml_docs, print_enums=print_enums)
 
     # Otherwise, treat as list of subgraph names (possibly empty => all)
     registry = GraphRegistry.get_instance()
     schema = registry.build_combined_schema(subgraphs)
-    return _format_schema_description(schema=schema, baml_docs=baml_docs)
+    return format_schema_description(schema=schema, baml_docs=baml_docs, print_enums=print_enums)
 
 
 # NOTE: Combined-generator removed — use `generate_schema_description(list_or_name)`
@@ -265,7 +272,7 @@ def _get_relation_properties(node_class: Any, baml_docs: dict[str, Any]) -> list
     return properties
 
 
-def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any], print_enums: bool = True) -> str:
+def format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any], print_enums: bool = True) -> str:
     """Format schema as a compact, token-efficient description.
 
     Output format:
@@ -273,6 +280,14 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any], p
     - Relationships as: Source → [RELATION] → Dest with properties and description
     - Enumeration types with their values
     - Excludes embeddings and subgraph names
+
+    Args:
+        schema: The graph schema to format.
+        baml_docs: Parsed BAML documentation containing descriptions.
+        print_enums: Whether to include enumeration types (default: True).
+
+    Returns:
+        Markdown-formatted schema description.
     """
     lines = ["## Graph Schema Description", ""]
 
@@ -320,7 +335,7 @@ def _format_schema_description(schema: GraphSchema, baml_docs: dict[str, Any], p
                 # Check if this field is an embedded class and flatten it
                 embedded_class = None
                 for emb_class in getattr(node, "embedded_struct_classes", []) or []:
-                    emb_field_name = _find_embedded_field_for_class(node.node_class, emb_class)  # type: ignore[name-defined]
+                    emb_field_name = find_embedded_field_for_class(node.node_class, emb_class)
                     if emb_field_name == field_name:
                         embedded_class = emb_class
                         break

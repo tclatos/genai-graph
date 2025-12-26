@@ -1,5 +1,27 @@
 # Ideas around evolution of the Tk and Bleuprint
 
+# Better orga
+
+I want to have a better, cleaner project structure, with better separationn between the CLI commands, the perfect tasks and the processing code.  Over time, code updates have lead to some overcomplications. For example, some 'private' functions have been imported in commmands_ekg.py (_find_embedded_field_for_class, _format_schema_description, ...). That illustrates a bad design .. and justify the requested refactoring.
+
+
+To do so, I suggets that:
+- Transform the KgOutcomeManager to a 'KgManager' (rename the file), a larger singleton that holds most of logic to create and use a KG. It will hold the configuration, the outcome, and methods to access them and deal with the KG and the schema.  Use  @once to define the singleton.
+- A KG is defined by its profile and a tag  ('dev', 'prod', "1.0-dev', ..).  Add such tag in ekg.yaml definition (with a associated environment variable KG_CONFIG_TAG that complement KG_CONFIG, default to 'dev' if not exists), and update the outcome directoty name
+- KgManager should include the configuration taken from the YAML file as a Pydantic model (to enforce type checking).  
+- The CLI commands (kg create, kg info, kg cypher, ....) should not have direct access to the global_config(), but use the KgManager to access configuration.  remove _get_kg_config_name and related functions : should be handled by the KgManager.  Simplify code.
+- Similary, update or (better) remove the task resolve_config_task 
+- Update genai_graph/core/graph_registry.py so the registry is managed from the KgManager
+- (Done) The former KgContext responsibilities have been merged into KgManager; KgContext can be removed.
+
+More generaly, you can do other refactoring that you judge usefull to improve code quality and simplify it.
+
+Note that Prefect has been introduced recently.   Using it more broadly and following its best practice might be a way to improve quality, observability etc (but dont misuse it !)
+
+Check that all commands works with KG_CONFIG="simple" ('kg create', 'kg info', ....), as well as integration tests (that might require refactoring as they are quite old)
+
+
+
 # Better outcome
 
 We want to improve the organisation of the generated KG. To do so :

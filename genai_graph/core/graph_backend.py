@@ -413,11 +413,12 @@ def create_backend_from_config(config_key: str = "default", kg_config_name: str 
     if not backend_type:
         raise ValueError(f"Missing 'type' in graph_db config for '{config_key}'")
 
-    # Use KG outcome manager for path if kg_config_name is provided
+    # Use KgManager-derived path if kg_config_name is provided
     if kg_config_name and backend_type.lower() == "kuzu":
-        from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
+        from genai_graph.core.kg_manager import get_kg_manager
 
-        manager = get_kg_outcome_manager(kg_config_name)
+        manager = get_kg_manager()
+        manager.activate(profile=kg_config_name)
         connection_path = str(manager.db_path)
         manager.ensure_directories()
     elif not connection_path:
@@ -461,11 +462,12 @@ def get_backend_storage_path_from_config(config_key: str = "default", kg_config_
     """
     from genai_tk.utils.config_mngr import global_config
 
-    # Use KG outcome manager if kg_config_name is provided
+    # Use KgManager if kg_config_name is provided
     if kg_config_name:
-        from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
+        from genai_graph.core.kg_manager import get_kg_manager
 
-        manager = get_kg_outcome_manager(kg_config_name)
+        manager = get_kg_manager()
+        manager.activate(profile=kg_config_name)
         return manager.db_path
 
     config = global_config()

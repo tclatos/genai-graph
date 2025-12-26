@@ -200,13 +200,14 @@ class EkgCommands(CliTopCommand):
 
             from genai_graph.core.graph_backend import create_backend_from_config
             from genai_graph.core.graph_html import generate_html_visualization
-            from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
+            from genai_graph.core.kg_manager import get_kg_manager
 
             console.print(Panel("[bold cyan]Exporting EKG HTML Visualization[/bold cyan]"))
 
-            # Get the KG config name and outcome manager
+            # Get the KG config name and KG manager
             kg_config_name = get_kg_config_name(config_name)
-            outcome_manager = get_kg_outcome_manager(kg_config_name)
+            manager = get_kg_manager()
+            manager.activate(profile=kg_config_name)
 
             # Get database connection
             backend = create_backend_from_config(GRAPH_DB_CONFIG, kg_config_name)
@@ -217,9 +218,9 @@ class EkgCommands(CliTopCommand):
 
             console.print("[green]✅ Connected to EKG database[/green]")
 
-            # Use outcome manager for output path if output_dir is default
+            # Use KgManager for output path if output_dir is default
             if output_dir == "/tmp":
-                html_file_path = outcome_manager.get_html_export_path()
+                html_file_path = manager.get_html_export_path()
                 console.print(f"📁 Using organized output: [bold]{html_file_path}[/bold]")
             else:
                 # Use custom output directory

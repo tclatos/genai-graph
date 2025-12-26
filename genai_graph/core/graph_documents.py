@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from genai_graph.core.graph_backend import GraphBackend
 from genai_graph.core.graph_schema import GraphSchema
-from genai_graph.core.kg_context import KgContext
+from genai_graph.core.kg_manager import KgManager
 from genai_graph.core.subgraph_factories import SubgraphFactory
 
 
@@ -109,7 +109,7 @@ def _apply_pull_subgraphs(
     nodes_dict: dict[str, list[dict[str, object]]],
     pulled: set[tuple[str, str]],
     source_key: str,
-    context: KgContext | None = None,
+    context: KgManager | None = None,
 ) -> None:
     """Pull DB-backed subgraphs on-demand based on configured triggers.
 
@@ -180,7 +180,7 @@ def add_documents_to_graph(
     subgraph_impl: SubgraphFactory,
     backend: GraphBackend,
     schema: GraphSchema,
-    context: KgContext | None = None,
+    context: KgManager | None = None,
 ) -> DocumentStats:
     """Add one or more documents to the knowledge graph.
 

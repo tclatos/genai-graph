@@ -23,7 +23,7 @@ from typing import (
 from loguru import logger
 from pydantic import BaseModel, PrivateAttr, model_validator
 
-from genai_graph.core.kg_context import KgContext
+from genai_graph.core.kg_manager import KgManager
 
 
 class ExtraFields(BaseModel, ABC):
@@ -84,6 +84,12 @@ def _find_embedded_field_for_class(parent_cls: type[BaseModel], embedded_cls: ty
             return field_name
 
     return None
+
+
+def find_embedded_field_for_class(parent_cls: type[BaseModel], embedded_cls: type[BaseModel]) -> str | None:
+    """Public API wrapper over :func:`_find_embedded_field_for_class`."""
+
+    return _find_embedded_field_for_class(parent_cls, embedded_cls)
 
 
 class GraphNode(BaseModel):
@@ -690,11 +696,11 @@ class GraphSchema(BaseModel):
             node_config.excluded_fields = excluded_fields
 
     @no_type_check  # Avoid type-checking *ANY* methods or attributes of this class.
-    def _validate_coherence(self, context: KgContext | None = None) -> None:
+    def _validate_coherence(self, context: KgManager | None = None) -> None:
         """Validate that the schema configuration is coherent with the Pydantic model.
 
         Args:
-            context: Optional KgContext for collecting warnings
+            context: Optional KgManager for collecting warnings
         """
         warnings_list = []
 
@@ -814,14 +820,14 @@ class GraphSchema(BaseModel):
         """Get all validation warnings."""
         return self._warnings.copy()
 
-    def validate_with_context(self, context: KgContext) -> None:
-        """Re-run coherence validation and collect warnings into context.
+    def validate_with_context(self, context: KgManager) -> None:
+        """Re-run coherence validation and collect warnings into a KgManager.
 
         This method allows re-validating the schema after initial construction
-        to collect warnings into a KgContext object.
+        to collect warnings into the central KgManager singleton.
 
         Args:
-            context: KgContext for collecting warnings
+            context: KgManager for collecting warnings
         """
         # First add any warnings accumulated during schema construction (e.g., from path deduction)
         for warning_msg in self._warnings:

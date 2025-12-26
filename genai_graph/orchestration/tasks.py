@@ -13,6 +13,7 @@ from typing import Any
 from genai_tk.utils.config_mngr import import_from_qualified
 from loguru import logger
 from prefect import get_run_logger, task
+from prefect.exceptions import MissingContextError
 from pydantic import BaseModel
 
 from genai_graph.core.graph_backend import (
@@ -25,8 +26,22 @@ from genai_graph.core.graph_core import create_schema as core_create_schema
 from genai_graph.core.graph_documents import DocumentStats, add_documents_to_graph
 from genai_graph.core.graph_html import generate_html
 from genai_graph.core.graph_schema import GraphSchema
-from genai_graph.core.kg_context import KgContext
+from genai_graph.core.kg_manager import get_kg_manager
 from genai_graph.core.subgraph_factories import SubgraphFactory, TableBackedSubgraphFactory
+
+
+def _get_prefect_logger_or_default() -> Any:
+    """Return a Prefect run logger when in a flow, else fall back to loguru logger.
+
+    This allows the same task functions to be reused both inside Prefect flows
+    and in direct local execution (e.g. from the CLI) without requiring a
+    running Prefect server.
+    """
+
+    try:
+        return get_run_logger()
+    except MissingContextError:
+        return logger
 
 
 class SubgraphBundle(BaseModel):
@@ -57,35 +72,16 @@ class KgRunResult(BaseModel):
 
 @task
 def resolve_config_task(config_name: str | None) -> tuple[str, dict[str, Any]]:
-    """Resolve KG config name and return its configuration dictionary.
+    """Resolve KG profile and return its configuration dictionary via KgManager."""
 
-    This mirrors the behavior of the previous ``get_kg_config_name`` helper,
-    updating ``kg_config`` in the global configuration so that other
-    components (e.g. ``GraphRegistry``) see the same value.
-    """
+    logger_pf = _get_prefect_logger_or_default()
 
-    from genai_tk.utils.config_mngr import global_config as _gc
+    from genai_graph.core.kg_manager import get_kg_manager
 
-    logger_pf = get_run_logger()
-    cfg = _gc()
+    manager = get_kg_manager()
+    effective, _ = manager.activate(config_name)
+    kg_cfg = manager.get_profile_dict()
 
-    if config_name:
-        cfg.set("kg_config", config_name)
-        logger_pf.info(f"Using explicit KG config name: {config_name}")
-        effective = config_name
-    else:
-        default_from_config = cfg.get("default_kg_config")
-        if default_from_config:
-            cfg.set("default_kg_config", default_from_config)
-            cfg.set("kg_config", default_from_config)
-            effective = default_from_config
-            logger_pf.info(f"Using default_kg_config from config: {effective}")
-        else:
-            cfg.set("kg_config", "default")
-            effective = "default"
-            logger_pf.info(f"Falling back to KG config name: {effective}")
-
-    kg_cfg = cfg.get_dict(f"kg_configs.{effective}")
     logger_pf.info(
         "Loaded KG config '%s', subgraphs=%d.",
         effective,
@@ -108,7 +104,7 @@ def initialize_backend_task(config_key: str = "default", kg_config_name: str | N
         kg_config_name: Optional KG configuration name for organized output folders
     """
 
-    logger_pf = get_run_logger()
+    logger_pf = _get_prefect_logger_or_default()
 
     backend = create_backend_from_config(config_key, kg_config_name)
     db_path = get_backend_storage_path_from_config(config_key, kg_config_name)
@@ -118,10 +114,11 @@ def initialize_backend_task(config_key: str = "default", kg_config_name: str | N
 
 
 @task
-def load_factories_task(kg_cfg: dict[str, Any], context: KgContext) -> list[SubgraphBundle]:
+def load_factories_task(kg_cfg: dict[str, Any]) -> list[SubgraphBundle]:
     """Load and instantiate subgraph factories from KG configuration."""
 
-    logger_pf = get_run_logger()
+    logger_pf = _get_prefect_logger_or_default()
+    manager = get_kg_manager()
     subgraphs_cfg = kg_cfg.get("subgraphs", [])
 
     bundles: list[SubgraphBundle] = []
@@ -145,7 +142,7 @@ def load_factories_task(kg_cfg: dict[str, Any], context: KgContext) -> list[Subg
             else:
                 msg = f"Factory {factory_path} is not a SubgraphFactory"
                 logger.warning(msg)
-                context.add_warning(msg)
+                manager.add_warning(msg)
                 continue
 
             logger_pf.info("Loaded subgraph factory: %s", subgraph_impl.name)
@@ -156,7 +153,7 @@ def load_factories_task(kg_cfg: dict[str, Any], context: KgContext) -> list[Subg
             msg = f"Failed to import factory {factory_path}: {exc}"
             logger.error(msg)
             logger.error(traceback.format_exc())
-            context.add_warning(msg)
+            manager.add_warning(msg)
 
     return bundles
 
@@ -165,11 +162,11 @@ def load_factories_task(kg_cfg: dict[str, Any], context: KgContext) -> list[Subg
 def create_schema_task(
     bundles: list[SubgraphBundle],
     backend: GraphBackend,
-    context: KgContext,
 ) -> list[SubgraphBundle]:
     """Create graph schema for all loaded subgraphs (Pass 1)."""
 
-    logger_pf = get_run_logger()
+    logger_pf = _get_prefect_logger_or_default()
+    manager = get_kg_manager()
 
     for bundle in bundles:
         subgraph_impl = bundle.factory
@@ -177,8 +174,8 @@ def create_schema_task(
 
         schema = subgraph_impl.build_schema()
         try:
-            core_create_schema(backend, schema.nodes, schema.relations, context)
-            schema.validate_with_context(context)
+            core_create_schema(backend, schema.nodes, schema.relations, manager)
+            schema.validate_with_context(manager)
             logger_pf.info(
                 "Created schema for subgraph '%s'",
                 getattr(subgraph_impl, "name", "<unknown>"),
@@ -189,7 +186,7 @@ def create_schema_task(
             msg = f"Schema creation failed for subgraph {getattr(subgraph_impl, 'name', '<unknown>')}: {exc}"
             logger.error(msg)
             logger.error(traceback.format_exc())
-            context.add_warning(msg)
+            manager.add_warning(msg)
 
         bundle.schema_obj = schema
 
@@ -200,11 +197,11 @@ def create_schema_task(
 def ingest_subgraphs_task(
     bundles: list[SubgraphBundle],
     backend: GraphBackend,
-    context: KgContext,
 ) -> DocumentStats:
     """Ingest documents for all configured subgraphs (Pass 2)."""
 
-    logger_pf = get_run_logger()
+    logger_pf = _get_prefect_logger_or_default()
+    manager = get_kg_manager()
 
     total_stats = DocumentStats()
 
@@ -237,7 +234,7 @@ def ingest_subgraphs_task(
             except Exception as exc:  # pragma: no cover - defensive
                 msg = f"Failed to get keys from table for {factory_path}: {exc}"
                 logger.warning(msg)
-                context.add_warning(msg)
+                manager.add_warning(msg)
                 keys = []
 
         if not keys:
@@ -245,7 +242,7 @@ def ingest_subgraphs_task(
 
         try:
             assert schema is not None, "Schema must be created before ingestion"
-            stats = add_documents_to_graph(keys, subgraph_impl, backend, schema, context)
+            stats = add_documents_to_graph(keys, subgraph_impl, backend, schema, manager)
             logger_pf.info(
                 "Ingest stats for %s: processed=%d failed=%d nodes=%d rels=%d",
                 factory_path,
@@ -264,7 +261,7 @@ def ingest_subgraphs_task(
             msg = f"Ingestion error for {factory_path}: {exc}"
             logger.error(msg)
             logger.error(traceback.format_exc())
-            context.add_warning(msg)
+            manager.add_warning(msg)
             # Assume all keys failed when we cannot be more precise
             total_stats.total_failed += len(keys)
 
@@ -287,7 +284,7 @@ def delete_backend_task(config_key: str = "default", kg_config_name: str | None 
         kg_config_name: Optional KG configuration name for organized output folders
     """
 
-    logger_pf = get_run_logger()
+    logger_pf = _get_prefect_logger_or_default()
     path = get_backend_storage_path_from_config(config_key, kg_config_name)
 
     if path.exists():
@@ -319,13 +316,14 @@ def export_html_task(
         output_dir: Optional custom output directory (if None, uses KG outcome manager)
     """
 
-    logger_pf = get_run_logger()
+    logger_pf = _get_prefect_logger_or_default()
 
     if output_dir is None:
-        # Use KG outcome manager for organized output
-        from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
+        # Use KgManager for organized output
+        from genai_graph.core.kg_manager import get_kg_manager
 
-        manager = get_kg_outcome_manager(config_name)
+        manager = get_kg_manager()
+        manager.activate(profile=config_name)
         destination = manager.get_html_export_path()
     else:
         # Custom output directory
@@ -339,16 +337,16 @@ def export_html_task(
 
 
 @task
-def summarize_warnings_task(context: KgContext, config_name: str | None = None) -> list[str]:
-    """Return collected warnings from the KG context and log them if config_name provided.
+def summarize_warnings_task(config_name: str | None = None) -> list[str]:
+    """Return collected warnings from KgManager and log them if config_name provided.
 
     Args:
-        context: The KG context containing warnings
         config_name: Optional KG configuration name to log warnings to file
     """
 
-    logger_pf = get_run_logger()
-    warnings = context.get_warnings()
+    logger_pf = _get_prefect_logger_or_default()
+    manager = get_kg_manager()
+    warnings = manager.get_warnings()
 
     if warnings:
         logger_pf.warning(
@@ -358,9 +356,7 @@ def summarize_warnings_task(context: KgContext, config_name: str | None = None) 
 
         # Log warnings to file if config_name is provided
         if config_name:
-            from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
-
-            manager = get_kg_outcome_manager(config_name)
+            manager.activate(profile=config_name)
             manager.log_warnings(warnings)
     else:
         logger_pf.info("KG creation completed with no warnings")

@@ -92,6 +92,7 @@ def build_ekg_agent_system_prompt(subgraphs: list[str]) -> str:
 def create_ekg_cypher_tool(
     *,
     backend_config: str = "default",
+    kg_config_name: str | None = None,
     console: Console | None = None,
     debug: bool = False,
 ) -> BaseTool:
@@ -99,6 +100,7 @@ def create_ekg_cypher_tool(
 
     Args:
         backend_config: Name of the backend configuration to use.
+        kg_config_name: Name of the KG configuration to use (e.g., "simple").
         console: Optional Rich console for debug printing.
         debug: If True, print generated Cypher queries before execution.
     """
@@ -111,7 +113,7 @@ def create_ekg_cypher_tool(
         (or OPTIONAL MATCH) and ending with RETURN.
         """
 
-        backend = create_backend_from_config(backend_config)
+        backend = create_backend_from_config(backend_config, kg_config_name)
         if not backend:
             return "EKG database not found. Load data first with 'cli kg add-doc --key <data_key>'."
 

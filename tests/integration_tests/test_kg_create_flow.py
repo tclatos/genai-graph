@@ -37,8 +37,8 @@ def test_create_kg_flow_runs(tmp_path: Path, monkeypatch) -> None:
     result = create_kg_flow(config_name=None, delete_first=True, export_html=False)
 
     # Database path should exist
-    assert result.backend.db_path is not None
-    assert result.backend.db_path.parent.exists()
+    assert result.db_path is not None
+    assert result.db_path.parent.exists()
 
     # Statistics should at least be well-formed
     assert result.stats.total_processed >= 0

@@ -10,7 +10,7 @@ from genai_graph.core.extra_fields_utils import apply_extra_fields
 from genai_graph.core.graph_backend import GraphBackend, create_in_memory_backend
 from genai_graph.core.graph_merge import merge_nodes_batch
 from genai_graph.core.graph_schema import GraphNode, GraphRelation, GraphSchema, _find_embedded_field_for_class
-from genai_graph.core.kg_context import KgContext
+from genai_graph.core.kg_manager import KgManager
 
 
 class NodeRecord(NamedTuple):
@@ -153,7 +153,7 @@ def restart_database() -> GraphBackend:
 
 
 def create_schema(
-    backend: GraphBackend, nodes: list[GraphNode], relations: list[GraphRelation], context: KgContext | None = None
+    backend: GraphBackend, nodes: list[GraphNode], relations: list[GraphRelation], context: KgManager | None = None
 ) -> None:
     """Create node and relationship tables in the graph database (idempotent).
 
@@ -583,7 +583,7 @@ def load_graph_data(
     backend: GraphBackend,
     nodes_dict: dict[str, list[dict[str, Any]]],
     relationships: list[RelationshipRecord] | list[tuple[Any, ...]],
-    context: KgContext | None = None,
+    context: KgManager | None = None,
 ) -> None:
     """Load nodes and relationships into the graph database using MERGE semantics.
 
@@ -711,7 +711,7 @@ def create_graph(
     model: BaseModel,
     schema_config: GraphSchema,
     source_key: str | None = None,
-    context: KgContext | None = None,
+    context: KgManager | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[RelationshipRecord]]:
     """Create a knowledge graph from a Pydantic model in the configured graph database.
 

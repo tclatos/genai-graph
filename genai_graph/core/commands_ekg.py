@@ -1,8 +1,8 @@
 """CLI commands for interacting with the Enterprise Knowledge Graph.
 
 This module provides the ``kg`` top-level command (as configured via
-``config/overrides.yaml``) and routes the ``create`` command through the
-Prefect-based orchestration flow defined in ``genai_graph.orchestration``.
+``config/overrides.yaml``). The ``create`` command runs a Prefect flow
+using an in-process runner so no long-lived Prefect server is required.
 """
 
 from __future__ import annotations
@@ -12,8 +12,13 @@ from typing import Annotated
 
 import typer
 from genai_tk.main.cli import CliTopCommand
-from genai_tk.utils.config_mngr import global_config
 from loguru import logger
+from prefect.settings import (
+    PREFECT_API_URL,
+    PREFECT_SERVER_ALLOW_EPHEMERAL_MODE,
+    PREFECT_SERVER_EPHEMERAL_ENABLED,
+    temporary_settings,
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -23,11 +28,8 @@ from genai_graph.core.graph_backend import (
     get_backend_storage_path_from_config,
 )
 from genai_graph.core.graph_registry import GraphRegistry, get_subgraph
-from genai_graph.core.graph_schema import _find_embedded_field_for_class
-from genai_graph.core.schema_doc_generator import (
-    _format_schema_description,
-    _parse_baml_descriptions,
-)
+from genai_graph.core.graph_schema import find_embedded_field_for_class
+from genai_graph.core.kg_manager import get_kg_manager
 from genai_graph.orchestration.flows import create_kg_flow
 
 GRAPH_DB_CONFIG = "default"
@@ -36,25 +38,15 @@ console = Console()
 
 
 def _get_kg_config_name(config_name: str | None) -> str:
-    """Resolve the KG configuration name and update global config.
+    """Resolve KG profile using KgManager.
 
-    This mirrors the behavior of the historical ``get_kg_config_name`` helper
-    so that other components (e.g. GraphRegistry) see the same selected config.
+    This keeps command implementations simple while centralising the
+    actual logic in :mod:`genai_graph.core.kg_manager`.
     """
 
-    cfg = global_config()
-
-    if config_name:
-        cfg.set("kg_config", config_name)
-        return config_name
-
-    default_from_config = cfg.get("default_kg_config")
-    if default_from_config:
-        cfg.set("kg_config", default_from_config)
-        return default_from_config
-
-    cfg.set("kg_config", "default")
-    return "default"
+    manager = get_kg_manager()
+    profile, _ = manager.activate(config_name)
+    return profile
 
 
 class EkgCommands(CliTopCommand):
@@ -93,11 +85,10 @@ class EkgCommands(CliTopCommand):
                 ),
             ] = True,
         ) -> None:
-            """Create the KG database and ingest documents using Prefect.
+            """Create the KG database and ingest documents using a Prefect flow.
 
-            This command now delegates the heavy lifting to the Prefect flow
-            ``create_kg_flow`` while preserving the observable behavior
-            (configuration handling, warning display, and summary output).
+            The flow is executed with an in-process runner and ephemeral client
+            so that no long-lived Prefect server or agent is required.
             """
 
             # Resolve config name and keep global_config in sync for the rest
@@ -116,12 +107,22 @@ class EkgCommands(CliTopCommand):
             os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
             os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
 
+            # Run the Prefect flow with an ephemeral, in-process server by
+            # temporarily disabling any configured API URL and enabling
+            # Prefect's ephemeral server mode.
             try:
-                result = create_kg_flow(
-                    config_name=cfg_name,
-                    delete_first=delete_first,
-                    export_html=export_html,
-                )
+                with temporary_settings(
+                    {
+                        PREFECT_API_URL: None,
+                        PREFECT_SERVER_EPHEMERAL_ENABLED: True,
+                        PREFECT_SERVER_ALLOW_EPHEMERAL_MODE: True,
+                    }
+                ):
+                    result = create_kg_flow(
+                        config_name=cfg_name,
+                        delete_first=delete_first,
+                        export_html=export_html,
+                    )
             except Exception as exc:  # pragma: no cover - defensive
                 import traceback as tb
 
@@ -220,9 +221,11 @@ class EkgCommands(CliTopCommand):
                 raise typer.Exit(1) from exc
 
             db_path = get_backend_storage_path_from_config(GRAPH_DB_CONFIG, kg_config_name)
-            cfg = global_config()
-            active_cfg = cfg.get("kg_config", default="(not set)")
-            default_kg = cfg.get("default_kg_config", default="(not set)")
+
+            manager = get_kg_manager()
+            manager.activate(kg_config_name)
+            active_cfg = manager.profile
+            default_kg = manager.ekg_config.default_kg_config
 
             info_table = Table(title="Database Information")
             info_table.add_column("Property", style="cyan", no_wrap=True)
@@ -232,18 +235,17 @@ class EkgCommands(CliTopCommand):
             info_table.add_row("Database Type", "Cypher Graph Database")
             info_table.add_row("Backend", "Cypher (via GraphBackend abstraction)")
             info_table.add_row("Storage", "Persistent File Storage")
-            info_table.add_row("Active KG Config", active_cfg)
+            info_table.add_row("Active KG Config", f"{active_cfg}@{manager.tag}")
             info_table.add_row("Default KG Config", default_kg)
             info_table.add_row("Subgraph(s)", subgraph_title)
 
             console.print(info_table)
             console.print("")
 
-            # Show KG outcome manager info
-            from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
-
-            outcome_manager = get_kg_outcome_manager(kg_config_name)
-            outcome_info = outcome_manager.get_info()
+            # Show KG manager info
+            manager = get_kg_manager()
+            manager.activate(kg_config_name)
+            outcome_info = manager.get_info()
 
             if outcome_info.get("exists"):
                 outcome_table = Table(title="KG Outputs & Outcomes")
@@ -440,7 +442,7 @@ class EkgCommands(CliTopCommand):
             has_embedded = False
             for node in schema.nodes:
                 for embedded_class in getattr(node, "embedded_struct_classes", []) or []:
-                    field_name = _find_embedded_field_for_class(node.node_class, embedded_class)
+                    field_name = find_embedded_field_for_class(node.node_class, embedded_class)
                     if not field_name:
                         continue
                     has_embedded = True
@@ -494,24 +496,18 @@ class EkgCommands(CliTopCommand):
 
             _get_kg_config_name(config_name)
 
-            registry = GraphRegistry()
-            selected_subgraphs = subgraphs or registry.listsubgraphs()
+            selected_subgraphs = subgraphs or []
 
             try:
-                schema_obj = registry.build_combined_schema(selected_subgraphs)
+                from genai_graph.core.schema_doc_generator import generate_schema_description
+
+                description = generate_schema_description(selected_subgraphs, print_enums=with_enums)
             except ValueError as exc:
                 import traceback as tb
 
                 console.print(f"[red]❌ {exc}[/red]")
                 console.print("[red]" + tb.format_exc() + "[/red]")
                 raise typer.Exit(1) from exc
-
-            baml_docs = _parse_baml_descriptions()
-            description = _format_schema_description(
-                schema=schema_obj,
-                baml_docs=baml_docs,
-                print_enums=with_enums,
-            )
 
             subgraph_title = ", ".join(selected_subgraphs) if selected_subgraphs else "ALL"
             console.print(
@@ -533,6 +529,16 @@ class EkgCommands(CliTopCommand):
                     help="Input query or '-' to read from stdin",
                 ),
             ] = None,
+            config_name: Annotated[
+                str | None,
+                typer.Option(
+                    "--config",
+                    help=(
+                        "Name of the KG config to use from config/ekg.yaml "
+                        "(default: value of key 'kg_config' or 'default_kg_config')"
+                    ),
+                ),
+            ] = None,
             chat: Annotated[
                 bool,
                 typer.Option(
@@ -540,7 +546,7 @@ class EkgCommands(CliTopCommand):
                     "-s",
                     help="Start an interactive chat session with the EKG agent",
                 ),
-            ] = True,
+            ] = False,
             llm: Annotated[
                 str | None,
                 typer.Option(
@@ -613,6 +619,9 @@ class EkgCommands(CliTopCommand):
             )
             from genai_graph.core.graph_registry import GraphRegistry
 
+            # Get KG config name and activate it
+            kg_config_name = _get_kg_config_name(config_name)
+
             registry = GraphRegistry.get_instance()
             selected_subgraphs = subgraphs or registry.listsubgraphs()
 
@@ -625,6 +634,7 @@ class EkgCommands(CliTopCommand):
             system_prompt = build_ekg_agent_system_prompt(selected_subgraphs)
             ekg_tool = create_ekg_cypher_tool(
                 backend_config=GRAPH_DB_CONFIG,
+                kg_config_name=kg_config_name,
                 console=console,
                 debug=debug,
             )
@@ -661,6 +671,16 @@ class EkgCommands(CliTopCommand):
         @cli_app.command("cypher")
         def cypher(
             query: str = typer.Argument(help="Cypher query to execute"),
+            config_name: Annotated[
+                str | None,
+                typer.Option(
+                    "--config",
+                    help=(
+                        "Name of the KG config to use from config/ekg.yaml "
+                        "(default: value of key 'kg_config' or 'default_kg_config')"
+                    ),
+                ),
+            ] = None,
             subgraphs: Annotated[
                 list[str],
                 typer.Option(
@@ -785,7 +805,7 @@ class EkgCommands(CliTopCommand):
                 from genai_graph.core.graph_registry import GraphRegistry
 
                 # Get the effective config name using centralized logic
-                get_kg_config_name(config_name)
+                _get_kg_config_name(config_name)
 
                 # If no subgraphs are provided, use all registered ones
                 registry = GraphRegistry.get_instance()

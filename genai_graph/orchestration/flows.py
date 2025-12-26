@@ -7,7 +7,6 @@ from prefect.artifacts import create_markdown_artifact
 from prefect.task_runners import ThreadPoolTaskRunner
 
 from genai_graph.core.graph_backend import get_backend_storage_path_from_config
-from genai_graph.core.kg_context import KgContext
 from genai_graph.orchestration.tasks import (
     KgRunResult,
     create_schema_task,
@@ -52,26 +51,25 @@ def create_kg_flow(
 
     cfg_name, kg_cfg = resolve_config_task.submit(config_name).result()
 
-    context = KgContext(config_name=cfg_name, config_dict=kg_cfg)
+    # Initialize KG manager and log start
+    from genai_graph.core.kg_manager import get_kg_manager
 
-    # Initialize outcome manager and log start
-    from genai_graph.core.kg_outcome_manager import get_kg_outcome_manager
-
-    outcome_manager = get_kg_outcome_manager(cfg_name)
-    outcome_manager.log_outcome("create_kg", "started", "Starting KG creation flow")
+    manager = get_kg_manager()
+    manager.activate(profile=cfg_name)
+    manager.log_outcome("create_kg", "started", "Starting KG creation flow")
 
     backend = initialize_backend_task.submit("default", cfg_name).result()
     db_path = get_backend_storage_path_from_config("default", cfg_name)
 
-    bundles = load_factories_task.submit(kg_cfg, context).result()
-    bundles = create_schema_task.submit(bundles, backend, context).result()
+    bundles = load_factories_task.submit(kg_cfg).result()
+    bundles = create_schema_task.submit(bundles, backend).result()
 
-    stats = ingest_subgraphs_task.submit(bundles, backend, context).result()
-    warnings = summarize_warnings_task.submit(context, cfg_name).result()
+    stats = ingest_subgraphs_task.submit(bundles, backend).result()
+    warnings = summarize_warnings_task.submit(cfg_name).result()
 
     # Log completion outcome
     outcome_status = "warning" if warnings else "success"
-    outcome_manager.log_outcome(
+    manager.log_outcome(
         "create_kg",
         outcome_status,
         f"KG creation completed with {stats.total_processed} docs processed",
@@ -120,7 +118,7 @@ def create_kg_flow(
     html_result = None
     if export_html:
         html_result = export_html_task.submit(cfg_name, backend).result()
-        outcome_manager.log_outcome(
+        manager.log_outcome(
             "export_html",
             "success",
             f"HTML exported to {html_result.output_path}",

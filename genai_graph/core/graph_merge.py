@@ -11,7 +11,7 @@ from genai_tk.core.prompts import dedent_ws
 from loguru import logger
 
 from genai_graph.core.graph_backend import GraphBackend
-from genai_graph.core.kg_context import KgContext
+from genai_graph.core.kg_manager import KgManager
 
 
 def _should_update_value(value: Any) -> bool:
@@ -138,7 +138,7 @@ def merge_node_in_graph(
     node_type: str,
     node_data: dict[str, Any],
     merge_on_field: str = "name",
-    context: KgContext | None = None,
+    context: KgManager | None = None,
 ) -> tuple[bool, str]:
     """Merge a single node into the graph database.
 
@@ -265,7 +265,7 @@ def merge_nodes_batch(
     conn: GraphBackend,
     nodes_dict: dict[str, list[dict[str, Any]]],
     merge_on_field: str = "_name",
-    context: KgContext | None = None,
+    context: KgManager | None = None,
 ) -> tuple[dict[str, dict[str, int]], dict[tuple[str, str], str]]:
     """Merge multiple nodes into the graph database in batch.
 

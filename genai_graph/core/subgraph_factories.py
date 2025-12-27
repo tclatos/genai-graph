@@ -204,6 +204,16 @@ class TableBackedSubgraphFactory(SubgraphFactory):
         from sqlalchemy import create_engine
 
         logger.info(f"Initializing TableBackedSubgraphFactory with db_dsn: {self.db_dsn}")
+
+        # Ensure parent directory exists for SQLite databases
+        if self.db_dsn.startswith("sqlite:///"):
+            # Extract file path from DSN (format: sqlite:///path/to/db.db)
+            db_file_path = self.db_dsn.replace("sqlite:///", "")
+            db_path = UPath(db_file_path)
+            if db_path.parent and not db_path.parent.exists():
+                logger.info(f"Creating database directory: {db_path.parent}")
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+
         self._db_engine = create_engine(self.db_dsn)
         self._create_import_tracking_table()
         for file_path in self.files:

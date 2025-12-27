@@ -324,7 +324,8 @@ def export_html_task(
 
         manager = get_kg_manager()
         manager.activate()
-        destination = manager.get_html_export_path()
+        destination = manager.html_path
+        manager.ensure_directories()
     else:
         # Custom output directory
         output_dir.mkdir(parents=True, exist_ok=True)

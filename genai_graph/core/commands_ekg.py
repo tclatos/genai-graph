@@ -242,11 +242,11 @@ class EkgCommands(CliTopCommand):
                         f"{db_info['size_mb']:.2f} MB",
                     )
 
-                if outcome_info.get("html_exports"):
-                    html_info = outcome_info["html_exports"]
+                if outcome_info.get("html_export"):
+                    html_info = outcome_info["html_export"]
                     outcome_table.add_row(
-                        "HTML Exports",
-                        f"{html_info['count']} file(s): {', '.join(html_info['files'])}",
+                        "HTML Export",
+                        f"{html_info['size_mb']:.2f} MB",
                     )
 
                 if outcome_info.get("outcomes"):
@@ -797,29 +797,17 @@ class EkgCommands(CliTopCommand):
             _get_kg_config_name()
             manager = get_kg_manager()
 
-            # Check if HTML directory exists
-            if not manager.html_dir.exists():
+            # Check if HTML file exists
+            if not manager.html_path.exists():
                 console.print(
-                    "[red]❌ No HTML exports found.[/red]\n"
+                    "[red]❌ No HTML export found.[/red]\n"
                     "[yellow]💡 Run [bold]cli kg create[/bold] to generate a visualization[/yellow]"
                 )
                 raise typer.Exit(1)
 
-            # Find the most recent HTML file for this profile
-            html_files = list(manager.html_dir.glob(f"{manager.profile}-{manager.tag}*.html"))
+            file_url = manager.html_path.as_uri()
 
-            if not html_files:
-                console.print(
-                    f"[red]❌ No HTML export found for config '{manager.profile}@{manager.tag}'[/red]\n"
-                    "[yellow]💡 Run [bold]cli kg create --export-html[/bold] to generate one[/yellow]"
-                )
-                raise typer.Exit(1)
-
-            # Get the most recent file (by modification time)
-            html_file = max(html_files, key=lambda p: p.stat().st_mtime)
-            file_url = html_file.as_uri()
-
-            console.print(f"[bold cyan]🌐 Opening HTML visualization:[/bold cyan] {html_file.name}")
+            console.print(f"[bold cyan]🌐 Opening HTML visualization:[/bold cyan] {manager.html_path.name}")
 
             # Open in browser
             webbrowser.open(file_url)

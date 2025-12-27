@@ -81,7 +81,7 @@ class KgManager(BaseModel):
 
     _base_path: UPath | None = None
     _db_path: UPath | None = None
-    _html_dir: UPath | None = None
+    _html_path: UPath | None = None
     _outcomes_file: UPath | None = None
     _warnings_file: UPath | None = None
 
@@ -123,7 +123,7 @@ class KgManager(BaseModel):
     def _reset_cached_paths(self) -> None:
         self._base_path = None
         self._db_path = None
-        self._html_dir = None
+        self._html_path = None
         self._outcomes_file = None
         self._warnings_file = None
 
@@ -168,46 +168,40 @@ class KgManager(BaseModel):
 
     @property
     def base_path(self) -> UPath:
-        """Root directory for this KG profile/tag.
+        """Root directory for this KG profile.
 
         Layout:
-            <paths.data_root>/kg_outputs/<profile>/<tag>/
+            <paths.data_root>/kg_outputs/<profile>/
         """
 
         if self._base_path is None:
             cfg = global_config()
             data_root = cfg.get_dir_path("paths.data_root")
-            self._base_path = data_root / "kg_outputs" / self.profile / self.tag
+            self._base_path = data_root / "kg_outputs" / self.profile
         return self._base_path
-
-    @property
-    def db_dir(self) -> UPath:
-        """Directory for database files."""
-
-        return self.base_path / "kuzu"
 
     @property
     def db_path(self) -> UPath:
         """Path to the Kuzu database file for this KG."""
 
         if self._db_path is None:
-            self._db_path = self.db_dir / "ekg_database.db"
+            self._db_path = self.base_path / f"{self.profile}-{self.tag}.db"
         return self._db_path
 
     @property
-    def html_dir(self) -> UPath:
-        """Directory for HTML exports."""
+    def html_path(self) -> UPath:
+        """Path to the HTML export file for this KG."""
 
-        if self._html_dir is None:
-            self._html_dir = self.base_path / "html"
-        return self._html_dir
+        if self._html_path is None:
+            self._html_path = self.base_path / f"{self.profile}-{self.tag}.html"
+        return self._html_path
 
     @property
     def outcomes_file(self) -> UPath:
         """Path to the outcomes log file (JSONL)."""
 
         if self._outcomes_file is None:
-            self._outcomes_file = self.base_path / "outcomes.jsonl"
+            self._outcomes_file = self.base_path / f"{self.profile}-{self.tag}-outcomes.jsonl"
         return self._outcomes_file
 
     @property
@@ -215,26 +209,13 @@ class KgManager(BaseModel):
         """Path to the warnings log file (plain text)."""
 
         if self._warnings_file is None:
-            self._warnings_file = self.base_path / "warnings.log"
+            self._warnings_file = self.base_path / f"{self.profile}-{self.tag}-warnings.log"
         return self._warnings_file
 
     def ensure_directories(self) -> None:
-        """Create all necessary directories if they don't exist."""
+        """Create base directory if it doesn't exist."""
 
         self.base_path.mkdir(parents=True, exist_ok=True)
-        self.db_dir.mkdir(parents=True, exist_ok=True)
-        self.html_dir.mkdir(parents=True, exist_ok=True)
-
-    def get_html_export_path(self, suffix: str = "") -> UPath:
-        """Return destination path for an HTML export file.
-
-        Args:
-            suffix: Optional suffix added before ``.html`` in the filename.
-        """
-
-        self.html_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{self.profile}-{self.tag}{suffix}_graph.html"
-        return self.html_dir / filename
 
     # ------------------------------------------------------------------
     # Outcome and warning management
@@ -340,12 +321,14 @@ class KgManager(BaseModel):
         else:
             info["database"] = None
 
-        # HTML exports
-        html_files = list(self.html_dir.glob("*.html")) if self.html_dir.exists() else []
-        info["html_exports"] = {
-            "count": len(html_files),
-            "files": [f.name for f in html_files],
-        }
+        # HTML export
+        if self.html_path.exists():
+            info["html_export"] = {
+                "path": str(self.html_path),
+                "size_mb": self.html_path.stat().st_size / (1024 * 1024),
+            }
+        else:
+            info["html_export"] = None
 
         # Outcomes
         if self.outcomes_file.exists():

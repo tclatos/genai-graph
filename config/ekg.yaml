@@ -1,6 +1,5 @@
 
-kg_config: ${oc.env:KG_CONFIG,db_only}
-kg_tag: ${oc.env:KG_CONFIG_TAG,dev}
+
 schemas_root: genai_graph.ekg.schema
 
 kg_configs:

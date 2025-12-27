@@ -60,7 +60,6 @@ class EtlCommands(CliTopCommand):
                 cli etl update --config custom
             """
             import cocoindex
-
             from genai_graph.etl.cocoindex_start import update_vector_store
 
             # Get configuration
@@ -133,7 +132,6 @@ class EtlCommands(CliTopCommand):
                 cli etl query "API documentation" --verbose
             """
             import cocoindex
-
             from genai_graph.etl.cocoindex_start import search_vector_store
 
             # Get configuration

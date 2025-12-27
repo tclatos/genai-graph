@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 import pytest
 
@@ -31,8 +31,8 @@ def test_create_kg_flow_runs(tmp_path: Path, monkeypatch) -> None:
     # Use whatever default test KG config is defined for tests, typically
     # something like "db_only" or any config used in existing integration
     # tests and documentation.
-    default_kg = cfg.get("default_kg_config") or "db_only"
-    cfg.set("default_kg_config", default_kg)
+    default_kg = cfg.get("kg_config") or "db_only"
+    cfg.set("kg_config", default_kg)
 
     result = create_kg_flow(config_name=None, delete_first=True, export_html=False)
 

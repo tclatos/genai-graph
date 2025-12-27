@@ -79,7 +79,7 @@ def resolve_config_task(config_name: str | None) -> tuple[str, dict[str, Any]]:
     from genai_graph.core.kg_manager import get_kg_manager
 
     manager = get_kg_manager()
-    effective, _ = manager.activate(config_name)
+    effective, _ = manager.activate()
     kg_cfg = manager.get_profile_dict()
 
     logger_pf.info(
@@ -323,7 +323,7 @@ def export_html_task(
         from genai_graph.core.kg_manager import get_kg_manager
 
         manager = get_kg_manager()
-        manager.activate(profile=config_name)
+        manager.activate()
         destination = manager.get_html_export_path()
     else:
         # Custom output directory
@@ -356,7 +356,7 @@ def summarize_warnings_task(config_name: str | None = None) -> list[str]:
 
         # Log warnings to file if config_name is provided
         if config_name:
-            manager.activate(profile=config_name)
+            manager.activate()
             manager.log_warnings(warnings)
     else:
         logger_pf.info("KG creation completed with no warnings")

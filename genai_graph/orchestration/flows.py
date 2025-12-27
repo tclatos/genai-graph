@@ -55,7 +55,7 @@ def create_kg_flow(
     from genai_graph.core.kg_manager import get_kg_manager
 
     manager = get_kg_manager()
-    manager.activate(profile=cfg_name)
+    manager.activate()
     manager.log_outcome("create_kg", "started", "Starting KG creation flow")
 
     backend = initialize_backend_task.submit("default", cfg_name).result()

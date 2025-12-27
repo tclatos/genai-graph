@@ -418,7 +418,7 @@ def create_backend_from_config(config_key: str = "default", kg_config_name: str 
         from genai_graph.core.kg_manager import get_kg_manager
 
         manager = get_kg_manager()
-        manager.activate(profile=kg_config_name)
+        manager.activate()
         connection_path = str(manager.db_path)
         manager.ensure_directories()
     elif not connection_path:
@@ -467,7 +467,7 @@ def get_backend_storage_path_from_config(config_key: str = "default", kg_config_
         from genai_graph.core.kg_manager import get_kg_manager
 
         manager = get_kg_manager()
-        manager.activate(profile=kg_config_name)
+        manager.activate()
         return manager.db_path
 
     config = global_config()

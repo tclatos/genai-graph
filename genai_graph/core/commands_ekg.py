@@ -13,12 +13,6 @@ from typing import Annotated
 import typer
 from genai_tk.main.cli import CliTopCommand
 from loguru import logger
-from prefect.settings import (
-    PREFECT_API_URL,
-    PREFECT_SERVER_ALLOW_EPHEMERAL_MODE,
-    PREFECT_SERVER_EPHEMERAL_ENABLED,
-    temporary_settings,
-)
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -27,25 +21,22 @@ from genai_graph.core.graph_backend import (
     create_backend_from_config,
     get_backend_storage_path_from_config,
 )
-from genai_graph.core.graph_registry import GraphRegistry, get_subgraph
-from genai_graph.core.graph_schema import find_embedded_field_for_class
 from genai_graph.core.kg_manager import get_kg_manager
-from genai_graph.orchestration.flows import create_kg_flow
 
 GRAPH_DB_CONFIG = "default"
 
 console = Console()
 
 
-def _get_kg_config_name(config_name: str | None) -> str:
-    """Resolve KG profile using KgManager.
+def _get_kg_config_name() -> str:
+    """Get the configured KG profile from KgManager.
 
     This keeps command implementations simple while centralising the
     actual logic in :mod:`genai_graph.core.kg_manager`.
     """
 
     manager = get_kg_manager()
-    profile, _ = manager.activate(config_name)
+    profile, _ = manager.activate()
     return profile
 
 
@@ -60,16 +51,6 @@ class EkgCommands(CliTopCommand):
 
         @cli_app.command("create")
         def create(
-            config_name: Annotated[
-                str | None,
-                typer.Option(
-                    "--config",
-                    help=(
-                        "Name of the KG config to use from config/ekg.yaml "
-                        "(default: value of key 'kg_config' or 'default_kg_config')"
-                    ),
-                ),
-            ] = None,
             delete_first: Annotated[
                 bool,
                 typer.Option(
@@ -91,9 +72,17 @@ class EkgCommands(CliTopCommand):
             so that no long-lived Prefect server or agent is required.
             """
 
-            # Resolve config name and keep global_config in sync for the rest
-            # of the system (GraphRegistry, etc.).
-            cfg_name = _get_kg_config_name(config_name)
+            # Get the configured KG config name.
+            from prefect.settings import (
+                PREFECT_API_URL,
+                PREFECT_SERVER_ALLOW_EPHEMERAL_MODE,
+                PREFECT_SERVER_EPHEMERAL_ENABLED,
+                temporary_settings,
+            )
+
+            from genai_graph.orchestration.flows import create_kg_flow
+
+            cfg_name = _get_kg_config_name()
 
             console.print(f"[bold]Creating KG using config[/bold] [cyan]{cfg_name}[/cyan]...")
 
@@ -155,7 +144,7 @@ class EkgCommands(CliTopCommand):
                     Panel(
                         f"[bold green]🌐 HTML export created:[/bold green]\n\n"
                         f"[link={file_url}]{file_url}[/link]\n\n"
-                        f"[dim]Click the link above to open the visualization[/dim]",
+                        f"[dim]Click the link above or run[/dim] [bold cyan]cli kg view[/bold cyan] [dim]to open it in your browser[/dim]",
                         title="HTML Visualization Ready",
                         border_style="green",
                     )
@@ -163,16 +152,6 @@ class EkgCommands(CliTopCommand):
 
         @cli_app.command("info")
         def info(
-            config_name: Annotated[
-                str | None,
-                typer.Option(
-                    "--config",
-                    help=(
-                        "Name of the KG config to use from config/ekg.yaml "
-                        "(default: value of key 'kg_config' or 'default_kg_config')"
-                    ),
-                ),
-            ] = None,
             subgraphs: Annotated[
                 list[str],
                 typer.Option(
@@ -183,8 +162,10 @@ class EkgCommands(CliTopCommand):
             ] = [],
         ) -> None:
             """Display EKG database information, schema overview, and mappings."""
+            from genai_graph.core.graph_registry import GraphRegistry, get_subgraph
+            from genai_graph.core.graph_schema import find_embedded_field_for_class
 
-            _get_kg_config_name(config_name)
+            _get_kg_config_name()
 
             # Build registry and select subgraphs
             registry = GraphRegistry()
@@ -207,7 +188,7 @@ class EkgCommands(CliTopCommand):
             )
 
             # Get KG config name
-            kg_config_name = _get_kg_config_name(config_name)
+            kg_config_name = _get_kg_config_name()
 
             # Connect to backend and gather DB-level details
             try:
@@ -223,9 +204,9 @@ class EkgCommands(CliTopCommand):
             db_path = get_backend_storage_path_from_config(GRAPH_DB_CONFIG, kg_config_name)
 
             manager = get_kg_manager()
-            manager.activate(kg_config_name)
+            manager.activate()
             active_cfg = manager.profile
-            default_kg = manager.ekg_config.default_kg_config
+            default_kg = manager.ekg_config.kg_config
 
             info_table = Table(title="Database Information")
             info_table.add_column("Property", style="cyan", no_wrap=True)
@@ -244,7 +225,7 @@ class EkgCommands(CliTopCommand):
 
             # Show KG manager info
             manager = get_kg_manager()
-            manager.activate(kg_config_name)
+            manager.activate()
             outcome_info = manager.get_info()
 
             if outcome_info.get("exists"):
@@ -459,16 +440,6 @@ class EkgCommands(CliTopCommand):
 
         @cli_app.command("schema")
         def schema(
-            config_name: Annotated[
-                str | None,
-                typer.Option(
-                    "--config",
-                    help=(
-                        "Name of the KG config to use from config/ekg.yaml "
-                        "(default: value of key 'kg_config' or 'default_kg_config')"
-                    ),
-                ),
-            ] = None,
             subgraphs: Annotated[
                 list[str],
                 typer.Option(
@@ -494,7 +465,7 @@ class EkgCommands(CliTopCommand):
             query generation.
             """
 
-            _get_kg_config_name(config_name)
+            _get_kg_config_name()
 
             selected_subgraphs = subgraphs or []
 
@@ -527,16 +498,6 @@ class EkgCommands(CliTopCommand):
                     "--input",
                     "-i",
                     help="Input query or '-' to read from stdin",
-                ),
-            ] = None,
-            config_name: Annotated[
-                str | None,
-                typer.Option(
-                    "--config",
-                    help=(
-                        "Name of the KG config to use from config/ekg.yaml "
-                        "(default: value of key 'kg_config' or 'default_kg_config')"
-                    ),
                 ),
             ] = None,
             chat: Annotated[
@@ -619,8 +580,8 @@ class EkgCommands(CliTopCommand):
             )
             from genai_graph.core.graph_registry import GraphRegistry
 
-            # Get KG config name and activate it
-            kg_config_name = _get_kg_config_name(config_name)
+            # Get KG config name
+            kg_config_name = _get_kg_config_name()
 
             registry = GraphRegistry.get_instance()
             selected_subgraphs = subgraphs or registry.listsubgraphs()
@@ -671,16 +632,6 @@ class EkgCommands(CliTopCommand):
         @cli_app.command("cypher")
         def cypher(
             query: str = typer.Argument(help="Cypher query to execute"),
-            config_name: Annotated[
-                str | None,
-                typer.Option(
-                    "--config",
-                    help=(
-                        "Name of the KG config to use from config/ekg.yaml "
-                        "(default: value of key 'kg_config' or 'default_kg_config')"
-                    ),
-                ),
-            ] = None,
             subgraphs: Annotated[
                 list[str],
                 typer.Option(
@@ -708,7 +659,7 @@ class EkgCommands(CliTopCommand):
             from genai_graph.core.graph_registry import GraphRegistry
 
             # Get KG config name
-            kg_config_name = _get_kg_config_name(config_name)
+            kg_config_name = _get_kg_config_name()
 
             registry = GraphRegistry.get_instance()
             selected_subgraphs = subgraphs or registry.listsubgraphs()
@@ -773,13 +724,6 @@ class EkgCommands(CliTopCommand):
         @cli_app.command("query")
         def query_ekg(
             query: str = typer.Argument(help="query to execute"),
-            config_name: Annotated[
-                str | None,
-                typer.Option(
-                    "--config",
-                    help="Name of the KG config to use from config/ekg.yaml (default: value of key 'default_kg_config')",
-                ),
-            ] = None,
             llm: Annotated[
                 str | None,
                 typer.Option(help="Name or tag of the LLM to use by BAML"),
@@ -804,8 +748,8 @@ class EkgCommands(CliTopCommand):
 
                 from genai_graph.core.graph_registry import GraphRegistry
 
-                # Get the effective config name using centralized logic
-                _get_kg_config_name(config_name)
+                # Get the configured KG config name.
+                _get_kg_config_name()
 
                 # If no subgraphs are provided, use all registered ones
                 registry = GraphRegistry.get_instance()
@@ -839,3 +783,45 @@ class EkgCommands(CliTopCommand):
                 console.print(f"[red]❌ Query error: {e}[/red]")
                 console.print("[red]" + tb.format_exc() + "[/red]")
                 return
+
+        @cli_app.command("view")
+        def view_html() -> None:
+            """Open the HTML visualization of the current KG configuration in a browser.
+
+            Opens the most recently generated HTML export file for the active KG
+            configuration in the default web browser.
+            """
+            import webbrowser
+
+            # Get the current KG config
+            _get_kg_config_name()
+            manager = get_kg_manager()
+
+            # Check if HTML directory exists
+            if not manager.html_dir.exists():
+                console.print(
+                    "[red]❌ No HTML exports found.[/red]\n"
+                    "[yellow]💡 Run [bold]cli kg create[/bold] to generate a visualization[/yellow]"
+                )
+                raise typer.Exit(1)
+
+            # Find the most recent HTML file for this profile
+            html_files = list(manager.html_dir.glob(f"{manager.profile}-{manager.tag}*.html"))
+
+            if not html_files:
+                console.print(
+                    f"[red]❌ No HTML export found for config '{manager.profile}@{manager.tag}'[/red]\n"
+                    "[yellow]💡 Run [bold]cli kg create --export-html[/bold] to generate one[/yellow]"
+                )
+                raise typer.Exit(1)
+
+            # Get the most recent file (by modification time)
+            html_file = max(html_files, key=lambda p: p.stat().st_mtime)
+            file_url = html_file.as_uri()
+
+            console.print(f"[bold cyan]🌐 Opening HTML visualization:[/bold cyan] {html_file.name}")
+
+            # Open in browser
+            webbrowser.open(file_url)
+
+            console.print("[green]✓ Opened in your default browser[/green]")

@@ -4,9 +4,6 @@ This module defines a singleton :class:`KgManager` responsible for
 coordinating KG configuration, identity (profile + tag), filesystem
 layout for artifacts, and high-level outcome/warning tracking.
 
-It replaces the previous "KgOutcomeManager" concept by expanding it
-into a more complete, typed manager that other components (CLI,
-backend helpers, registry, Prefect flows) can query.
 """
 
 from __future__ import annotations
@@ -68,8 +65,8 @@ class EkgProfileConfig(BaseModel):
 class EkgConfig(BaseModel):
     """Top-level EKG configuration loaded from ``config/ekg.yaml``."""
 
-    default_kg_config: str
-    default_kg_tag: str = "dev"
+    kg_config: str
+    kg_tag: str = "dev"
     schemas_root: str | None = None
     kg_configs: dict[str, EkgProfileConfig] = Field(default_factory=dict)
 
@@ -103,9 +100,9 @@ class KgManager(BaseModel):
         cfg = global_config()
 
         # Top-level EKG config
-        default_profile = cfg.get("default_kg_config", default="db_only")
-        default_tag_env = os.environ.get("KG_CONFIG_TAG")
-        default_tag = cfg.get("default_kg_tag", default=default_tag_env or "dev")
+        profile = cfg.get("kg_config", default="db_only")
+        tag_env = os.environ.get("KG_CONFIG_TAG")
+        tag = cfg.get("kg_tag", default=tag_env or "dev")
 
         try:
             kg_configs_dict = cfg.get_dict("kg_configs")
@@ -115,22 +112,13 @@ class KgManager(BaseModel):
         schemas_root = cfg.get("schemas_root", default=None)
 
         ekg_config = EkgConfig(
-            default_kg_config=default_profile,
-            default_kg_tag=default_tag,
+            kg_config=profile,
+            kg_tag=tag,
             schemas_root=schemas_root,
             kg_configs={k: EkgProfileConfig(**v) for k, v in kg_configs_dict.items()},
         )
 
-        # Resolve active profile and tag (respecting environment and overrides)
-        active_profile = cfg.get("kg_config", default=ekg_config.default_kg_config)
-        active_tag = cfg.get("kg_tag", default=ekg_config.default_kg_tag)
-
-        # Ensure they are written back so legacy consumers that still read
-        # global_config() see consistent values.
-        cfg.set("kg_config", active_profile)
-        cfg.set("kg_tag", active_tag)
-
-        return cls(ekg_config=ekg_config, profile=active_profile, tag=active_tag)
+        return cls(ekg_config=ekg_config, profile=profile, tag=tag)
 
     def _reset_cached_paths(self) -> None:
         self._base_path = None
@@ -139,49 +127,21 @@ class KgManager(BaseModel):
         self._outcomes_file = None
         self._warnings_file = None
 
-    def activate(self, profile: str | None = None, tag: str | None = None) -> tuple[str, str]:
-        """Select effective profile and tag and update global config.
-
-        Args:
-            profile: Optional explicit KG profile name (e.g. "simple").
-            tag: Optional explicit KG tag (e.g. "dev", "prod", "1.0-dev").
+    def activate(self) -> tuple[str, str]:
+        """Validate profile and return current profile and tag.
 
         Returns:
-            Tuple of (profile, tag) actually in use.
+            Tuple of (profile, tag) in use.
         """
 
-        cfg = global_config()
-
-        # Resolve profile
-        if profile:
-            effective_profile = profile
-        else:
-            effective_profile = cfg.get(
-                "kg_config",
-                default=self.ekg_config.default_kg_config,
-            )
-
-        if effective_profile not in self.ekg_config.kg_configs:
+        if self.profile not in self.ekg_config.kg_configs:
             logger.warning(
                 "Unknown KG profile '%s'; available=%s",
-                effective_profile,
+                self.profile,
                 sorted(self.ekg_config.kg_configs.keys()),
             )
 
-        # Resolve tag
-        if tag:
-            effective_tag = tag
-        else:
-            effective_tag = cfg.get("kg_tag", default=self.ekg_config.default_kg_tag)
-
-        self.profile = effective_profile
-        self.tag = effective_tag
-
-        cfg.set("kg_config", effective_profile)
-        cfg.set("kg_tag", effective_tag)
-
-        self._reset_cached_paths()
-        return self.profile, self.tag
+        return (self.profile, self.tag)
 
     # ------------------------------------------------------------------
     # Configuration access
@@ -299,7 +259,7 @@ class KgManager(BaseModel):
             details=details,
         )
 
-        with open(self.outcomes_file, "a") as f:
+        with open(str(self.outcomes_file), "a") as f:
             f.write(outcome.model_dump_json() + "\n")
 
         logger.debug("[KG %s@%s] outcome: %s - %s", self.profile, self.tag, operation, status)
@@ -313,7 +273,7 @@ class KgManager(BaseModel):
         self.base_path.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().isoformat()
-        with open(self.warnings_file, "a") as f:
+        with open(str(self.warnings_file), "a") as f:
             f.write(f"\n=== Warnings at {timestamp} ===\n")
             f.writelines(f"{warning}\n" for warning in warnings)
 
@@ -326,7 +286,7 @@ class KgManager(BaseModel):
             return []
 
         outcomes: list[KgOutcome] = []
-        with open(self.outcomes_file) as f:
+        with open(str(self.outcomes_file)) as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -344,7 +304,7 @@ class KgManager(BaseModel):
         if not self.warnings_file.exists():
             return []
 
-        with open(self.warnings_file) as f:
+        with open(str(self.warnings_file)) as f:
             lines = f.readlines()
 
         return [line.strip() for line in lines[-limit:][::-1]]
@@ -355,7 +315,7 @@ class KgManager(BaseModel):
         import shutil
 
         if self.base_path.exists():
-            shutil.rmtree(self.base_path)
+            shutil.rmtree(str(self.base_path))
             logger.info("Cleared all data for KG '%s@%s'", self.profile, self.tag)
 
     def get_info(self) -> dict[str, Any]:
@@ -389,7 +349,7 @@ class KgManager(BaseModel):
 
         # Outcomes
         if self.outcomes_file.exists():
-            with open(self.outcomes_file) as f:
+            with open(str(self.outcomes_file)) as f:
                 outcome_count = sum(1 for _ in f)
             info["outcomes"] = {
                 "count": outcome_count,
@@ -400,7 +360,7 @@ class KgManager(BaseModel):
 
         # Warnings
         if self.warnings_file.exists():
-            with open(self.warnings_file) as f:
+            with open(str(self.warnings_file)) as f:
                 warning_count = sum(1 for _ in f)
             info["warnings"] = {
                 "count": warning_count,

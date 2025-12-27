@@ -517,7 +517,6 @@ class GraphSchema(BaseModel):
 
     def _deduce_relation_field_paths(self) -> None:
         """Auto-deduce field paths for all relationship configurations."""
-        from loguru import logger
 
         for relation_config in self.relations:
             # Skip deduction if field paths are already explicitly provided

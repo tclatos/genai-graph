@@ -1,6 +1,10 @@
-# Ideas around evolution of the Tk and Bleuprint
 
 
+# Ideas around evolution of the Tk and Bleuprin
+
+# Better  entity resolution ! 
+- issues with "known_as" (ex: gor Capgeminy)
+- use embeddings  ? 
 
 ## Better HTML visualisation
 

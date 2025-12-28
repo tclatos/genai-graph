@@ -12,11 +12,15 @@ from genai_graph.core.graph_backend import create_backend_from_config
 from genai_graph.core.text2cypher import SYSTEM_PROMPT, _schema_markdown_for_subgraphs
 
 
-def build_ekg_agent_system_prompt(subgraphs: list[str]) -> str:
+def build_ekg_agent_system_prompt(subgraphs: list[str], single_tool_mode: bool = False) -> str:
     """Build the system prompt for the EKG LangChain agent.
 
     The prompt explains the agent's role, how to use the Cypher tool, and
     embeds the graph schema and Cypher authoring guidelines.
+
+    Args:
+        subgraphs: List of subgraph names to include in the schema
+        single_tool_mode: If True, adjusts prompt for single tool call behavior
     """
 
     schema_markdown = _schema_markdown_for_subgraphs(subgraphs)
@@ -24,6 +28,36 @@ def build_ekg_agent_system_prompt(subgraphs: list[str]) -> str:
     # standalone text-to-Cypher translator. Here it serves as the canonical
     # reference for how the agent should construct Cypher queries that it
     # passes to the execution tool.
+
+    if single_tool_mode:
+        # In single-tool mode, be extremely directive
+        instructions = dedent_ws(
+            """
+            CRITICAL INSTRUCTION:
+            You MUST call the `ekg_cypher_query` tool to execute the query.
+            DO NOT respond with just the Cypher query text.
+            Your ONLY job is to:
+            1. Generate the appropriate Cypher query
+            2. Call the ekg_cypher_query tool with that query
+            3. Let the tool return the results
+            
+            You will be stopped after the first tool call, so make it count.
+            """
+        )
+    else:
+        instructions = dedent_ws(
+            """
+            IMPORTANT:
+            - When a question requires information from the EKG, you MUST call the
+              `ekg_cypher_query` tool instead of replying with a raw Cypher query.
+            - Your final answers to the user must be clear natural-language
+              explanations grounded in the tool results.
+            - Only show raw Cypher when the user explicitly asks to see the query
+              itself, and even then you should still call the tool to obtain and
+              explain the results.
+            """
+        )
+
     return dedent_ws(
         f"""
         You are an AI assistant that answers questions about enterprise data stored in a
@@ -37,14 +71,7 @@ def build_ekg_agent_system_prompt(subgraphs: list[str]) -> str:
         Use this tool whenever a question requires precise data lookup, filtering,
         aggregation or joins over the structured graph.
 
-        IMPORTANT:
-        - When a question requires information from the EKG, you MUST call the
-          `ekg_cypher_query` tool instead of replying with a raw Cypher query.
-        - Your final answers to the user must be clear natural-language
-          explanations grounded in the tool results.
-        - Only show raw Cypher when the user explicitly asks to see the query
-          itself, and even then you should still call the tool to obtain and
-          explain the results.
+        {instructions}
 
         When you call `ekg_cypher_query`:
         - First think about what information is needed and how it maps to the graph

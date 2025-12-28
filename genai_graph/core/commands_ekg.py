@@ -554,6 +554,13 @@ class EkgCommands(CliTopCommand):
                     help="Enable LangChain debug mode",
                 ),
             ] = False,
+            first_tool: Annotated[
+                bool,
+                typer.Option(
+                    "--first-tool",
+                    help="Stop after the first tool call and return raw result (non-chat mode only)",
+                ),
+            ] = False,
         ) -> None:
             """Run an EKG-aware LangChain ReAct agent over the knowledge graph.
 
@@ -563,6 +570,7 @@ class EkgCommands(CliTopCommand):
             Examples:
                 uv run cli kg agent -i "List the names of all competitors"
                 uv run cli kg agent --chat
+                uv run cli kg agent --first-tool -i "List all competitors"
                 uv run cli kg agent --mcp filesystem -i "List recent EKG exports on disk"
             """
             import asyncio
@@ -592,7 +600,7 @@ class EkgCommands(CliTopCommand):
 
             setup_langchain(llm, lc_debug, lc_verbose)
 
-            system_prompt = build_ekg_agent_system_prompt(selected_subgraphs)
+            system_prompt = build_ekg_agent_system_prompt(selected_subgraphs, single_tool_mode=first_tool)
             ekg_tool = create_ekg_cypher_tool(
                 backend_config=GRAPH_DB_CONFIG,
                 kg_config_name=kg_config_name,
@@ -619,6 +627,7 @@ class EkgCommands(CliTopCommand):
                     raise typer.Exit(1)
 
                 # Reuse the common ReAct helper from genai-tk
+                # If --first-tool is specified, the agent stops after one tool call
                 asyncio.run(
                     run_langchain_agent_direct(
                         input.strip(),
@@ -626,6 +635,7 @@ class EkgCommands(CliTopCommand):
                         mcp_server_names=mcp,
                         additional_tools=[ekg_tool],
                         pre_prompt=system_prompt,
+                        single_tool_mode=first_tool,
                     )
                 )
 

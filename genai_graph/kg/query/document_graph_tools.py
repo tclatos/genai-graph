@@ -930,8 +930,15 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
             return _tool_error(exc)
 
     @tool("get_section_content")
-    def _get_section_content(section_ids: str) -> str:
-        """Fetch the raw Markdown text of one or more sections. Comma-separated section_ids."""
+    def _get_section_content(
+        section_ids: str,
+        start_line: int | None = None,
+        max_lines: int | None = None,
+    ) -> str:
+        """Fetch the raw Markdown text of one or more sections. Comma-separated section_ids.
+
+        Optional start_line (1-indexed) and max_lines slice long section tables/text.
+        """
         ids = [s.strip() for s in section_ids.split(",") if s.strip()]
         try:
             rows = get_section_content(_connect(db_path), ids)
@@ -939,7 +946,21 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
             return _tool_error(exc)
         if not rows:
             return f"No sections found for ids: {section_ids}"
-        return "\n\n---\n\n".join(f"### [{r['section_id']}] {r['title']}\n\n{r['text']}" for r in rows)
+
+        rendered_sections = []
+        for r in rows:
+            text = r["text"]
+            if start_line is not None or max_lines is not None:
+                lines = text.splitlines()
+                s_idx = max(0, (start_line - 1)) if start_line is not None else 0
+                e_idx = s_idx + max_lines if max_lines is not None else len(lines)
+                sliced_lines = lines[s_idx:e_idx]
+                header = f"### [{r['section_id']}] {r['title']} (lines {s_idx + 1}-{min(e_idx, len(lines))} of {len(lines)})"
+                rendered_sections.append(f"{header}\n\n" + "\n".join(sliced_lines))
+            else:
+                rendered_sections.append(f"### [{r['section_id']}] {r['title']}\n\n{text}")
+
+        return "\n\n---\n\n".join(rendered_sections)
 
     @tool("search_sections")
     def _search_sections(query: str, limit: int = 20, folder_id: str | None = None, mode: str = "hybrid") -> str:

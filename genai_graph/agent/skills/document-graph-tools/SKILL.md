@@ -35,9 +35,10 @@ YAML section tree for one document: each section `id`, `title`, `description`.
 `document_id` accepts a content hash (full or prefix), filename, or path.
 Use `max_level=2` for a long document's top-level outline.
 
-### `get_section_content(section_ids: str) -> str`
+### `get_section_content(section_ids: str, start_line: int | None = None, max_lines: int | None = None) -> str`
 Raw Markdown text of one or more sections, comma-separated section ids
 (`hash::sequence`). This is the only way to read actual body text.
+Optional `start_line` (1-based) and `max_lines` allow slicing long financial tables/sections.
 
 ### `search_sections(keyword: str, limit: int = 20, folder_id: str | None = None) -> str`
 Keyword search over section titles and body text. Returns matching

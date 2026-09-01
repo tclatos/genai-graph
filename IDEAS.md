@@ -1,3 +1,8 @@
+
+# Middleware
+Consider ToolCallLimitMiddleware  
+
+
 # Marjdownization
 - Analyse embedded diagrams
 
@@ -9,6 +14,22 @@ and async call
 Move genai_graph/kg/parallel.py  to utils/ladybug (or better)
 Make SharedKuzuParallel a Pydantic class
 Refactor KuzuBackend ? 
+
+
+
+# better genai-graph
+
+- Update in genai-graph  the  cli docgraph commands so that they  take into account the new feature related to chunks
+
+- Use Chonkie instead of genai_graph/kg/document_graph/chunker.py 
+
+
+- more tests, notably semantic  search. Create test graph in memory ;   Use real LLM
+
+- update doc and skills
+
+
+Update doc 
 
 # CLI
  ? Merge cli docgraph folder-toc and cli docgraph folders 

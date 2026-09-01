@@ -66,6 +66,10 @@ holds Folders → Documents → Markdown sections; every section has a one-line
   `get_document_toc` on the most relevant document to see its section map, then
   read the specific section with `get_section_content`. One grounded read beats
   another blind search.
+- **Do not re-fetch the TOC.** Once you call `get_document_toc` for a document,
+  its full section tree and section IDs remain in your conversation history above.
+  Do NOT call `get_document_toc` again for the same document — refer to the
+  earlier output to pick subsequent section IDs.
 
 ## Example: "What SLAs does the RFP require?"
 

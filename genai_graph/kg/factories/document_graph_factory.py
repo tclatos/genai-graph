@@ -51,7 +51,6 @@ from genai_graph.kg.nodes.document_section import (
     HAS_SECTION,
     HAS_SUBSECTION,
     MarkdownSection,
-    SectionChunk,
     SectionChunkNode,
     SectionNode,
 )

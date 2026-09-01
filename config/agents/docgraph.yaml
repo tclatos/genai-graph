@@ -9,6 +9,9 @@ agent_defaults:
   type: react
   middlewares:
     - class: genai_tk.agents.langchain.middleware.rich_middleware.RichToolCallMiddleware
+    - class: genai_tk.agents.langchain.middleware.deduplicate_middleware.DeduplicateToolCallsMiddleware
+      tools: ["get_document_toc", "get_folder_toc", "list_documents"]
+      mode: "stub"
     - class: genai_graph.agent.middleware.map_before_search.MapBeforeSearchMiddleware
       max_consecutive: 3
   checkpointer:

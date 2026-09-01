@@ -955,7 +955,9 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
                 s_idx = max(0, (start_line - 1)) if start_line is not None else 0
                 e_idx = s_idx + max_lines if max_lines is not None else len(lines)
                 sliced_lines = lines[s_idx:e_idx]
-                header = f"### [{r['section_id']}] {r['title']} (lines {s_idx + 1}-{min(e_idx, len(lines))} of {len(lines)})"
+                header = (
+                    f"### [{r['section_id']}] {r['title']} (lines {s_idx + 1}-{min(e_idx, len(lines))} of {len(lines)})"
+                )
                 rendered_sections.append(f"{header}\n\n" + "\n".join(sliced_lines))
             else:
                 rendered_sections.append(f"### [{r['section_id']}] {r['title']}\n\n{text}")

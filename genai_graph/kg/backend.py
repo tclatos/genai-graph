@@ -225,9 +225,11 @@ class KuzuBackend(KgBackend):
 
         self.db = ladybug.Database(connection_string, enable_multi_writes=enable_multi_writes)
         self.conn = ladybug.Connection(self.db)
-        # Ensure the vector extension is loaded so tables with vector indexes
-        # can accept inserts without a "extension is not loaded" binder error.
+        # Ensure the vector and FTS extensions are loaded so tables with vector
+        # or full-text search indexes can accept deletes/inserts without a
+        # "extension is not loaded" binder error.
         self.ensure_vector_extension()
+        self.ensure_fts_extension()
 
     def attach(self, database: Any, *, num_threads: int = 0) -> None:
         """Reuse an already-open ``ladybug.Database`` with a fresh ``Connection``.

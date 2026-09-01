@@ -1,6 +1,4 @@
 # Marjdownization
-- Mistral OCR avalabke for more formats (Doc, Ppt, ....)
-- Firewall AnyDoc for fast
 - Analyse embedded diagrams
 
 # Multi-write

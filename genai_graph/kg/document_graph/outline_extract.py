@@ -31,12 +31,22 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from genai_graph.kg.document_graph.summarize import _clean_text, _is_length_limit_error
-from genai_graph.kg.document_graph.tree_parser import detect_headings
+from genai_graph.kg.document_graph.tree_parser import _TOC_HEADER_RE, detect_headings
 
 _DEFAULT_LLM_TAG = "default"
 
 # "Page 12" conversion artifacts that leak in from PDF/Office -> Markdown.
 _PAGE_MARKER_RE = re.compile(r"(?im)^\s*#*\s*page\s+\d+\s*$")
+
+
+def _extract_toc_excerpt(raw: str, max_lines: int = 250) -> str:
+    """Extract the candidate Table of Contents / preamble excerpt for fast structure analysis."""
+    lines = raw.splitlines()
+    for i, line in enumerate(lines[:500]):
+        if _TOC_HEADER_RE.match(line.strip()):
+            start = max(0, i)
+            return "\n".join(lines[start : start + max_lines])
+    return "\n".join(lines[:max_lines])
 
 
 class OutlineEntry(BaseModel):
@@ -59,9 +69,15 @@ class OutlineEntry(BaseModel):
 class DocumentOutline(BaseModel):
     """Structured-output schema for one outline-extraction LLM call."""
 
-    document_description: str = Field(..., description="ONE plain-text sentence, at most 20 words, on the whole document.")
-    document_summary: str = Field(..., description="2-4 plain-text sentences, at most 60 words, abstracting the document.")
-    sections: list[OutlineEntry] = Field(..., description="Every section in document order; titles must appear verbatim.")
+    document_description: str = Field(
+        ..., description="ONE plain-text sentence, at most 20 words, on the whole document."
+    )
+    document_summary: str = Field(
+        ..., description="2-4 plain-text sentences, at most 60 words, abstracting the document."
+    )
+    sections: list[OutlineEntry] = Field(
+        ..., description="Every section in document order; titles must appear verbatim."
+    )
 
 
 class OutlineConfig(BaseModel):
@@ -93,7 +109,9 @@ class OutlineResult(BaseModel):
     """Outcome of extracting one document's outline (cached on disk)."""
 
     outline: DocumentOutline | None = Field(default=None, description="The extracted outline, or None when degraded")
-    degraded: bool = Field(default=False, description="True when no outline was produced (over context window or failure)")
+    degraded: bool = Field(
+        default=False, description="True when no outline was produced (over context window or failure)"
+    )
     reason: str | None = Field(default=None, description="Why degradation happened, if it did")
     llm_calls: int = 0
 
@@ -138,8 +156,7 @@ def _policy_hash(config: OutlineConfig, llm_id: str) -> str:
     descriptions for structural dividers, and drops title-restatement descriptions.
     """
     payload = (
-        f"hybrid-v2|{llm_id}|{config.summary_min_tokens}|"
-        f"{config.max_description_words}|{config.max_summary_words}"
+        f"hybrid-v2|{llm_id}|{config.summary_min_tokens}|{config.max_description_words}|{config.max_summary_words}"
     )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
@@ -158,8 +175,36 @@ def _cache_path(config: OutlineConfig, llm_id: str, markdown_hash: str) -> Path 
 
 
 def _clean_markdown_for_prompt(raw: str) -> str:
-    """Drop ``Page N`` conversion artifacts so they do not clutter the LLM input."""
-    return _PAGE_MARKER_RE.sub("", raw)
+    """Drop ``Page N`` artifacts and condense bulky tables/numeric runs for the LLM input."""
+    # 1. Drop page markers
+    text = _PAGE_MARKER_RE.sub("", raw)
+
+    # 2. Condense Markdown pipe tables: keep header + 2 rows, replace rest with placeholder
+    def _condense_table(match: re.Match) -> str:
+        table_lines = match.group(0).strip().splitlines()
+        if len(table_lines) <= 4:
+            return match.group(0)
+        kept = table_lines[:3]
+        omitted = len(table_lines) - 3
+        return "\n" + "\n".join(kept) + f"\n| ... ({omitted} table rows omitted for outline extraction) |\n"
+
+    table_re = re.compile(r"(?:^[ \t]*\|[^\n]+\|[ \t]*\n){4,}", re.MULTILINE)
+    text = table_re.sub(_condense_table, text)
+
+    # 3. Condense runs of 5+ numeric/currency lines (OCR plain-text tabular listings)
+    def _condense_numbers(match: re.Match) -> str:
+        num_lines = match.group(0).strip().splitlines()
+        if len(num_lines) <= 4:
+            return match.group(0)
+        omitted = len(num_lines)
+        return f"\n[... {omitted} numeric data lines omitted ...]\n"
+
+    num_run_re = re.compile(
+        r"(?:^[ \t]*(?:\$[\s\d,\.\(\)\-]+|\d[\d,\.\(\)\-\%\s]*|\([0-9,\.\s]+\))[ \t]*\n){5,}", re.MULTILINE
+    )
+    text = num_run_re.sub(_condense_numbers, text)
+
+    return text
 
 
 # Words that carry no routing signal on their own: generic filing/document
@@ -168,15 +213,80 @@ def _clean_markdown_for_prompt(raw: str) -> str:
 # significant words are all already in the title adds nothing for routing).
 _RESTATEMENT_STOPWORDS = frozenset(
     {
-        "section", "document", "filing", "report", "annual", "information", "overview",
-        "statement", "part", "item", "note", "notes", "chapter", "page", "content",
-        "contents", "data", "details", "type", "form", "kind", "following", "above",
-        "below", "begins", "describes", "provides", "lists", "summarizes", "outlines",
-        "explains", "introduces", "presents", "shows", "states", "indicates", "notes",
-        "discusses", "covers", "includes", "contains", "details", "the", "a", "an", "of",
-        "for", "to", "in", "on", "and", "or", "as", "is", "are", "this", "these",
-        "those", "its", "their", "with", "by", "from", "that", "which", "such", "into",
-        "about", "under", "per", "also", "both", "each", "all", "any", "some",
+        "section",
+        "document",
+        "filing",
+        "report",
+        "annual",
+        "information",
+        "overview",
+        "statement",
+        "part",
+        "item",
+        "note",
+        "notes",
+        "chapter",
+        "page",
+        "content",
+        "contents",
+        "data",
+        "details",
+        "type",
+        "form",
+        "kind",
+        "following",
+        "above",
+        "below",
+        "begins",
+        "describes",
+        "provides",
+        "lists",
+        "summarizes",
+        "outlines",
+        "explains",
+        "introduces",
+        "presents",
+        "shows",
+        "states",
+        "indicates",
+        "discusses",
+        "covers",
+        "includes",
+        "contains",
+        "the",
+        "a",
+        "an",
+        "of",
+        "for",
+        "to",
+        "in",
+        "on",
+        "and",
+        "or",
+        "as",
+        "is",
+        "are",
+        "this",
+        "these",
+        "those",
+        "its",
+        "their",
+        "with",
+        "by",
+        "from",
+        "that",
+        "which",
+        "such",
+        "into",
+        "about",
+        "under",
+        "per",
+        "also",
+        "both",
+        "each",
+        "all",
+        "any",
+        "some",
     }
 )
 

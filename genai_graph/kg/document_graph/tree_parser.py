@@ -24,9 +24,55 @@ from pydantic import BaseModel, Field
 # preamble (text before the first heading) or a heading-less document.
 ROOT_SECTION_TITLE = "(document root)"
 
-# Headings that are page markers from a PDF/Doc → Markdown conversion (e.g.
+# Words that are page markers from a PDF/Doc → Markdown conversion (e.g.
 # "## Page 12"). These carry no structural meaning and must not become sections.
 _PAGE_MARKER_RE = re.compile(r"^page\s+\d+$", re.IGNORECASE)
+
+# Multilingual Table of Contents (TOC) header pattern:
+# Matches common TOC titles in English, French, German, Spanish, Italian, etc.
+_TOC_HEADER_RE = re.compile(
+    r"^\s*(?:#*\s*)?(?:"
+    r"table\s+of\s+contents|"
+    r"table\s+des\s+mati[èe]res|"
+    r"sommaire|"
+    r"inhaltsverzeichnis|"
+    r"table\s+du\s+contenu|"
+    r"list\s+of\s+contents|"
+    r"contents|"
+    r"índice|"
+    r"indice"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+# Generic structured document headings pattern (language/domain-agnostic):
+# Matches:
+# - PART / Part / SECTION / Section / CHAPTER / Chapter / ARTICLE / Article / ITEM / Item + numbers
+# - NOTE / Note / EXHIBIT / Exhibit / ANNEX / Annex / ANNEXE / Annexe / APPENDIX / Appendix + numbers
+# - Common corporate financial statement titles (Statements of Income, Balance Sheets, Bilans, etc.)
+# - SIGNATURE / SIGNATURES
+_HEURISTIC_HEADING_RE = re.compile(
+    r"^(?:"
+    r"(?:(?:PART|Part|SECTION|Section|CHAPTER|Chapter|ARTICLE|Article|ITEM|Item)\s+[IVX\d]+(?:\.\d+)?[A-Za-z]?\.?)"
+    r"|(?:(?:NOTE|Note|EXHIBIT|Exhibit|ANNEX|Annex|ANNEXE|Annexe|APPENDIX|Appendix)\s+[A-Za-z\d]+(?:\.\d+)?\.?)"
+    r"|(?:\b(?:CONDENSED\s+)?(?:CONSOLIDATED\s+)?(?:STATEMENTS?\s+OF|BALANCE\s+SHEETS?|BILAN|COMPTE\s+DE\s+R[ÉE]SULTAT|TABLEAU\s+DE\s+FLUX)\b)"
+    r"|(?:SIGNATURES?)"
+    r")",
+    re.IGNORECASE,
+)
+
+# Common non-heading uppercase tokens to ignore during standalone uppercase title matching
+_NON_HEADING_UPPERCASE_TOKENS = frozenset(
+    {
+        "PAGE",
+        "N/A",
+        "NONE",
+        "TOTAL",
+        "ALL RIGHTS RESERVED",
+        "CONFIDENTIAL",
+        "UNAUDITED",
+    }
+)
 
 # Surrounding Markdown emphasis/whitespace, stripped before comparing a heading
 # title to another for de-duplication (e.g. "**Advanced Micro Devices, Inc.**"
@@ -113,7 +159,7 @@ def _dedupe_page_header_headings(
         if next_start is not None:
             # Body lines: 0-indexed slice from just after the heading line up to
             # (excluding) the next heading's line.
-            body = raw_lines[line_start: next_start - 1]
+            body = raw_lines[line_start : next_start - 1]
             empty_body = all(not line.strip() for line in body)
         if is_repeat and empty_body:
             continue
@@ -187,6 +233,73 @@ def _estimate_token_count(text: str) -> int:
     return len(re.findall(r"\w+|[^\w\s]", text))
 
 
+def _detect_heuristic_headings(raw: str) -> list[tuple[str, int, int]]:
+    """Detect headings from document text heuristics when no Markdown '#' headings exist.
+
+    Identifies standard structured document headings (Parts, Items, Chapters, Articles,
+    Notes, Financial Statements) and standalone uppercase titles surrounded by blank lines.
+    """
+    lines = raw.splitlines()
+    headings: list[tuple[str, int, int]] = []
+    in_toc_block = False
+    toc_lines_passed = 0
+
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if not s:
+            if in_toc_block:
+                toc_lines_passed += 1
+                if toc_lines_passed > 80:
+                    in_toc_block = False
+            continue
+
+        # Filter out lines that are inside the initial Table of Contents summary block
+        if _TOC_HEADER_RE.match(s) and i < 300:
+            in_toc_block = True
+            toc_lines_passed = 0
+            continue
+        if in_toc_block:
+            toc_lines_passed += 1
+            if toc_lines_passed > 100 or i > 350:
+                in_toc_block = False
+            else:
+                continue
+
+        prev_blank = i == 0 or not lines[i - 1].strip()
+        next_blank = i == len(lines) - 1 or not lines[i + 1].strip()
+
+        # Rule 1: Structured document prefixes (Part, Item, Section, Chapter, Note, etc.)
+        if _HEURISTIC_HEADING_RE.match(s) and len(s) < 140:
+            if re.match(r"^(?:PART|Part|SECTION|Section|CHAPTER|Chapter)\b", s, re.IGNORECASE):
+                level = 1
+            elif (
+                re.match(r"^(?:ITEM|Item|ARTICLE|Article)\b", s, re.IGNORECASE)
+                or "STATEMENTS" in s.upper()
+                or "BALANCE" in s.upper()
+                or "BILAN" in s.upper()
+            ):
+                level = 2
+            elif re.match(
+                r"^(?:Note|NOTE|EXHIBIT|Exhibit|ANNEX|Annex|ANNEXE|Annexe|APPENDIX|Appendix)\b", s, re.IGNORECASE
+            ):
+                level = 3
+            else:
+                level = 2
+            title = _strip_surrounding_emphasis(s)
+            headings.append((title, level, i + 1))
+            continue
+
+        # Rule 2: Standalone multi-word uppercase titles surrounded by blank lines
+        words = s.split()
+        if s.isupper() and prev_blank and next_blank and not s.isdigit() and not s.startswith("<!--"):
+            if 2 <= len(words) <= 10 and 6 <= len(s) <= 80:
+                if not any(token in s for token in _NON_HEADING_UPPERCASE_TOKENS):
+                    title = _strip_surrounding_emphasis(s)
+                    headings.append((title, 2, i + 1))
+
+    return headings
+
+
 def detect_headings(raw: str) -> list[tuple[str, int, int]]:
     """Find the document's top-level headings and their logical levels.
 
@@ -195,6 +308,8 @@ def detect_headings(raw: str) -> list[tuple[str, int, int]]:
     precisely. Page-marker headings (``Page 12``) are dropped — they are PDF/Doc
     conversion artifacts with no structural meaning. For numbered documents the
     unreliable source ``#`` levels are re-derived from the outline numbers.
+    When no Markdown headings exist in the document, heuristics for SEC / financial
+    filing headings (Items, Parts, Notes, Financial Statements) are used.
 
     Returns:
         ``(title, level, line_start)`` tuples in document order, where
@@ -219,11 +334,11 @@ def detect_headings(raw: str) -> list[tuple[str, int, int]]:
                 headings.append((title, level, line_start))
         depth += tok.nesting
 
+    if not headings:
+        headings = _detect_heuristic_headings(raw)
+
     inferred_levels = _infer_levels([h[0] for h in headings], [h[1] for h in headings])
-    inferred = [
-        (title, inferred_levels[idx], line_start)
-        for idx, (title, _, line_start) in enumerate(headings)
-    ]
+    inferred = [(title, inferred_levels[idx], line_start) for idx, (title, _, line_start) in enumerate(headings)]
     return _dedupe_page_header_headings(inferred, raw.splitlines())
 
 

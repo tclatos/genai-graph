@@ -21,10 +21,11 @@ from __future__ import annotations
 from typing import Any
 
 import yaml
+from genai_tk.utils.ladybug import get_shared_database
 from langchain_core.tools import BaseTool, tool
 from loguru import logger
 
-from genai_graph.kg.backend import KgBackend, KuzuBackend
+from genai_graph.kg.backend import KgBackend, KuzuBackend, LadybugBackend
 from genai_graph.kg.embeddings_handler import EmbeddingsHandler
 from genai_graph.kg.nodes.document import DocumentNode, FolderNode
 from genai_graph.kg.nodes.document_section import SectionChunkNode, SectionNode
@@ -436,7 +437,7 @@ def get_document_toc(
 
 
 def build_toc_tree(
-    toc_rows: list[dict[str, Any]], *, include_summaries: bool = True, max_level: int | None = None
+    toc_rows: list[dict[str, Any]], *, include_summaries: bool = False, max_level: int | None = None
 ) -> list[dict[str, Any]]:
     """Nest flat `get_document_toc` rows into a tree by `parent_section_id`.
 
@@ -448,10 +449,8 @@ def build_toc_tree(
     navigate to.
 
     Args:
-        include_summaries: Also emit the fuller `summary` where one exists. On by
-            default so the agent sees the generated summaries for substantial
-            sections (only sections that actually have a summary are affected, so
-            the cost scales with how many were summarised, not the section count).
+        include_summaries: Also emit the fuller `summary` where one exists. Off by
+            default so the agent sees descriptions first without blowing context.
         max_level: Drop sections deeper than this heading level.
     """
     by_parent: dict[str | None, list[dict[str, Any]]] = {}
@@ -495,13 +494,12 @@ def render_toc_outline(toc_rows: list[dict[str, Any]]) -> str:
 
 
 def document_toc_yaml(
-    backend: KgBackend, document_id: str, *, include_summaries: bool = True, max_level: int | None = None
+    backend: KgBackend, document_id: str, *, include_summaries: bool = False, max_level: int | None = None
 ) -> str:
     """Return one document's table of contents as a YAML string.
 
     Section `description`s are always included (they are the routing signal), and
-    the fuller per-section `summary` is included by default where one was
-    generated (pass `include_summaries=False` to omit them).
+    the fuller per-section `summary` can be included by passing `include_summaries=True`.
     """
     doc = get_document(backend, document_id)
     toc_rows = get_document_toc(backend, document_id)
@@ -695,9 +693,7 @@ def _semantic_section_hits(
     return sorted(best.values(), key=lambda r: r["distance"])[:limit]
 
 
-def _contains_section_hits(
-    backend: KgBackend, keyword: str, limit: int, folder_id: str | None
-) -> list[dict[str, Any]]:
+def _contains_section_hits(backend: KgBackend, keyword: str, limit: int, folder_id: str | None) -> list[dict[str, Any]]:
     """Legacy CONTAINS search (fallback when the FTS index is unavailable)."""
     where = "WHERE s.title CONTAINS $keyword OR s.text CONTAINS $keyword"
     ret = (
@@ -856,8 +852,10 @@ def search_sections(
 
 
 def _connect(db_path: str) -> KgBackend:
-    backend = KuzuBackend()
-    backend.connect(db_path)
+    """Connect to the Document Graph reusing the process-shared ladybug.Database handle."""
+    backend = LadybugBackend()
+    shared_db = get_shared_database(db_path)
+    backend.attach(shared_db)
     return backend
 
 
@@ -909,9 +907,7 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
             backend = _connect(db_path)
             resolved = resolve_folder_id(backend, folder_id) if folder_id else None
             if folder_id and resolved is None:
-                return (
-                    f"No folder found matching {folder_id!r}. Omit folder_id to list every ingested document."
-                )
+                return f"No folder found matching {folder_id!r}. Omit folder_id to list every ingested document."
             return folder_toc_yaml(backend, resolved)
         except Exception as exc:  # noqa: BLE001
             return _tool_error(exc)

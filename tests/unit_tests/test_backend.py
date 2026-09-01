@@ -8,6 +8,7 @@ import pytest
 
 from genai_graph.kg.backend import (
     KuzuBackend,
+    LadybugBackend,
     Neo4jBackend,
     _normalize_db_config,
     create_backend,
@@ -16,11 +17,18 @@ from genai_graph.kg.backend import (
 
 
 class TestCreateBackend:
+    def test_ladybug(self) -> None:
+        backend = create_backend("ladybug")
+        assert isinstance(backend, LadybugBackend)
+        assert isinstance(backend, KuzuBackend)
+
     def test_kuzu(self) -> None:
         backend = create_backend("kuzu")
+        assert isinstance(backend, LadybugBackend)
         assert isinstance(backend, KuzuBackend)
 
     def test_kuzu_case_insensitive(self) -> None:
+        assert isinstance(create_backend("LADYBUG"), LadybugBackend)
         assert isinstance(create_backend("KUZU"), KuzuBackend)
 
     def test_neo4j(self) -> None:
@@ -32,15 +40,15 @@ class TestCreateBackend:
 
     def test_in_memory(self) -> None:
         backend = create_in_memory_backend()
-        assert isinstance(backend, KuzuBackend)
+        assert isinstance(backend, LadybugBackend)
         # Connection is live
         backend.execute("CREATE NODE TABLE T(id STRING, PRIMARY KEY(id))")
         backend.close()
 
 
 class TestNormalizeDbConfig:
-    def test_bare_string_defaults_to_kuzu(self) -> None:
-        assert _normalize_db_config("/tmp/x.db") == {"type": "kuzu", "path": "/tmp/x.db"}
+    def test_bare_string_defaults_to_ladybug(self) -> None:
+        assert _normalize_db_config("/tmp/x.db") == {"type": "ladybug", "path": "/tmp/x.db"}
 
     def test_mapping_passthrough(self) -> None:
         cfg = {"type": "neo4j", "path": "bolt://localhost"}
@@ -49,12 +57,12 @@ class TestNormalizeDbConfig:
 
 class TestKuzuBackendBasics:
     def test_execute_without_connect_raises(self) -> None:
-        backend = KuzuBackend()
+        backend = LadybugBackend()
         with pytest.raises(RuntimeError, match="Not connected"):
             backend.execute("MATCH (n) RETURN n")
 
     def test_get_query_language(self) -> None:
-        assert KuzuBackend().get_query_language() == "Cypher"
+        assert LadybugBackend().get_query_language() == "Cypher"
 
     def test_close_resets_connection(self) -> None:
         backend = create_in_memory_backend()

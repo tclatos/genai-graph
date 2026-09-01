@@ -194,7 +194,7 @@ class KgBackend(QueryExecutor, ABC):
             return pd.DataFrame()
 
 
-class KuzuBackend(KgBackend):
+class LadybugBackend(KgBackend):
     """Ladybug graph database backend implementation.
 
     Ladybug is a maintained fork of Kuzu with full API compatibility.
@@ -646,17 +646,22 @@ class Neo4jBackend(KgBackend):
         return "Cypher"
 
 
-def create_backend(backend_type: str = "kuzu") -> KgBackend:
+# Backward compatibility alias
+KuzuBackend = LadybugBackend
+
+
+def create_backend(backend_type: str = "ladybug") -> KgBackend:
     """Create a graph backend instance.
 
     Args:
-        backend_type: Type of backend ('kuzu', 'neo4j')
+        backend_type: Type of backend ('ladybug', 'kuzu', 'neo4j')
 
     Returns:
         KgBackend instance
     """
     backends = {
-        "kuzu": KuzuBackend,
+        "ladybug": LadybugBackend,
+        "kuzu": LadybugBackend,
         "neo4j": Neo4jBackend,
     }
 
@@ -669,11 +674,11 @@ def create_backend(backend_type: str = "kuzu") -> KgBackend:
 def _normalize_db_config(db_config: Any) -> dict[str, Any]:
     """Normalize a ``graph_db.<key>`` entry to a ``{type, path}`` dict.
 
-    Supports the shorthand form (a bare path string, defaulting to the Kuzu/Ladybug
+    Supports the shorthand form (a bare path string, defaulting to the Ladybug
     backend) alongside the explicit ``{type: ..., path: ...}`` mapping form.
     """
     if isinstance(db_config, str):
-        return {"type": "kuzu", "path": db_config}
+        return {"type": "ladybug", "path": db_config}
     return dict(db_config)
 
 
@@ -682,7 +687,7 @@ def create_in_memory_backend() -> KgBackend:
 
     Currently returns a Ladybug-based backend connected to an in-memory database.
     """
-    backend = KuzuBackend()
+    backend = LadybugBackend()
     backend.connect(":memory:")
     return backend
 

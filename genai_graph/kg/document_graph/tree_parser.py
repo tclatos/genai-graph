@@ -48,18 +48,27 @@ _TOC_HEADER_RE = re.compile(
 # Generic structured document headings pattern (language/domain-agnostic):
 # Matches:
 # - PART / Part / SECTION / Section / CHAPTER / Chapter / ARTICLE / Article / ITEM / Item + numbers
-# - NOTE / Note / EXHIBIT / Exhibit / ANNEX / Annex / ANNEXE / Annexe / APPENDIX / Appendix + numbers
+# - NOTE / Note / EXHIBIT / Exhibit / ANNEX / Annex / ANNEXE / Annexe / APPENDIX / Appendix / SCHEDULE / Schedule + numbers
+# - TABLE / Table / CHART / Chart + codes/numbers (e.g. TABLE FFO-1.—Summary ..., Table 1: ..., CHART A)
 # - Common corporate financial statement titles (Statements of Income, Balance Sheets, Bilans, etc.)
 # - SIGNATURE / SIGNATURES
 _HEURISTIC_HEADING_RE = re.compile(
     r"^(?:"
     r"(?:(?:PART|Part|SECTION|Section|CHAPTER|Chapter|ARTICLE|Article|ITEM|Item)\s+[IVX\d]+(?:\.\d+)?[A-Za-z]?\.?)"
-    r"|(?:(?:NOTE|Note|EXHIBIT|Exhibit|ANNEX|Annex|ANNEXE|Annexe|APPENDIX|Appendix)\s+[A-Za-z\d]+(?:\.\d+)?\.?)"
+    r"|(?:(?:NOTE|Note|EXHIBIT|Exhibit|ANNEX|Annex|ANNEXE|Annexe|APPENDIX|Appendix|SCHEDULE|Schedule)\s+[A-Za-z\d]+(?:\.\d+)?\.?)"
+    r"|(?:(?:TABLE|Table|CHART|Chart)\s+[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*(?:\s*[.—:–—]\s*\S.*|\s+-\s+\S.*|\s*$))"
     r"|(?:\b(?:CONDENSED\s+)?(?:CONSOLIDATED\s+)?(?:STATEMENTS?\s+OF|BALANCE\s+SHEETS?|BILAN|COMPTE\s+DE\s+R[ÉE]SULTAT|TABLEAU\s+DE\s+FLUX)\b)"
+    r"|(?:Summary\s+Table\s+on\b)"
     r"|(?:SIGNATURES?)"
     r")",
     re.IGNORECASE,
 )
+
+_MONTHS_YEAR_RE = re.compile(
+    r"^(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}$",
+    re.IGNORECASE,
+)
+_PAGE_NUM_RE = re.compile(r"^(?:-?\s*\d+\s*-?|page\s+\d+)$", re.IGNORECASE)
 
 # Common non-heading uppercase tokens to ignore during standalone uppercase title matching
 _NON_HEADING_UPPERCASE_TOKENS = frozenset(
@@ -237,10 +246,11 @@ def _detect_heuristic_headings(raw: str) -> list[tuple[str, int, int]]:
     """Detect headings from document text heuristics when no Markdown '#' headings exist.
 
     Identifies standard structured document headings (Parts, Items, Chapters, Articles,
-    Notes, Financial Statements) and standalone uppercase titles surrounded by blank lines.
+    Notes, Tables, Charts, Financial Statements) and standalone uppercase titles surrounded by blank lines.
     """
     lines = raw.splitlines()
     headings: list[tuple[str, int, int]] = []
+    seen_titles: set[str] = set()
     in_toc_block = False
     toc_lines_passed = 0
 
@@ -266,36 +276,60 @@ def _detect_heuristic_headings(raw: str) -> list[tuple[str, int, int]]:
                 continue
 
         prev_blank = i == 0 or not lines[i - 1].strip()
-        next_blank = i == len(lines) - 1 or not lines[i + 1].strip()
+        next_blank = (
+            i == len(lines) - 1
+            or not lines[i + 1].strip()
+            or lines[i + 1].strip().startswith("|")
+            or lines[i + 1].strip().startswith("[")
+        )
 
-        # Rule 1: Structured document prefixes (Part, Item, Section, Chapter, Note, etc.)
-        if _HEURISTIC_HEADING_RE.match(s) and len(s) < 140:
-            if re.match(r"^(?:PART|Part|SECTION|Section|CHAPTER|Chapter)\b", s, re.IGNORECASE):
+        # Check for surrounding running page headers (e.g. "September 2011", "4")
+        is_near_page_marker = False
+        for offset in (-2, -1, 1, 2):
+            if 0 <= i + offset < len(lines):
+                neighbor = lines[i + offset].strip()
+                if _MONTHS_YEAR_RE.match(neighbor) or _PAGE_NUM_RE.match(neighbor):
+                    is_near_page_marker = True
+                    break
+
+        # Rule 1: Structured document prefixes (Part, Item, Section, Chapter, Table, Chart, Note, etc.)
+        if _HEURISTIC_HEADING_RE.match(s) and len(s) < 160:
+            if re.match(r"^(?:PART|Part|CHAPTER|Chapter)\b", s, re.IGNORECASE):
                 level = 1
             elif (
-                re.match(r"^(?:ITEM|Item|ARTICLE|Article)\b", s, re.IGNORECASE)
+                re.match(r"^(?:ITEM|Item|ARTICLE|Article|SECTION|Section)\b", s, re.IGNORECASE)
                 or "STATEMENTS" in s.upper()
                 or "BALANCE" in s.upper()
                 or "BILAN" in s.upper()
             ):
                 level = 2
             elif re.match(
-                r"^(?:Note|NOTE|EXHIBIT|Exhibit|ANNEX|Annex|ANNEXE|Annexe|APPENDIX|Appendix)\b", s, re.IGNORECASE
+                r"^(?:TABLE|Table|CHART|Chart|SCHEDULE|Schedule|NOTE|Note|EXHIBIT|Exhibit|ANNEX|Annex|ANNEXE|Annexe|APPENDIX|Appendix)\b",
+                s,
+                re.IGNORECASE,
             ):
                 level = 3
             else:
                 level = 2
             title = _strip_surrounding_emphasis(s)
             headings.append((title, level, i + 1))
+            seen_titles.add(title.lower())
             continue
 
         # Rule 2: Standalone multi-word uppercase titles surrounded by blank lines
         words = s.split()
         if s.isupper() and prev_blank and next_blank and not s.isdigit() and not s.startswith("<!--"):
             if 2 <= len(words) <= 10 and 6 <= len(s) <= 80:
+                # If this uppercase title is near a page marker AND has already been seen as a heading, skip it (it is a recurring running header)
+                if is_near_page_marker and s.lower() in seen_titles:
+                    continue
+                # Also skip library stamps / cover page stamps if near line 1-35
+                if i < 35 and any(tok in s for tok in ("LIBRARY", "JUN ", "JUL ", "AUG ", "SEP ", "ROOM 5030")):
+                    continue
                 if not any(token in s for token in _NON_HEADING_UPPERCASE_TOKENS):
                     title = _strip_surrounding_emphasis(s)
                     headings.append((title, 2, i + 1))
+                    seen_titles.add(s.lower())
 
     return headings
 

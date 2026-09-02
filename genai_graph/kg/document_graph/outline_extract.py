@@ -761,7 +761,7 @@ def extract_outline(
         algo_headings = detect_headings(md_text)
     elif strategy == "toc_preamble":
         anchored, _ = extract_toc_from_preamble(md_text, filename, config, warnings=warnings)
-        algo_headings = anchored if anchored else detect_headings(md_text)
+        algo_headings = anchored or detect_headings(md_text)
         preamble_toc_used = bool(anchored)
     elif strategy == "llm_full":
         algo_headings = detect_headings(md_text)

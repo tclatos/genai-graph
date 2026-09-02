@@ -39,14 +39,51 @@ _DEFAULT_LLM_TAG = "default"
 _PAGE_MARKER_RE = re.compile(r"(?im)^\s*#*\s*page\s+\d+\s*$")
 
 
-def _extract_toc_excerpt(raw: str, max_lines: int = 250) -> str:
-    """Extract the candidate Table of Contents / preamble excerpt for fast structure analysis."""
+def _extract_toc_excerpt(raw: str, max_lines: int = 350) -> tuple[str | None, int, int]:
+    """Extract candidate Table of Contents / preamble excerpt for fast structure analysis.
+
+    Returns:
+        (toc_text, start_line_1_indexed, end_line_1_indexed) or (None, 1, 1) if no TOC header is found.
+    """
     lines = raw.splitlines()
     for i, line in enumerate(lines[:500]):
         if _TOC_HEADER_RE.match(line.strip()):
             start = max(0, i)
-            return "\n".join(lines[start : start + max_lines])
-    return "\n".join(lines[:max_lines])
+            end = start + 1
+            blank_streak = 0
+            for j in range(start + 1, min(len(lines), start + max_lines)):
+                lj = lines[j].strip()
+                if not lj:
+                    blank_streak += 1
+                else:
+                    if (
+                        (blank_streak >= 1 and (lj.startswith("#") or bool(_PAGE_MARKER_RE.match(lj))))
+                        or (blank_streak >= 2 and not lj.startswith("|") and not lj.startswith("["))
+                    ) and (j > start + 2):
+                        end = j
+                        break
+                    blank_streak = 0
+                end = j + 1
+            return "\n".join(lines[start:end]), start + 1, end
+    return None, 1, 1
+
+
+class TocPreambleEntry(BaseModel):
+    """One section or table in the extracted Table of Contents."""
+
+    title: str = Field(..., description="Heading or section title as listed in the Table of Contents")
+    level: int = Field(
+        default=1,
+        description="Hierarchical level: 1 (Part/Chapter/Major Section), 2 (Item/Section), 3 (Table/Note/Subsection)",
+    )
+    page: str | None = Field(default=None, description="Page number or identifier if given in the TOC, otherwise None")
+
+
+class DocumentTocPreamble(BaseModel):
+    """Structured-output schema for TOC extraction from document preamble."""
+
+    document_title: str | None = Field(default=None, description="Title of the document if identified")
+    entries: list[TocPreambleEntry] = Field(default_factory=list, description="Ordered list of TOC entries")
 
 
 class OutlineEntry(BaseModel):
@@ -84,6 +121,14 @@ class OutlineConfig(BaseModel):
     """Policy and LLM settings for outline extraction."""
 
     llm: str | None = Field(default=None, description="LLM id (name@provider) or tag; None uses kg_build.llms.default")
+    structure_strategy: str = Field(
+        default="auto",
+        description="Structure discovery strategy: 'auto' | 'algo' | 'toc_preamble' | 'llm_full'",
+    )
+    generate_summaries: bool = Field(
+        default=True,
+        description="Whether to generate section routing descriptions and summaries with LLM",
+    )
     context_safety_ratio: float = Field(
         default=0.9,
         description="Degrade (no LLM call) when the document's token count exceeds this fraction of the context window",
@@ -146,17 +191,10 @@ def _context_window_for(llm_id: str) -> int | None:
 
 
 def _policy_hash(config: OutlineConfig, llm_id: str) -> str:
-    """Stable short hash of the LLM + policy fields that affect the outline.
-
-    Includes a ``hybrid-v2`` tag so caches from earlier outline prompts are not
-    reused: v1 flattened heading levels (the ``_infer_levels`` heuristic overrode
-    well-structured Markdown, e.g. the AMD 10-K's clean H1-H5 hierarchy collapsed
-    to mostly level 1) and forced a description for every heading (many were mere
-    title restatements). v2 respects Markdown heading levels, allows null
-    descriptions for structural dividers, and drops title-restatement descriptions.
-    """
+    """Stable short hash of the LLM + policy fields that affect the outline."""
     payload = (
-        f"hybrid-v2|{llm_id}|{config.summary_min_tokens}|{config.max_description_words}|{config.max_summary_words}"
+        f"multi-tier-v1|{llm_id}|{config.structure_strategy}|{config.generate_summaries}|"
+        f"{config.summary_min_tokens}|{config.max_description_words}|{config.max_summary_words}"
     )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
@@ -370,6 +408,109 @@ def _titles_match(a: str, b: str) -> bool:
     return na == nb or na in nb or nb in na
 
 
+def _find_heading_line(lines: list[str], title: str, cursor: int) -> int | None:
+    """Return the next 0-based line index at/after *cursor* whose text matches *title*."""
+    for i in range(cursor, len(lines)):
+        line = lines[i].strip()
+        if not line:
+            continue
+        if _titles_match(line, title):
+            return i
+    return None
+
+
+def anchor_toc_preamble(
+    raw: str,
+    entries: list[TocPreambleEntry],
+    toc_end_line: int = 1,
+) -> list[tuple[str, int, int]]:
+    """Anchor TOC preamble entries onto the body of the document to produce heading tuples.
+
+    Scans sequential lines in raw (starting after the TOC preamble) to find matching
+    headings in document order.
+
+    Returns:
+        list of (title, level, line_start_1_indexed)
+    """
+    lines = raw.splitlines()
+    cursor = max(0, toc_end_line - 1)
+    anchored: list[tuple[str, int, int]] = []
+
+    for entry in entries:
+        level = max(1, min(6, entry.level))
+        title = entry.title.strip()
+        if not title:
+            continue
+        line_idx = _find_heading_line(lines, title, cursor)
+        if line_idx is not None:
+            anchored.append((title, level, line_idx + 1))
+            cursor = line_idx + 1
+
+    return anchored
+
+
+def _call_toc_preamble_llm(
+    *, llm_id: str, filename: str, toc_text: str, max_tokens: int | None = None
+) -> DocumentTocPreamble:
+    """Call LLM with structured output to extract table of contents from preamble text."""
+    from genai_tk.core.factories.llm_factory import get_llm
+    from genai_tk.core.prompts import def_prompt
+
+    system = """
+        You extract the structured Table of Contents from the preamble or beginning of a document.
+        Return all sections/items/parts/tables in the EXACT order they appear in the Table of Contents.
+        For each entry:
+        - `title`: the exact heading/section text as listed in the Table of Contents.
+        - `level`: hierarchical depth: 1 (top-level Part/Chapter/Major Section), 2 (Item/Section/Sub-chapter), 3 (Table/Chart/Note/Subsection).
+        - `page`: reported page number or identifier if given, else null.
+
+        Do not invent sections not present in the Table of Contents.
+    """
+    user = """
+        Document: {filename}
+
+        --- Table of Contents excerpt ---
+        {toc_text}
+        --- end excerpt ---
+    """
+    prompt = def_prompt(system=system, user=user)
+    llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentTocPreamble)
+    result = (prompt | structured_llm).invoke({"filename": filename, "toc_text": toc_text})
+    assert isinstance(result, DocumentTocPreamble)
+    return result
+
+
+def extract_toc_from_preamble(
+    raw: str,
+    filename: str,
+    config: OutlineConfig,
+    *,
+    warnings: list[str],
+) -> tuple[list[tuple[str, int, int]], DocumentTocPreamble | None]:
+    """Extract TOC entries from document preamble using LLM and anchor them to document lines.
+
+    Returns:
+        (anchored_headings, preamble_toc)
+    """
+    toc_text, _start_line, end_line = _extract_toc_excerpt(raw)
+    if not toc_text:
+        return [], None
+
+    llm_id = _resolve_llm_id(config)
+    try:
+        toc = _call_toc_preamble_llm(
+            llm_id=llm_id, filename=filename, toc_text=toc_text, max_tokens=config.llm_max_tokens
+        )
+        anchored = anchor_toc_preamble(raw, toc.entries, toc_end_line=end_line)
+        return anchored, toc
+    except Exception as exc:  # noqa: BLE001
+        msg = f"{filename}: preamble TOC extraction failed: {exc}"
+        warnings.append(msg)
+        logger.warning(msg)
+        return [], None
+
+
 def _render_headings_block(headings: list[tuple[str, int, int]]) -> str:
     """Render detected headings as a numbered ``[Llevel] title`` list for the prompt."""
     if not headings:
@@ -480,19 +621,26 @@ def _build_prompt(*, filename: str, raw: str, config: OutlineConfig) -> tuple[st
 
 
 def _call_llm(
-    *, llm_id: str, filename: str, raw: str, config: OutlineConfig, max_tokens: int | None
+    *,
+    llm_id: str,
+    filename: str,
+    raw: str,
+    config: OutlineConfig,
+    max_tokens: int | None,
+    headings: list[tuple[str, int, int]] | None = None,
 ) -> DocumentOutline:
     """The LLM call boundary — isolated so tests can substitute a fake implementation.
 
-    The detected headings block is computed here from ``raw`` (the LLM input text)
+    The detected headings block is computed from ``headings`` or ``raw`` (the LLM input text)
     and passed as the ``{headings}`` template variable; this keeps the call
     signature stable for fakes while still giving the model the heading list.
     """
     from genai_tk.core.factories.llm_factory import get_llm
     from genai_tk.core.prompts import def_prompt
 
+    target_headings = headings if headings is not None else detect_headings(raw)
     system, user = _build_prompt(filename=filename, raw=raw, config=config)
-    headings_block = _render_headings_block(detect_headings(raw))
+    headings_block = _render_headings_block(target_headings)
     prompt = def_prompt(system=system, user=user)
     llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
     structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentOutline)
@@ -505,7 +653,13 @@ def _call_llm(
 
 
 def _call_llm_with_retry(
-    *, llm_id: str, filename: str, raw: str, config: OutlineConfig, warnings: list[str]
+    *,
+    llm_id: str,
+    filename: str,
+    raw: str,
+    config: OutlineConfig,
+    warnings: list[str],
+    headings: list[tuple[str, int, int]] | None = None,
 ) -> DocumentOutline | None:
     """Call the LLM, retrying once with a larger completion budget on a length-limit failure."""
     max_tokens = config.llm_max_tokens
@@ -513,7 +667,14 @@ def _call_llm_with_retry(
     for attempt in range(2):
         started = time.monotonic()
         try:
-            outline = _call_llm(llm_id=llm_id, filename=filename, raw=raw, config=config, max_tokens=max_tokens)
+            outline = _call_llm(
+                llm_id=llm_id,
+                filename=filename,
+                raw=raw,
+                config=config,
+                max_tokens=max_tokens,
+                headings=headings,
+            )
             if attempt > 0:
                 logger.info("{}: outline retry succeeded ({:.1f}s)", context, time.monotonic() - started)
             return _clean_outline(outline, config)
@@ -565,10 +726,12 @@ def extract_outline(
     """Extract a document's outline (TOC + summaries), cache-addressed by *markdown_hash*.
 
     Idempotent: a fresh cache hit returns the stored result without an LLM call.
-    When the document exceeds the model's context window (scaled by
-    ``context_safety_ratio``), no LLM call is made and a degraded result is
-    returned (and cached) so the build falls back to the algorithmic parser. An
-    LLM call failure is likewise cached as degraded, so a re-run does not retry.
+    Supports multi-tier structure discovery:
+    - ``algo``: fast deterministic heading parsing (markdown-it + domain heuristics)
+    - ``toc_preamble``: extracts printed TOC from preamble using LLM and anchors to body lines
+    - ``llm_full``: full document outline extraction
+    - ``auto``: chooses preamble TOC when a printed TOC exists in preamble, native markdown
+      when rich Markdown headings are present, and heuristic fallback otherwise.
 
     Args:
         md_text: Full Markdown document text.
@@ -578,8 +741,7 @@ def extract_outline(
         warnings: List to append human-readable warnings to.
 
     Returns:
-        `OutlineResult`; ``.outline`` is None when degraded (caller falls back
-        to the algorithmic parser with no summaries).
+        `OutlineResult`; ``.outline`` is None when degraded.
     """
     llm_id = _resolve_llm_id(config)
     cache_path = _cache_path(config, llm_id, markdown_hash)
@@ -590,6 +752,49 @@ def extract_outline(
             # original extraction and is reset so callers' totals count fresh calls only.
             return cached.model_copy(update={"llm_calls": 0})
 
+    strategy = config.structure_strategy
+    algo_headings: list[tuple[str, int, int]] = []
+    preamble_toc_used = False
+
+    # 1. Determine structure according to configured strategy
+    if strategy == "algo":
+        algo_headings = detect_headings(md_text)
+    elif strategy == "toc_preamble":
+        anchored, _ = extract_toc_from_preamble(md_text, filename, config, warnings=warnings)
+        algo_headings = anchored if anchored else detect_headings(md_text)
+        preamble_toc_used = bool(anchored)
+    elif strategy == "llm_full":
+        algo_headings = detect_headings(md_text)
+    elif strategy == "auto":
+        raw_headings = detect_headings(md_text)
+        toc_text, _s, _e = _extract_toc_excerpt(md_text)
+        # If a printed TOC exists and there are few native markdown headings (<10), extract via preamble
+        if toc_text is not None and len([h for h in raw_headings if h[1] > 0]) < 10:
+            anchored, _ = extract_toc_from_preamble(md_text, filename, config, warnings=warnings)
+            if len(anchored) >= 3:
+                algo_headings = anchored
+                preamble_toc_used = True
+            else:
+                algo_headings = raw_headings
+        else:
+            algo_headings = raw_headings
+    else:
+        algo_headings = detect_headings(md_text)
+
+    # 2. If summaries are disabled, return pure structure with zero additional LLM summary calls
+    if not config.generate_summaries:
+        entries = [OutlineEntry(title=title, level=level) for title, level, _ in algo_headings]
+        doc_outline = DocumentOutline(
+            document_description=f"Document with {len(entries)} section(s)",
+            document_summary="",
+            sections=entries,
+        )
+        result = OutlineResult(outline=doc_outline, llm_calls=(1 if preamble_toc_used else 0))
+        if cache_path is not None:
+            _write_cached(cache_path, result)
+        return result
+
+    # 3. Summaries requested: check context window safety
     cleaned = _clean_markdown_for_prompt(md_text)
     doc_tokens = count_tokens(cleaned)
     context_window = _context_window_for(llm_id)
@@ -600,22 +805,38 @@ def extract_outline(
         )
         warnings.append(msg)
         logger.warning(msg)
-        result = OutlineResult(degraded=True, reason="context_window_overflow")
+        result = OutlineResult(
+            outline=None,
+            degraded=True,
+            reason="context_window_overflow",
+            llm_calls=(1 if preamble_toc_used else 0),
+        )
         if cache_path is not None:
             _write_cached(cache_path, result)
         return result
 
-    outline = _call_llm_with_retry(llm_id=llm_id, filename=filename, raw=cleaned, config=config, warnings=warnings)
+    outline = _call_llm_with_retry(
+        llm_id=llm_id,
+        filename=filename,
+        raw=cleaned,
+        config=config,
+        warnings=warnings,
+        headings=algo_headings,
+    )
     if outline is None:
-        result = OutlineResult(degraded=True, reason="llm_call_failed")
+        result = OutlineResult(
+            outline=None,
+            degraded=True,
+            reason="llm_call_failed",
+            llm_calls=(1 if preamble_toc_used else 0),
+        )
     else:
-        # Anchor the LLM's entries onto the detected Markdown headings: the
+        # Anchor the LLM's entries onto the detected headings: the
         # heading's verbatim title and level are authoritative (the LLM only
         # supplies description/summary), so the cached outline matches the
         # structure the downstream merge slices on (one entry per heading).
-        algo_headings = detect_headings(md_text)
         aligned = _align_outline(outline, algo_headings)
-        result = OutlineResult(outline=aligned, llm_calls=1)
+        result = OutlineResult(outline=aligned, llm_calls=(2 if preamble_toc_used else 1))
     if cache_path is not None:
         _write_cached(cache_path, result)
     return result

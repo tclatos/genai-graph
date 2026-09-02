@@ -1,4 +1,6 @@
 
+
+
 # Middleware
 Consider ToolCallLimitMiddleware  
 
@@ -11,9 +13,6 @@ Analyse how KG building van be speed uo wuth new
  (kg/backend.py): KuzuBackend.connect(..., enable_multi_writes=) forwards to ladybug.Database; new KuzuBackend.attach(db) reuses an already-open Database with a fresh Connection (no vector extension) — the shape Ladybug requires for shared-DB workers.
 and async call
 
-Move genai_graph/kg/parallel.py  to utils/ladybug (or better)
-Make SharedKuzuParallel a Pydantic class
-Refactor KuzuBackend ? 
 
 
 

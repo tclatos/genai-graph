@@ -144,6 +144,70 @@ class TestExtractOutline:
         assert result.outline is not None
         assert result.llm_calls == 1  # re-extracted despite a present-but-corrupt cache
 
+    def test_preamble_toc_extraction_and_anchoring(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from genai_graph.kg.document_graph.outline_extract import (
+            DocumentTocPreamble,
+            TocPreambleEntry,
+            extract_toc_from_preamble,
+        )
+
+        doc_text = """
+Table of Contents
+
+1. Overview ................. 1
+2. Financials ............... 5
+
+Page 1
+
+# Overview
+This is the overview body.
+
+Page 5
+
+# Financials
+These are the financials.
+"""
+        fake_toc = DocumentTocPreamble(
+            document_title="Test Document",
+            entries=[
+                TocPreambleEntry(title="Overview", level=1, page="1"),
+                TocPreambleEntry(title="Financials", level=1, page="5"),
+            ],
+        )
+        monkeypatch.setattr(
+            "genai_graph.kg.document_graph.outline_extract._call_toc_preamble_llm",
+            lambda **kwargs: fake_toc,
+        )
+        config = _config(tmp_path)
+        config.structure_strategy = "toc_preamble"
+        warnings: list[str] = []
+
+        anchored, toc = extract_toc_from_preamble(doc_text, "doc.md", config, warnings=warnings)
+        assert toc is not None
+        assert len(anchored) == 2
+        assert anchored[0][0] == "Overview"
+        assert anchored[1][0] == "Financials"
+
+    def test_structure_strategy_algo_no_summaries(self, tmp_path: Path) -> None:
+        doc_text = """
+# Section One
+Text 1
+
+## Section Two
+Text 2
+"""
+        config = _config(tmp_path)
+        config.structure_strategy = "algo"
+        config.generate_summaries = False
+        warnings: list[str] = []
+
+        result = extract_outline(doc_text, "md5hash123", "doc.md", config, warnings=warnings)
+        assert result.outline is not None
+        assert result.llm_calls == 0
+        assert len(result.outline.sections) == 2
+        assert result.outline.sections[0].title == "Section One"
+        assert result.outline.sections[0].description is None
+
 
 @pytest.mark.unit
 class TestRestatementFilter:

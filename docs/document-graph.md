@@ -36,6 +36,9 @@ produced. Chunking/embedding based RAG is a separate, unrelated path (see
 [`DocumentDirectoryFactory`](#documentdirectoryfactory) below); the Document Graph is
 for heading-based, vectorless navigation.
 
+For details on the multi-tier heading decomposition and LLM enrichment strategies,
+see the **[Document Decomposition Guide](document-decomposition-guide.md)**.
+
 ## Factories
 
 | Factory | Produces | Use it when |

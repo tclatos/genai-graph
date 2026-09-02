@@ -49,6 +49,8 @@ def document_graph_flow(
     force_stage: str | None = None,
     delete_first: bool = False,
     llm: str | None = None,
+    structure_strategy: str = "auto",
+    generate_summaries: bool = True,
     llm_max_tokens: int | None = None,
     summary_min_tokens: int = 800,
     outline_cache_dir: str | None = None,
@@ -73,6 +75,8 @@ def document_graph_flow(
             enabling the LLM build path: a flash model discovers each document's
             structure and summarizes its sections in one call. None (default) keeps
             the fast algorithmic-only path. See ``kg_build.llms.*`` config tags.
+        structure_strategy: Decomposition strategy: 'auto' | 'algo' | 'toc_preamble' | 'llm_full'.
+        generate_summaries: Whether to generate LLM section descriptions and summaries.
         llm_max_tokens: Explicit max output tokens for the outline call; raise for
             reasoning models that exhaust their completion budget.
         summary_min_tokens: Prompt guidance for what counts as a "substantial"
@@ -105,10 +109,12 @@ def document_graph_flow(
 
         resolved_llm = _resolve_build_llm(llm)
         outline_config: OutlineConfig | None = None
-        if resolved_llm is not None:
+        if resolved_llm is not None or structure_strategy != "algo":
             cache_root = outline_cache_dir or str(Path(db_path).with_suffix("")) + "_outlines"
             outline_config = OutlineConfig(
                 llm=resolved_llm,
+                structure_strategy=structure_strategy,
+                generate_summaries=generate_summaries,
                 llm_max_tokens=llm_max_tokens,
                 summary_min_tokens=summary_min_tokens,
                 cache_root=cache_root,

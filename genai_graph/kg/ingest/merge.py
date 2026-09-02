@@ -968,7 +968,21 @@ def merge_relationships_batch(
                           (to:{to_type} {{{to_key_field}: to_id}})
                     MERGE (from)-[:{rel_name}]->(to)
                 """
-                kuzu_conn.execute(merge_rel_query)
+                try:
+                    kuzu_conn.execute(merge_rel_query)
+                except Exception as batch_err:
+                    logger.warning(
+                        f"Batch LOAD FROM failed for {rel_name} ({len(row_data)} rows): {batch_err}; falling back to point merges"
+                    )
+                    for r in row_data:
+                        f_id = r["from_id"]
+                        t_id = r["to_id"]
+                        point_q = f"""
+                            MATCH (from:{from_type} {{{from_key_field}: $from_id}}),
+                                  (to:{to_type} {{{to_key_field}: $to_id}})
+                            MERGE (from)-[:{rel_name}]->(to)
+                        """
+                        kuzu_conn.execute(point_q, parameters={"from_id": f_id, "to_id": t_id})
             total_created += max(0, _count_relationships(conn, rel_name) - before)
 
             # Collect Arrow table for parquet export if collector is active

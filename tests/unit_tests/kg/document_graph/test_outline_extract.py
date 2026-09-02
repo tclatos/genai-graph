@@ -23,7 +23,9 @@ def _outline() -> DocumentOutline:
         document_summary="A doc summary.",
         sections=[
             OutlineEntry(title="Title", level=1, description="Company overview and fiscal-year basis."),
-            OutlineEntry(title="Section A", level=2, description="Product lines and target markets.", summary="A summary."),
+            OutlineEntry(
+                title="Section A", level=2, description="Product lines and target markets.", summary="A summary."
+            ),
         ],
     )
 
@@ -152,7 +154,9 @@ class TestRestatementFilter:
         assert _is_title_restatement("Gaming Segment", "Introduces the Gaming segment.")
         assert _is_title_restatement("Our Strategy", "Outlines our strategy.")
         assert not _is_title_restatement("Data Center Products", "Lists server CPUs, GPUs and DPUs.")
-        assert not _is_title_restatement("Non-custom products", "Off-the-shelf CPUs/GPUs recognized on delivery (ASC 606).")
+        assert not _is_title_restatement(
+            "Non-custom products", "Off-the-shelf CPUs/GPUs recognized on delivery (ASC 606)."
+        )
         assert not _is_title_restatement("Title", None)
 
     def test_clean_outline_drops_restatements_keeps_substantive(self, tmp_path: Path) -> None:

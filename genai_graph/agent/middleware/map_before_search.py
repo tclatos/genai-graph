@@ -28,9 +28,7 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolM
 from loguru import logger
 
 _SEARCH_TOOL = "search_sections"
-_ORIENTING_TOOLS = frozenset(
-    {"get_folder_toc", "get_document_toc", "get_section_content", "list_documents"}
-)
+_ORIENTING_TOOLS = frozenset({"get_folder_toc", "get_document_toc", "get_section_content", "list_documents"})
 _NUDGE = (
     "You have called search_sections several times in a row without orienting. "
     "Before searching again, call get_document_toc to map the most relevant "

@@ -142,9 +142,7 @@ class TestMergeNodesBatchErrorHandler:
         from genai_graph.kg.ingest.merge import merge_nodes_batch
 
         # Real table WITHOUT the bad_field column declared in the Pydantic model
-        graph_backend.execute(
-            "CREATE NODE TABLE _SchemaNode(id STRING, name STRING, score DOUBLE, PRIMARY KEY(id))"
-        )
+        graph_backend.execute("CREATE NODE TABLE _SchemaNode(id STRING, name STRING, score DOUBLE, PRIMARY KEY(id))")
 
         # Must raise the real DB error (Cannot find property bad_field), NOT an AttributeError
         with pytest.raises(RuntimeError, match="Cannot find property"):
@@ -171,9 +169,7 @@ class TestMergeNodesBatchErrorHandler:
 
         from genai_graph.kg.ingest.merge import merge_nodes_batch
 
-        graph_backend.execute(
-            "CREATE NODE TABLE _SchemaNode(id STRING, name STRING, score DOUBLE, PRIMARY KEY(id))"
-        )
+        graph_backend.execute("CREATE NODE TABLE _SchemaNode(id STRING, name STRING, score DOUBLE, PRIMARY KEY(id))")
         registry = self._registry_for()
         config = registry.get("_SchemaNode")
 

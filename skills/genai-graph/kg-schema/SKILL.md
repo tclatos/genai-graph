@@ -43,13 +43,15 @@ Node models are plain Pydantic v2 models; nested model fields become relations.
 ```python
 from pydantic import BaseModel
 
+
 class Company(BaseModel):
     name: str
     sector: str | None = None
 
+
 class Project(BaseModel):
     title: str
-    client: Company            # → relation auto-detected
+    client: Company  # → relation auto-detected
     team: list[Person] = Field(default_factory=list)
 ```
 
@@ -62,7 +64,7 @@ company_node = GraphNode(node_class=Company, name_from="name", key_from="name")
 project_node = GraphNode(node_class=Project, name_from="title", key_from="title")
 
 schema = GraphSchema(
-    root_model_class=Project,          # entry point for field-path traversal
+    root_model_class=Project,  # entry point for field-path traversal
     nodes=[project_node, company_node],
     relations=[
         GraphRelation(from_node=project_node, to_node=company_node, name="FOR_CLIENT"),
@@ -109,8 +111,8 @@ them. You can also exclude fields manually via `GraphNode(excluded_fields={"inte
 ```python
 class Contract(BaseModel):
     supplier: Supplier
-    p_start_date_: str    # edge property → stored on the relation
-    internal_id: str      # node property
+    p_start_date_: str  # edge property → stored on the relation
+    internal_id: str  # node property
 ```
 
 ## Coherence validation
@@ -147,9 +149,9 @@ print(combined.get_warnings())
 from genai_graph.kg.schema import ResolvedSchema
 
 resolved = ResolvedSchema.from_graph_schema(schema)
-print(resolved.to_markdown())        # table summary
-resolved.to_html_file("schema.html") # interactive D3 diagram
-resolved.to_json_str()               # D3 JSON for tools/prompts
+print(resolved.to_markdown())  # table summary
+resolved.to_html_file("schema.html")  # interactive D3 diagram
+resolved.to_json_str()  # D3 JSON for tools/prompts
 ```
 
 Inject BAML field/class descriptions via

@@ -55,7 +55,7 @@ from pathlib import Path
 
 analyzer = SchemaAnalyzer(Path("export.jsonl"))
 analyzer.analyze()
-statements = analyzer.generate_kuzu_schema()   # CREATE NODE TABLE / CREATE REL TABLE …
+statements = analyzer.generate_kuzu_schema()  # CREATE NODE TABLE / CREATE REL TABLE …
 
 converter = Neo4jToKuzuConverter(Path("export.jsonl"))
 stats = converter.convert(Path("./ladybug_import"))  # per-label JSON files

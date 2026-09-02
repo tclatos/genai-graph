@@ -102,6 +102,7 @@ HAS_SUBSECTION: GraphRelation = GraphRelation(
 # are split on a token budget. The hierarchy stays ``Document → Section``; chunks
 # are a flat, indexed leaf layer reached via ``HAS_CHUNK``.
 
+
 class SectionChunk(BaseModel):
     """A contiguous text slice of a MarkdownSection, indexed for semantic search."""
 

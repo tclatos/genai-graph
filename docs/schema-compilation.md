@@ -35,6 +35,7 @@ field tree. At each step it records the dotted path from the root to each `Graph
 class Company(BaseModel):
     name: str
 
+
 class Project(BaseModel):
     title: str
     client: Company
@@ -52,7 +53,7 @@ company_node = GraphNode(
     node_class=Company,
     name_from="name",
     key_from="name",
-    field_paths=[{"from": "", "to": "client"}],   # only use the primary relationship
+    field_paths=[{"from": "", "to": "client"}],  # only use the primary relationship
 )
 ```
 
@@ -147,6 +148,7 @@ and need to recompute:
 
 ```python
 from genai_graph.kg.schema.compiler import compute_excluded_fields
+
 compute_excluded_fields(schema)
 ```
 
@@ -215,8 +217,12 @@ Pass `None` or `{}` to use only `GraphNode.description` fallbacks.
 
 ```python
 from genai_graph.kg.schema import (
-    GraphNode, GraphRelation, GraphSchema, ResolvedSchema,
-    build_model_field_map, validate_schema_coherence,
+    GraphNode,
+    GraphRelation,
+    GraphSchema,
+    ResolvedSchema,
+    build_model_field_map,
+    validate_schema_coherence,
 )
 
 # 1. Define
@@ -231,8 +237,8 @@ resolved = ResolvedSchema.from_graph_schema(schema)
 print(resolved.to_markdown())
 
 # 4. Export for LLM tool
-resolved.to_json_str()       # D3 JSON
-resolved.to_html_file(...)   # Interactive D3 graph
+resolved.to_json_str()  # D3 JSON
+resolved.to_html_file(...)  # Interactive D3 graph
 
 # 5. Ingest + query (see graph-definition-guide.md)
 ```

@@ -234,9 +234,7 @@ class DocumentGraphFactory(KgFactory):
             degraded,
             llm_calls,
         )
-        return OutlineStats(
-            total_files=len(files), degraded_count=degraded, llm_calls=llm_calls, warnings=warnings
-        )
+        return OutlineStats(total_files=len(files), degraded_count=degraded, llm_calls=llm_calls, warnings=warnings)
 
     def _build_bundle(self, path: Path, tree: FolderTree, content_hash: str) -> DocumentGraphBundle:
         from genai_tk.utils.hashing import buffer_digest

@@ -21,13 +21,15 @@ This project uses **Pydantic v2** as the standard for data modeling. All new cod
 ```python
 from pydantic import BaseModel, Field
 
+
 class UserResult(BaseModel):
     """Result of user lookup operation."""
+
     user_id: str
     name: str
     email: str | None = None
     tags: list[str] = Field(default_factory=list)
-    
+
     # Use model_config instead of class Config
     model_config = {"frozen": True}  # For immutable models
 ```
@@ -36,6 +38,7 @@ class UserResult(BaseModel):
 ```python
 # Avoid dataclasses - use Pydantic instead
 from dataclasses import dataclass
+
 
 @dataclass
 class UserResult:  # ❌ Use Pydantic BaseModel
@@ -91,6 +94,7 @@ class OperationResult(BaseModel):
     count: int
     message: str | None = None
 
+
 def process() -> OperationResult:
     return OperationResult(status="ok", count=5)
 ```
@@ -102,13 +106,14 @@ Use modern Python type hints (3.10+ syntax):
 ```python
 from pydantic import BaseModel, Field
 
+
 class Config(BaseModel):
     # Use | None instead of Optional[str]
     name: str | None = None
-    
+
     # Use list[str] instead of List[str]
     tags: list[str] = Field(default_factory=list)
-    
+
     # Use dict[str, Any] instead of Dict[str, Any]
     metadata: dict[str, Any] = Field(default_factory=dict)
 ```
@@ -153,15 +158,16 @@ Use Pydantic validation for input validation:
 ```python
 from pydantic import BaseModel, field_validator
 
+
 class QueryInput(BaseModel):
     query: str
     limit: int = 10
-    
-    @field_validator('limit')
+
+    @field_validator("limit")
     @classmethod
     def validate_limit(cls, v: int) -> int:
         if v < 1 or v > 1000:
-            raise ValueError('limit must be between 1 and 1000')
+            raise ValueError("limit must be between 1 and 1000")
         return v
 ```
 

@@ -56,20 +56,25 @@ from genai_graph.kg.factories import JsonFileBackedFactory
 from genai_graph.kg.schema import GraphNode, GraphRelation, GraphSchema
 from pydantic import BaseModel
 
+
 class Customer(BaseModel):
     id: str
     name: str
+
 
 class Opportunity(BaseModel):
     id: str
     title: str
     customer: Customer
 
+
 class OpportunityGraph(JsonFileBackedFactory):
     schema = GraphSchema(
         root_model_class=Opportunity,
-        nodes=[GraphNode(node_class=Opportunity, name_from="title", key_from="id"),
-               GraphNode(node_class=Customer, name_from="name", key_from="id")],
+        nodes=[
+            GraphNode(node_class=Opportunity, name_from="title", key_from="id"),
+            GraphNode(node_class=Customer, name_from="name", key_from="id"),
+        ],
         relations=[GraphRelation(from_node=..., to_node=..., name="FOR_CUSTOMER")],
     )
     source_model = Opportunity
@@ -90,16 +95,21 @@ Subclass `MarkdownBamlFactory`, implement `build_schema()` and `extract_from_mar
 from genai_graph.kg.factories import MarkdownBamlFactory
 from genai_graph.kg.schema import GraphSchema
 
+
 class ReviewedOpportunityGraph(MarkdownBamlFactory):
     def build_schema(self) -> GraphSchema:
         nodes, relations = self.get_document_schema_elements(ReviewedOpportunityNode)
-        return GraphSchema(root_model_class=ReviewedOpportunity,
-                           nodes=[ReviewedOpportunityNode, *nodes], relations=relations)
+        return GraphSchema(
+            root_model_class=ReviewedOpportunity, nodes=[ReviewedOpportunityNode, *nodes], relations=relations
+        )
 
     def extract_from_markdown(self, md_text: str) -> BaseModel:
         from genai_tk.extra.structured.baml_processor import BamlStructuredProcessor
+
         processor = BamlStructuredProcessor(
-            model_cls=ReviewedOpportunity, function_name="ExtractRainbow", kvstore_id="",
+            model_cls=ReviewedOpportunity,
+            function_name="ExtractRainbow",
+            kvstore_id="",
         )
         return processor.analyze_document("doc", md_text)
 ```
@@ -118,10 +128,13 @@ factories becomes one `Customer` table.
 ```python
 # schema/canonical_nodes.py
 from genai_graph.kg.schema import GraphNode
+
 customer_node = GraphNode(node_class=Customer, name_from="name", key_from="id")
 
 # schema/order_graph.py
 from schema.canonical_nodes import customer_node
+
+
 class OrderGraph(JsonFileBackedFactory):
     schema = GraphSchema(root_model_class=Order, nodes=[order_node, customer_node], relations=[...])
 ```

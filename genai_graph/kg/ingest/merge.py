@@ -792,9 +792,7 @@ def merge_nodes_batch(
 def _count_relationships(conn: KgBackend, rel_name: str) -> int:
     """Return the current row count of a relationship table (0 on a fresh/absent table)."""
     try:
-        df = conn.execute_get_as_df(
-            f"MATCH ()-[r:{rel_name}]->() RETURN count(r) AS c", None, union=False
-        )
+        df = conn.execute_get_as_df(f"MATCH ()-[r:{rel_name}]->() RETURN count(r) AS c", None, union=False)
     except Exception as exc:  # noqa: BLE001
         logger.debug("count({}) failed: {}", rel_name, exc)
         return 0

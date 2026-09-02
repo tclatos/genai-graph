@@ -68,9 +68,9 @@ from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
 backend = KuzuBackend()
 backend.connect("./data/kg/tree.db")
 factory = DocumentGraphFactory(sources=["./docs"], include=["*.md"])
-result = ingest_document_graph(backend, factory)           # MERGEs everything
+result = ingest_document_graph(backend, factory)  # MERGEs everything
 result = ingest_document_graph(backend, factory, force=True)  # rebuild sections for existing docs
-drop_document_graph(backend)                               # drop Section/Document/Folder tables
+drop_document_graph(backend)  # drop Section/Document/Folder tables
 ```
 
 `ingest_document_graph` builds the schema, parses each file's heading hierarchy
@@ -100,8 +100,12 @@ the CLI, an agent's tools, and the Textual TUI:
 
 ```python
 from genai_graph.kg.query.document_graph_tools import (
-    list_documents, get_document_toc, get_section_content,
-    reconstruct_document, reconstruct_section, search_sections,
+    list_documents,
+    get_document_toc,
+    get_section_content,
+    reconstruct_document,
+    reconstruct_section,
+    search_sections,
     create_document_graph_tools,
 )
 ```

@@ -66,6 +66,7 @@ The Neo4j factory auto-generates `mapped_props["id"]` from `key_field` (see `neo
 ```python
 from ekg_atos.baml_client.types import Partner as BamlPartner
 
+
 class Partner(BamlPartner):
     """Partner organization (canonical type for deduplication)."""
 ```
@@ -99,11 +100,13 @@ Replace raw class imports with the node singleton:
 ```python
 # Before
 from ekg_atos.baml_client.types import Partner
+
 # ...nodes list...
 GraphNode(node_class=Partner, name_from="name", key_from="name")
 
 # After
 from ekg_atos.schema.canonical_nodes import PartnerNode
+
 # ...nodes list...
 PartnerNode  # use the singleton directly
 ```
@@ -125,6 +128,7 @@ Also verify at runtime:
 ```python
 from ekg_atos.schema.common_nodes import Partner
 from ekg_atos.schema.stratnav import StratnavGraph
+
 sg = StratnavGraph.__new__(StratnavGraph)
 mapping = [m for m in sg.get_node_mappings() if m.neo4j_label == "TechnologyPartner"][0]
 assert mapping.node_class.__name__ == "Partner"

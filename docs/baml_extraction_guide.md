@@ -127,7 +127,7 @@ class ReviewedOpportunityGraph(JsonFileBackedFactory, BaseModel):
         relations = [
             GraphRelation(
                 from_node=ReviewedOpportunityNode,  # GraphNode instance
-                to_node=OpportunityNode,            # GraphNode instance
+                to_node=OpportunityNode,  # GraphNode instance
                 name="REVIEWS",
                 description="Links review to opportunity",
             ),
@@ -150,11 +150,11 @@ class ReviewedOpportunityGraph(JsonFileBackedFactory, BaseModel):
 
 ```python
 GraphNode(
-    node_class=Person,           # Pydantic class
-    name_from="name",            # Field for display name (or callable)
-    key_from="name",             # Primary key for dedup (or "AUTO_ID" or callable)
-    description="Team member",   # Documentation
-    index_fields=["name"],       # Fields to index for search
+    node_class=Person,  # Pydantic class
+    name_from="name",  # Field for display name (or callable)
+    key_from="name",  # Primary key for dedup (or "AUTO_ID" or callable)
+    description="Team member",  # Documentation
+    index_fields=["name"],  # Fields to index for search
 )
 ```
 
@@ -220,8 +220,7 @@ GraphNode(
     node_class=RiskAnalysis,
     # ✅ Correct: getattr extracts the enum member name
     name_from=lambda data, _: (
-        getattr(data.get("risk_category"), "name", None)
-        or str(data.get("risk_category", "other_risk"))
+        getattr(data.get("risk_category"), "name", None) or str(data.get("risk_category", "other_risk"))
     ),
     # ❌ Wrong: str(enum) gives "SWProjectRisks.ScheduleRisk"
     #   name_from=lambda data, _: str(data.get("risk_category")),
@@ -237,9 +236,7 @@ GraphNode(
     node_class=ReviewedOpportunity,
     extra_classes=[FinancialMetrics, KeyStatementOfWorkElement],
     name_from=lambda data, _: "Review:" + str(data.get("start_date")),
-    key_from=lambda data, _: str(
-        data.get("opportunity", {}).get("opportunity_id", "unknown")
-    ),
+    key_from=lambda data, _: str(data.get("opportunity", {}).get("opportunity_id", "unknown")),
 )
 ```
 
@@ -253,8 +250,8 @@ Properties from `FinancialMetrics` and `KeyStatementOfWorkElement` will be embed
 ```python
 GraphRelation(
     from_node=opportunity_node,  # GraphNode instance
-    to_node=customer_node,       # GraphNode instance
-    name="HAS_CUSTOMER",         # Relationship type name
+    to_node=customer_node,  # GraphNode instance
+    name="HAS_CUSTOMER",  # Relationship type name
     description="Opportunity belongs to customer",
 )
 ```
@@ -302,7 +299,7 @@ GraphRelation(
     to_node=person_node,
     name="HAS_TEAM_MEMBER",
     # Tuple: (from_path, to_path) — "" means root
-    field_paths=[("" , "team")],
+    field_paths=[("", "team")],
 )
 
 GraphRelation(
@@ -340,7 +337,7 @@ convention:
 ```python
 class Partner(BaseModel):
     name: str
-    p_role_: str | None = None   # → becomes "role" edge property
+    p_role_: str | None = None  # → becomes "role" edge property
 ```
 
 Fields prefixed with `p_` and suffixed with `_` are:
@@ -482,9 +479,7 @@ class FinancialMetrics {
 GraphNode(
     node_class=ReviewedOpportunity,
     extra_classes=[FinancialMetrics],  # Embed into parent
-    key_from=lambda data, _: str(
-        data.get("opportunity", {}).get("opportunity_id", "unknown")
-    ),
+    key_from=lambda data, _: str(data.get("opportunity", {}).get("opportunity_id", "unknown")),
 )
 ```
 
@@ -572,17 +567,23 @@ class identity — this allows `common_nodes.Customer` (which extends
 from ekg_atos.baml_client.types import Customer as BamlCustomer
 from ekg_atos.baml_client.types import Partner as BamlPartner
 
+
 class Customer(BamlCustomer):
     """Extended Customer with fields from multiple sources."""
-    iris_code: str | None = None      # From Neo4j / CRM
+
+    iris_code: str | None = None  # From Neo4j / CRM
     country: str | None = None
+
 
 class Partner(BamlPartner):
     """Partner organization (canonical type for deduplication)."""
+
     # Unifies Neo4j TechnologyPartner and BAML Partner
+
 
 class Geo(BamlGeo):
     """Canonical geographic location type."""
+
     # __name__ == "Geo" matches BamlGeo.__name__ — same table
 ```
 
@@ -609,7 +610,7 @@ label while mapping to the canonical class:
 ```python
 Neo4jNodeMapping(
     neo4j_label="TechnologyPartner",  # Label in the Neo4j export
-    node_class=Partner,               # Canonical type (table = "Partner")
+    node_class=Partner,  # Canonical type (table = "Partner")
     key_field="name",
 )
 ```

@@ -30,14 +30,17 @@ class EmbeddingsHandler:
             embeddings_tag: Legacy model tag from config (deprecated, use embeddings_id)
 
         Raises:
-            ValueError: If neither embeddings_id nor embeddings_tag is provided
+            ValueError: If neither embeddings_id nor embeddings_tag is provided and no default exists
         """
         if not embeddings_id and not embeddings_tag:
-            msg = "Either embeddings_id or embeddings_tag must be provided"
-            raise ValueError(msg)
+            from genai_tk.core.factories.embeddings_factory import embeddings_config
 
-        # Resolve to embeddings_id using EmbeddingsFactory
-        if embeddings_id:
+            try:
+                self.embeddings_id = embeddings_config().models.default
+            except Exception as exc:
+                msg = "Either embeddings_id or embeddings_tag must be provided"
+                raise ValueError(msg) from exc
+        elif embeddings_id:
             self.embeddings_id = embeddings_id
         else:
             # Legacy: resolve tag to ID
@@ -48,7 +51,7 @@ class EmbeddingsHandler:
             self.factory = get_embeddings(embeddings=self.embeddings_id, cache_embeddings=True)
             logger.debug("EmbeddingsHandler initialized with model: {}", self.embeddings_id)
         except Exception as e:
-            logger.error("Failed to initialize EmbeddingsFactory for {}: {}", self.embeddings_id, e)
+            logger.debug("Failed to initialize EmbeddingsFactory for {}: {}", self.embeddings_id, e)
             raise
 
     def compute_embeddings(self, text: str) -> list[float]:

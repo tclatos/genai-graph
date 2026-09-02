@@ -15,6 +15,7 @@ from genai_graph.kg.backend import KuzuBackend
 from genai_graph.kg.document_graph.ingest import drop_document_graph, ingest_document_graph
 from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
 from genai_graph.kg.query.document_graph_tools import (
+    get_available_indexes,
     get_document_toc,
     get_folder_path,
     get_folder_tree,
@@ -22,7 +23,9 @@ from genai_graph.kg.query.document_graph_tools import (
     list_documents,
     reconstruct_document,
     reconstruct_section,
+    resolve_document_id,
     resolve_folder_id,
+    resolve_node_ref,
     search_sections,
 )
 
@@ -211,6 +214,38 @@ class TestDocumentGraphTools:
         rows = search_sections(ingested_backend, "knobs")
         assert len(rows) == 1
         assert rows[0]["title"] == "Configuration"
+
+    def test_search_sections_modes_and_filters(self, ingested_backend: KuzuBackend) -> None:
+        # 1. Native Cypher search mode
+        cypher_rows = search_sections(ingested_backend, "knobs", mode="cypher")
+        assert len(cypher_rows) == 1
+        assert cypher_rows[0]["title"] == "Configuration"
+
+        # 2. BM25 search mode (falls back to CONTAINS if no FTS index)
+        bm25_rows = search_sections(ingested_backend, "knobs", mode="bm25")
+        assert len(bm25_rows) == 1
+        assert bm25_rows[0]["title"] == "Configuration"
+
+        # 3. Filter by document_id (filename or hash)
+        alpha_rows = search_sections(ingested_backend, "Installation", document_id="alpha.md")
+        assert len(alpha_rows) == 1
+        assert alpha_rows[0]["title"] == "Installation"
+
+        # Searching for Alpha content scoped to beta.md returns nothing
+        beta_rows = search_sections(ingested_backend, "Installation", document_id="beta.md")
+        assert len(beta_rows) == 0
+
+        # 4. Resolve helpers
+        assert resolve_document_id(ingested_backend, "alpha.md") is not None
+        node_type, node_id = resolve_node_ref(ingested_backend, "alpha.md")
+        assert node_type == "document"
+        assert node_id is not None
+
+        # 5. Index introspection
+        indexes = get_available_indexes(ingested_backend)
+        assert isinstance(indexes, dict)
+        assert "vector" in indexes
+        assert "fts" in indexes
 
     def test_search_sections_no_match(self, ingested_backend: KuzuBackend) -> None:
         assert search_sections(ingested_backend, "zzz-no-such-word") == []

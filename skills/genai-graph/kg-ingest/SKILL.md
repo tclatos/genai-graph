@@ -20,11 +20,11 @@ description: Ingest data into a genai-graph Ladybug (Kuzu-compatible) backend �
 
 ```python
 from genai_graph.kg.backend import (
-    KgBackend,            # abstract base (ABC)
-    KuzuBackend,          # Ladybug — the real backend
-    create_backend,               # create_backend("kuzu")
-    create_in_memory_backend,     # KuzuBackend connected to ":memory:"
-    create_backend_from_config,   # from graph_db.<key> YAML
+    KgBackend,  # abstract base (ABC)
+    KuzuBackend,  # Ladybug — the real backend
+    create_backend,  # create_backend("kuzu")
+    create_in_memory_backend,  # KuzuBackend connected to ":memory:"
+    create_backend_from_config,  # from graph_db.<key> YAML
 )
 ```
 
@@ -42,7 +42,7 @@ from genai_graph.kg.backend import create_backend_from_config
 from genai_graph.kg.ingest import create_graph
 
 backend = create_backend_from_config("my_graph")
-create_graph(backend, project, schema)   # creates tables + MERGEs data in one call
+create_graph(backend, project, schema)  # creates tables + MERGEs data in one call
 ```
 
 `create_graph(backend, model, schema)` runs schema creation then extraction+merge.
@@ -50,6 +50,7 @@ create_graph(backend, project, schema)   # creates tables + MERGEs data in one c
 
 ```python
 from genai_graph.kg.ingest import restart_database
+
 backend = restart_database()
 ```
 
@@ -103,9 +104,7 @@ building a custom flow that re-merges embeddings, mirror this drop→merge→cre
 ## Querying the backend directly
 
 ```python
-df = backend.execute_get_as_df(
-    "MATCH (p:Project)-[:FOR_CLIENT]->(c:Company) RETURN p.title, c.name"
-)
+df = backend.execute_get_as_df("MATCH (p:Project)-[:FOR_CLIENT]->(c:Company) RETURN p.title, c.name")
 rows = backend.execute("MATCH (n) RETURN labels(n), count(*)")
 ```
 

@@ -13,15 +13,15 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from pydantic import BaseModel
+from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Footer, Header, Markdown, Static, Tree
+from textual.widgets import Footer, Header, LoadingIndicator, Markdown, Static, Tree
 from textual.widgets.tree import TreeNode
 
 from genai_graph.kg.backend import KgBackend, KuzuBackend
 from genai_graph.kg.query.document_graph_tools import (
     get_document_toc,
-    get_section_content,
     list_documents,
     reconstruct_document,
     reconstruct_section,
@@ -90,17 +90,29 @@ class DocumentGraphApp(App[None]):
         height: 1fr;
     }
     #tree-panel {
-        width: 40%;
+        width: 38%;
         border-right: solid $accent;
     }
     #info-panel {
-        width: 60%;
+        width: 62%;
         padding: 1 2;
     }
     #meta {
         height: auto;
         border-bottom: solid $accent;
         padding-bottom: 1;
+        margin-bottom: 1;
+    }
+    #loading {
+        height: 3;
+        display: none;
+        margin: 1 0;
+    }
+    #loading.active {
+        display: block;
+    }
+    #content {
+        height: auto;
     }
     """
 
@@ -117,6 +129,7 @@ class DocumentGraphApp(App[None]):
         self.backend: KgBackend = KuzuBackend()
         self.backend.connect(db_path)
         self._doc_rows: list[dict[str, Any]] = []
+        self._active_node_key: tuple[str, str | None] | None = None
         self._current_md_path: str | None = None  # Converted Markdown file, for "m"
         self._current_origin_path: str | None = None  # Original source document, for "o"
 
@@ -126,6 +139,7 @@ class DocumentGraphApp(App[None]):
             yield Tree("Folder", id="tree-panel")
             with VerticalScroll(id="info-panel"):
                 yield Static("Select a node to see details.", id="meta")
+                yield LoadingIndicator(id="loading")
                 yield Markdown("", id="content")
         yield Footer()
 
@@ -133,6 +147,7 @@ class DocumentGraphApp(App[None]):
         self._rebuild_tree()
 
     def _rebuild_tree(self) -> None:
+        self._active_node_key = None
         tree = self.query_one(Tree)
         tree.clear()
         tree.root.data = NodeData(kind="root", loaded=True)
@@ -212,47 +227,91 @@ class DocumentGraphApp(App[None]):
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         self._show_node(event.node)
 
+    def _set_loading(self, loading: bool) -> None:
+        indicator = self.query_one("#loading", LoadingIndicator)
+        content = self.query_one("#content", Markdown)
+        if loading:
+            indicator.add_class("active")
+            content.display = False
+        else:
+            indicator.remove_class("active")
+            content.display = True
+
     def _show_node(self, node: TreeNode) -> None:
         data: NodeData | None = node.data
         if data is None:
             return
-        # Highlighting a folder/document reveals its children (docs/sections) in the tree panel.
-        if data.kind in ("folder", "document") and not node.is_expanded:
-            node.expand()
+
+        node_key = (data.kind, data.section_id or data.markdown_hash or data.path)
+        if self._active_node_key == node_key:
+            return
+        self._active_node_key = node_key
+
         meta = self.query_one("#meta", Static)
-        content = self.query_one("#content", Markdown)
         self._current_md_path = None
         self._current_origin_path = None
+
         if data.kind == "root":
+            self._set_loading(False)
             meta.update(f"[b]Folder[/b]\n{len(self._doc_rows)} document(s)")
-            content.update("")
+            self.query_one("#content", Markdown).update("")
         elif data.kind == "folder":
+            self._set_loading(False)
             meta.update(f"[b]Folder[/b] {data.path}\n{data.count} document(s)")
-            content.update("")
+            self.query_one("#content", Markdown).update("")
         elif data.kind == "document":
             self._current_md_path = data.path
             self._current_origin_path = _read_origin_path(data.path)
-            meta.update(
+            meta_text = (
                 f"[b]Document[/b] {data.filename}\n"
                 f"markdown: {data.path}\n"
                 f"source: {self._current_origin_path or '(none recorded — not converted from a raw document)'}\n"
                 f"hash: {data.markdown_hash}\nsections: {data.count}\n"
-                f"\n[dim](press [bold]m[/bold] to open the .md, [bold]o[/bold] to open the source)[/dim]"
+                f"\n[dim](press [bold]m[/bold] to open the .md, [bold]o[/bold] to open the source)[/dim]\n"
+                f"[yellow]⏳ Loading content...[/yellow]"
             )
-            content.update(reconstruct_document(self.backend, data.markdown_hash or "") or "")
+            meta.update(meta_text)
+            self._set_loading(True)
+            self._load_content_worker("document", data.markdown_hash or "", meta_text)
         elif data.kind == "section":
-            rows = get_section_content(self.backend, [data.section_id or ""])
-            row = rows[0] if rows else {}  # type: ignore[index]
             self._current_md_path = self._path_for_markdown_hash(data.markdown_hash)
             self._current_origin_path = _read_origin_path(self._current_md_path)
-            meta.update(
+            meta_text = (
                 f"[b]Section[/b] {data.title}\n"
                 f"id: {data.section_id}\n"
                 f"doc hash: {data.markdown_hash}\n"
-                f"level: {data.level}   sequence: {row.get('sequence', '?')}\n"
-                f"lines: {row.get('line_start', data.line_start)}–{row.get('line_end', '?')}"
+                f"level: {data.level}   line: {data.line_start}\n"
+                f"[yellow]⏳ Loading content...[/yellow]"
             )
-            content.update(reconstruct_section(self.backend, data.section_id or "") or "")
+            meta.update(meta_text)
+            self._set_loading(True)
+            self._load_content_worker("section", data.section_id or "", meta_text)
+
+    @work(exclusive=True, thread=True)
+    def _load_content_worker(self, kind: str, target_id: str, meta_text: str) -> None:
+        try:
+            if kind == "document":
+                text = reconstruct_document(self.backend, target_id)
+                if not text:
+                    text = "*(Document content is empty or could not be reconstructed.)*"
+            elif kind == "section":
+                text = reconstruct_section(self.backend, target_id)
+                if not text:
+                    text = "*(Section content is empty.)*"
+            else:
+                text = ""
+        except Exception as exc:
+            text = f"*(Error loading content: {exc})*"
+
+        clean_meta = meta_text.replace("\n[yellow]⏳ Loading content...[/yellow]", "")
+        self.app.call_from_thread(self._finish_content, text, clean_meta)
+
+    async def _finish_content(self, text: str, clean_meta: str) -> None:
+        self.query_one("#meta", Static).update(clean_meta)
+        content = self.query_one("#content", Markdown)
+        await content.update(text)
+        self._set_loading(False)
+        self.query_one("#info-panel", VerticalScroll).scroll_to(y=0, animate=False)
 
     def _path_for_markdown_hash(self, markdown_hash: str | None) -> str | None:
         """Look up a document's converted-Markdown path by its content hash."""

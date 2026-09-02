@@ -19,11 +19,11 @@ description: Query a genai-graph Knowledge Graph and build Cypher-aware agents â
 
 ```python
 from genai_graph.kg.query import (
-    SYSTEM_PROMPT,           # canonical Cypher authoring guidelines
-    text2cypher_chain,       # question -> Runnable producing Cypher
-    query_kg,                # end-to-end question -> Cypher -> results
-    build_kg_agent_system_prompt,   # schema-aware agent system prompt
-    create_kg_cypher_tool,          # LangChain tool executing Cypher
+    SYSTEM_PROMPT,  # canonical Cypher authoring guidelines
+    text2cypher_chain,  # question -> Runnable producing Cypher
+    query_kg,  # end-to-end question -> Cypher -> results
+    build_kg_agent_system_prompt,  # schema-aware agent system prompt
+    create_kg_cypher_tool,  # LangChain tool executing Cypher
 )
 from genai_graph.kg.query.document_graph_tools import create_document_graph_tools
 from genai_graph.kg.factories import SimilarityFactory, SimilaritySpec
@@ -35,9 +35,7 @@ from genai_graph.kg.factories import SimilarityFactory, SimilaritySpec
 from genai_graph.kg.backend import create_backend_from_config
 
 backend = create_backend_from_config("my_graph")
-df = backend.execute_get_as_df(
-    "MATCH (p:Project)-[:FOR_CLIENT]->(c:Company) RETURN p.title, c.name"
-)
+df = backend.execute_get_as_df("MATCH (p:Project)-[:FOR_CLIENT]->(c:Company) RETURN p.title, c.name")
 ```
 
 See `kg-ingest` for the full backend API. This is what the CLI `cli kg cypher`/`cli kg query` use.
@@ -48,7 +46,7 @@ See `kg-ingest` for the full backend API. This is what the CLI `cli kg cypher`/`
 from genai_graph.kg.query import query_kg, text2cypher_chain
 
 chain = text2cypher_chain(question, llm="default", kg_config_name="my_graph")
-cypher = chain.invoke({...})           # produces a Cypher statement
+cypher = chain.invoke({...})  # produces a Cypher statement
 result = query_kg(question, llm="default", kg_config_name="my_graph")  # end-to-end
 ```
 

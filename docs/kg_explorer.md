@@ -119,10 +119,7 @@ from genai_graph.kg.backend import create_backend_from_config
 from genai_graph.kg.export.html import generate_html
 
 backend = create_backend_from_config("default")
-html = generate_html(
-    backend,
-    query="MATCH (n:Person)-[r]->(m) RETURN n, r, m LIMIT 50"
-)
+html = generate_html(backend, query="MATCH (n:Person)-[r]->(m) RETURN n, r, m LIMIT 50")
 ```
 
 ### Integration with Existing Code

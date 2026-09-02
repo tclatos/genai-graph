@@ -43,19 +43,25 @@ def _fake_outline(filename: str) -> DocumentOutline:
         document_summary=f"Summary of {filename}.",
         sections=[
             OutlineEntry(title="Guide", level=1, description="The whole guide."),
-            OutlineEntry(title="Setup", level=2, description="How to install.", summary="Install via pip then configure."),
+            OutlineEntry(
+                title="Setup", level=2, description="How to install.", summary="Install via pip then configure."
+            ),
             OutlineEntry(title="Usage", level=2, description="How to run.", summary=None),
         ],
     )
 
 
-def _fake_call_llm(*, llm_id: str, filename: str, raw: str, config: OutlineConfig, max_tokens: int | None) -> DocumentOutline:
+def _fake_call_llm(
+    *, llm_id: str, filename: str, raw: str, config: OutlineConfig, max_tokens: int | None
+) -> DocumentOutline:
     return _fake_outline(filename)
 
 
 @pytest.mark.integration
 class TestDocumentGraphBuildLLMFlow:
-    def test_llm_path_writes_sections_and_summaries(self, temp_db_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_llm_path_writes_sections_and_summaries(
+        self, temp_db_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         (tmp_path / "guide.md").write_text(DOC.format(filler="Install with pip. " * 60), encoding="utf-8")
 
         monkeypatch.setattr("genai_graph.kg.document_graph.outline_extract._context_window_for", lambda llm_id: None)
@@ -90,7 +96,9 @@ class TestDocumentGraphBuildLLMFlow:
         finally:
             backend.close()
 
-    def test_over_context_window_degrades_to_algo(self, temp_db_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_over_context_window_degrades_to_algo(
+        self, temp_db_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         (tmp_path / "guide.md").write_text(DOC.format(filler="Install with pip. " * 60), encoding="utf-8")
 
         calls: list[dict] = []

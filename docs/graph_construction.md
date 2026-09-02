@@ -67,8 +67,7 @@ class ReviewedOpportunityGraph(JsonFileBackedFactory, BaseModel):
 
 ```python
 class ReviewedOpportunityGraph(MarkdownBamlFactory):
-    def extract_from_markdown(self, md_text: str) -> BaseModel:
-        ...  # call your BAML function
+    def extract_from_markdown(self, md_text: str) -> BaseModel: ...  # call your BAML function
 ```
 
 ### 2. Neo4jImportFactory
@@ -81,10 +80,10 @@ class StratnavGraph(Neo4jImportFactory):
     def get_node_mappings(self) -> list[Neo4jNodeMapping]:
         return [
             Neo4jNodeMapping(
-                neo4j_label="Account",      # Neo4j label
-                node_class=Customer,        # Target Pydantic class
-                key_field="name",           # Primary key
-                property_mappings={         # Field mapping
+                neo4j_label="Account",  # Neo4j label
+                node_class=Customer,  # Target Pydantic class
+                key_field="name",  # Primary key
+                property_mappings={  # Field mapping
                     "irisCode": "iris_code",
                     "subMarket": "segment",
                 },
@@ -138,6 +137,7 @@ When an entity appears in multiple data sources under different names
 ```python
 from ekg_atos.baml_client.types import Partner as BamlPartner
 
+
 class Partner(BamlPartner):
     """Partner organization (canonical type for deduplication)."""
 ```
@@ -176,6 +176,7 @@ Neo4jNodeMapping(
 ```python
 # common_nodes.py
 from ekg_atos.baml_client.types import Customer as BamlCustomer
+
 
 class Customer(BamlCustomer):
     """Extended Customer with fields from multiple sources."""
@@ -435,7 +436,7 @@ If the auto-chosen path is still wrong, specify `field_paths` explicitly as a li
 ```python
 GraphRelation(
     from_node=customer_node,  # GraphNode instance
-    to_node=person_node,      # GraphNode instance
+    to_node=person_node,  # GraphNode instance
     name="HAS_CONTACT",
     field_paths=[("customer", "customer.employees")],  # Explicit path
 )
@@ -514,6 +515,7 @@ Schema validation warnings are informational and don't block execution. To suppr
 
 ```python
 import warnings
+
 warnings.filterwarnings("ignore", category=UserWarning, message="Graph schema validation:")
 ```
 

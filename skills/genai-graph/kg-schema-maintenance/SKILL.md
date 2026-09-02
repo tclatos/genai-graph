@@ -136,7 +136,8 @@ Run `validate_schema_coherence(schema)` / `schema.get_warnings()`, or read the c
 
 ```python
 from genai_graph.kg.schema import validate_schema_coherence
-print(validate_schema_coherence(schema))   # expect []
+
+print(validate_schema_coherence(schema))  # expect []
 ```
 
 ```bash

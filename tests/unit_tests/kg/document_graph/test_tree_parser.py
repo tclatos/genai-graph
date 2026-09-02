@@ -128,12 +128,17 @@ class TestInferLevels:
 @pytest.mark.unit
 class TestStripSurroundingEmphasis:
     def test_balanced_wrap_is_stripped(self) -> None:
-        assert _strip_surrounding_emphasis("***Original Equipment Manufacturers***") == "Original Equipment Manufacturers"
+        assert (
+            _strip_surrounding_emphasis("***Original Equipment Manufacturers***") == "Original Equipment Manufacturers"
+        )
         assert _strip_surrounding_emphasis("**Advanced Micro Devices, Inc.**") == "Advanced Micro Devices, Inc."
         assert _strip_surrounding_emphasis("*Non-custom products*") == "Non-custom products"
 
     def test_dangling_unbalanced_is_stripped(self) -> None:
-        assert _strip_surrounding_emphasis("**Certification of Chief Executive Officer") == "Certification of Chief Executive Officer"
+        assert (
+            _strip_surrounding_emphasis("**Certification of Chief Executive Officer")
+            == "Certification of Chief Executive Officer"
+        )
 
     def test_backticks_and_internal_math_are_preserved(self) -> None:
         assert _strip_surrounding_emphasis("See `footnote`") == "See `footnote`"

@@ -21,16 +21,20 @@ description: Export genai-graph Knowledge Graph artifacts — interactive HTML/D
 
 ```python
 from genai_graph.kg.export import (
-    generate_html,            # graph visualization HTML
-    generate_dag_html,        # pipeline DAG HTML
-    export_html,              # full HTML export for a KG profile
-    export_schema,            # schema markdown
-    export_schema_json,       # canonical schema JSON (used by agents/text2cypher)
-    export_schema_html,       # interactive D3 schema diagram
-    export_info,              # info.md (stats + links to schema/warnings)
-    export_warnings,          # consolidated Markdown warnings report
-    HtmlExportResult, ParquetExportResult, ParquetManifest,
-    CacheFingerprints, compute_fingerprints_for_config, validate_parquet_cache,
+    generate_html,  # graph visualization HTML
+    generate_dag_html,  # pipeline DAG HTML
+    export_html,  # full HTML export for a KG profile
+    export_schema,  # schema markdown
+    export_schema_json,  # canonical schema JSON (used by agents/text2cypher)
+    export_schema_html,  # interactive D3 schema diagram
+    export_info,  # info.md (stats + links to schema/warnings)
+    export_warnings,  # consolidated Markdown warnings report
+    HtmlExportResult,
+    ParquetExportResult,
+    ParquetManifest,
+    CacheFingerprints,
+    compute_fingerprints_for_config,
+    validate_parquet_cache,
 )
 from genai_graph.kg.schema import ResolvedSchema
 ```
@@ -43,11 +47,11 @@ from genai_graph.kg.schema import ResolvedSchema
 from genai_graph.kg.schema import ResolvedSchema
 
 resolved = ResolvedSchema.from_graph_schema(schema)
-print(resolved.to_markdown())              # table summary (node/rel/vector sections)
+print(resolved.to_markdown())  # table summary (node/rel/vector sections)
 print(resolved.to_vector_section_markdown())  # '### Vector-Indexed Fields' for agent prompts
-resolved.to_html_file("schema.html")       # interactive D3 diagram
-json_str = resolved.to_json_str()          # D3 JSON for tools/prompts
-resolved.to_json_file("schema.json")       # canonical schema JSON
+resolved.to_html_file("schema.html")  # interactive D3 diagram
+json_str = resolved.to_json_str()  # D3 JSON for tools/prompts
+resolved.to_json_file("schema.json")  # canonical schema JSON
 ```
 
 The canonical schema JSON (`export_schema_json`) is what `build_kg_agent_system_prompt` and

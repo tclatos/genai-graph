@@ -9,17 +9,20 @@ Use standard Pydantic models. Nested fields become relations.
 ```python
 from pydantic import BaseModel
 
+
 class Company(BaseModel):
     name: str
     sector: str | None = None
+
 
 class Person(BaseModel):
     name: str
     title: str | None = None
 
+
 class Project(BaseModel):
     title: str
-    client: Company        # → FOR_CLIENT relation auto-detected
+    client: Company  # → FOR_CLIENT relation auto-detected
     lead: Person | None = None  # → HAS_LEAD relation auto-detected
 ```
 
@@ -31,7 +34,7 @@ Wrap each model in a `GraphNode` and specify identity fields.
 from genai_graph.kg.schema import GraphNode
 
 company_node = GraphNode(node_class=Company, name_from="name", key_from="name")
-person_node  = GraphNode(node_class=Person,  name_from="name", key_from="name")
+person_node = GraphNode(node_class=Person, name_from="name", key_from="name")
 project_node = GraphNode(node_class=Project, name_from="title", key_from="title")
 ```
 
@@ -52,7 +55,7 @@ from genai_graph.kg.schema import GraphRelation
 client_rel = GraphRelation(
     from_node=project_node,
     to_node=company_node,
-    name="FOR_CLIENT",          # Cypher relation type
+    name="FOR_CLIENT",  # Cypher relation type
     field_paths=[{"from": "", "to": "client"}],  # Optional: explicit path
 )
 lead_rel = GraphRelation(from_node=project_node, to_node=person_node, name="HAS_LEAD")
@@ -68,7 +71,7 @@ lead_rel = GraphRelation(from_node=project_node, to_node=person_node, name="HAS_
 from genai_graph.kg.schema import GraphSchema
 
 schema = GraphSchema(
-    root_model_class=Project,      # Entry point for field-path traversal
+    root_model_class=Project,  # Entry point for field-path traversal
     nodes=[project_node, company_node, person_node],
     relations=[client_rel, lead_rel],
 )
@@ -87,8 +90,9 @@ directory of JSON files (e.g. produced by `cli baml extract`), subclass
 from genai_graph.kg.factories import JsonFileBackedFactory
 from pydantic import BaseModel
 
+
 class ProjectGraph(JsonFileBackedFactory, BaseModel):
-    data_root: str = "data/projects"   # directory of {ModelName}/*.json files
+    data_root: str = "data/projects"  # directory of {ModelName}/*.json files
 
     def build_schema(self) -> GraphSchema:
         return GraphSchema(
@@ -114,9 +118,7 @@ from genai_graph.kg.ingest import create_graph
 
 backend = create_backend_from_config("my_graph")
 
-project = Project(
-    title="Alpha", client=Company(name="Acme", sector="Tech"), team=[Person(name="Alice", title="Lead")]
-)
+project = Project(title="Alpha", client=Company(name="Acme", sector="Tech"), team=[Person(name="Alice", title="Lead")])
 create_graph(backend, project, schema)
 ```
 
@@ -158,7 +160,7 @@ for row in results:
 from genai_graph.kg.schema import ResolvedSchema
 
 resolved = ResolvedSchema.from_graph_schema(schema)
-print(resolved.to_markdown())       # markdown table
+print(resolved.to_markdown())  # markdown table
 resolved.to_html_file("schema.html")  # interactive D3 graph
 ```
 

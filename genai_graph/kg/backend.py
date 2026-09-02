@@ -256,6 +256,9 @@ class LadybugBackend(KgBackend):
         """Execute a Cypher query on Ladybug."""
         if not self.conn:
             raise RuntimeError("Not connected to database")
+        # TODO : replace with "" CALL enable_cached_prepared_statement='none' ""
+        if parameters and hasattr(self.conn, "_pybind_implicit_prepared_cache"):
+            self.conn._pybind_implicit_prepared_cache.clear()
         return self.conn.execute(query, parameters)
 
     def create_node_table(

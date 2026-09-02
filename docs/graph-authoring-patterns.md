@@ -12,9 +12,11 @@ from genai_graph.kg.factories import JsonFileBackedFactory
 from genai_graph.kg.schema import GraphNode, GraphRelation, GraphSchema
 from pydantic import BaseModel
 
+
 class Customer(BaseModel):
     id: str
     name: str
+
 
 class Opportunity(BaseModel):
     id: str
@@ -22,8 +24,10 @@ class Opportunity(BaseModel):
     customer: Customer
     value: float | None = None
 
+
 customer_node = GraphNode(node_class=Customer, name_from="name", key_from="id")
 opportunity_node = GraphNode(node_class=Opportunity, name_from="title", key_from="id")
+
 
 class OpportunityGraph(JsonFileBackedFactory):
     schema = GraphSchema(
@@ -32,7 +36,7 @@ class OpportunityGraph(JsonFileBackedFactory):
         relations=[GraphRelation(from_node=opportunity_node, to_node=customer_node, name="FOR_CUSTOMER")],
     )
     source_model = Opportunity
-    source_dir = "data/opportunities"   # directory of *.json files
+    source_dir = "data/opportunities"  # directory of *.json files
 ```
 
 **When to use**: structured JSON exports, API responses saved to disk, pipeline outputs.
@@ -45,17 +49,18 @@ Use a DataFrame loader to convert tabular data (xlsx, csv) into Pydantic models 
 from pydantic import BaseModel
 import pandas as pd
 
+
 class CrmRow(BaseModel):
     opportunity_id: str
     customer_name: str
     stage: str
     amount: float | None = None
 
+
 def load_crm_data(path: str) -> list[CrmRow]:
     df = pd.read_excel(path)
     # normalise column names, handle NaN, etc.
-    df = df.rename(columns={"OppID": "opportunity_id", "Client": "customer_name",
-                             "Stage": "stage", "Amount": "amount"})
+    df = df.rename(columns={"OppID": "opportunity_id", "Client": "customer_name", "Stage": "stage", "Amount": "amount"})
     return [CrmRow(**row) for row in df.to_dict(orient="records")]
 ```
 
@@ -115,6 +120,7 @@ If you only need file-level provenance (no sections), use
 from genai_graph.kg.factories import DocumentDirectoryFactory
 from genai_graph.kg.nodes.document import DocumentNode
 
+
 class ReportGraph(DocumentDirectoryFactory):
     def build_schema(self) -> GraphSchema:
         return GraphSchema(root_model_class=None, nodes=[DocumentNode], relations=[])
@@ -134,6 +140,7 @@ cached as JSON automatically:
 from genai_graph.kg.factories import MarkdownBamlFactory
 from genai_graph.kg.schema import GraphSchema
 from pydantic import BaseModel
+
 
 class ReviewedOpportunityGraph(MarkdownBamlFactory):
     def build_schema(self) -> GraphSchema:
@@ -170,15 +177,17 @@ from pydantic import BaseModel, Field
 from genai_graph.kg.schema import GraphNode
 from genai_graph.kg.embeddings import EmbeddingField
 
+
 class Service(BaseModel):
     name: str
     description: str = Field(default="", json_schema_extra={"embedding": True})
+
 
 service_node = GraphNode(
     node_class=Service,
     name_from="name",
     key_from="name",
-    embedding_field="description",   # field to embed
+    embedding_field="description",  # field to embed
 )
 ```
 
@@ -201,22 +210,26 @@ Share node types across multiple factory graphs using a central canonical schema
 from pydantic import BaseModel
 from genai_graph.kg.schema import GraphNode
 
+
 class Customer(BaseModel):
     id: str
     name: str
+
 
 class Product(BaseModel):
     sku: str
     name: str
 
+
 # Canonical definitions — import these in all factories
 customer_node = GraphNode(node_class=Customer, name_from="name", key_from="id")
-product_node  = GraphNode(node_class=Product,  name_from="name", key_from="sku")
+product_node = GraphNode(node_class=Product, name_from="name", key_from="sku")
 ```
 
 ```python
 # schema/order_graph.py
 from schema.canonical_nodes import customer_node, product_node
+
 
 class OrderGraph(JsonFileBackedFactory):
     schema = GraphSchema(

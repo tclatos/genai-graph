@@ -91,14 +91,14 @@ backend at the **common ancestor** of all skill directories — that keeps
 
 ```python
 from genai_graph.agent import (
-    create_docgraph_agent,        # profile -> LangChainHarness (tools + skills + folder injected)
-    prepare_docgraph_profile,     # mutate profile in place (system prompt, skills, backend)
-    run_docgraph_agent,           # async: stream one turn, return assistant text
-    resolve_db_path,              # db_path or graph_db.default
+    create_docgraph_agent,  # profile -> LangChainHarness (tools + skills + folder injected)
+    prepare_docgraph_profile,  # mutate profile in place (system prompt, skills, backend)
+    run_docgraph_agent,  # async: stream one turn, return assistant text
+    resolve_db_path,  # db_path or graph_db.default
     create_document_graph_tools_from_config,
     build_docgraph_system_prompt,
-    DEFAULT_LLM,                 # "deepseek_v4flash@openrouter"
-    DEFAULT_PROFILE,             # "docgraph"
+    DEFAULT_LLM,  # "deepseek_v4flash@openrouter"
+    DEFAULT_PROFILE,  # "docgraph"
 )
 ```
 

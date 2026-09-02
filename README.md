@@ -98,17 +98,20 @@ uv run cli --help
 ```python
 from pydantic import BaseModel, Field
 
+
 class Company(BaseModel):
     name: str
     sector: str | None = None
+
 
 class Person(BaseModel):
     name: str
     role: str | None = None
 
+
 class Project(BaseModel):
     title: str
-    client: Company           # → FOR_CLIENT relation auto-detected
+    client: Company  # → FOR_CLIENT relation auto-detected
     team: list[Person] = Field(default_factory=list)  # → HAS_MEMBER
 ```
 
@@ -118,7 +121,7 @@ class Project(BaseModel):
 from genai_graph.kg.schema import GraphNode, GraphRelation, GraphSchema
 
 company_node = GraphNode(node_class=Company, name_from="name", key_from="name")
-person_node  = GraphNode(node_class=Person,  name_from="name", key_from="name")
+person_node = GraphNode(node_class=Person, name_from="name", key_from="name")
 project_node = GraphNode(node_class=Project, name_from="title", key_from="title")
 
 schema = GraphSchema(
@@ -126,7 +129,7 @@ schema = GraphSchema(
     nodes=[project_node, company_node, person_node],
     relations=[
         GraphRelation(from_node=project_node, to_node=company_node, name="FOR_CLIENT"),
-        GraphRelation(from_node=project_node, to_node=person_node,  name="HAS_MEMBER"),
+        GraphRelation(from_node=project_node, to_node=person_node, name="HAS_MEMBER"),
     ],
 )
 ```
@@ -139,7 +142,7 @@ Any label collisions or orphaned nodes produce `UserWarning` for early feedback.
 ```python
 from genai_graph.kg.ingest import create_graph, restart_database
 
-backend = restart_database()   # in-memory; or create_backend_from_config(...)
+backend = restart_database()  # in-memory; or create_backend_from_config(...)
 
 project = Project(
     title="Cloud Migration",
@@ -148,9 +151,7 @@ project = Project(
 )
 create_graph(backend, project, schema)
 
-df = backend.execute_get_as_df(
-    "MATCH (p:Project)-[:FOR_CLIENT]->(c:Company) RETURN p.title, c.name"
-)
+df = backend.execute_get_as_df("MATCH (p:Project)-[:FOR_CLIENT]->(c:Company) RETURN p.title, c.name")
 print(df)
 ```
 
@@ -160,8 +161,8 @@ print(df)
 from genai_graph.kg.schema import ResolvedSchema
 
 resolved = ResolvedSchema.from_graph_schema(schema)
-print(resolved.to_markdown())    # table summary
-resolved.to_html("schema.html") # interactive D3 diagram
+print(resolved.to_markdown())  # table summary
+resolved.to_html("schema.html")  # interactive D3 diagram
 ```
 
 ### 5. Create a factory for persistent ingestion
@@ -170,8 +171,9 @@ resolved.to_html("schema.html") # interactive D3 diagram
 from genai_graph.kg.factories import JsonFileBackedFactory
 from pydantic import BaseModel
 
+
 class ProjectGraph(JsonFileBackedFactory, BaseModel):
-    data_root: str = "data/projects"   # directory of {ModelName}/*.json files
+    data_root: str = "data/projects"  # directory of {ModelName}/*.json files
 
     def build_schema(self) -> GraphSchema:
         return GraphSchema(root_model_class=Project, nodes=[...], relations=[...])

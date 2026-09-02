@@ -82,6 +82,19 @@ def _resolve_folder_ref_or_exit(backend: Any, folder_ref: str | None) -> str | N
     return folder_id
 
 
+def _resolve_doc_ref_or_exit(backend: Any, doc_ref: str | None) -> str | None:
+    """Resolve a `--doc` option value to a `markdown_hash`, or exit with an error message."""
+    if doc_ref is None:
+        return None
+    from genai_graph.kg.query.document_graph_tools import resolve_document_id
+
+    doc_id = resolve_document_id(backend, doc_ref)
+    if doc_id is None:
+        console.print(f"[red]No document found matching: {doc_ref}[/red]")
+        raise typer.Exit(1)
+    return doc_id
+
+
 class DocGraphCommands(CliTopCommand):
     """Commands for building and navigating a Document Graph."""
 
@@ -225,7 +238,9 @@ class DocGraphCommands(CliTopCommand):
             ] = None,
             summary_min_tokens: Annotated[
                 int,
-                typer.Option("--summary-min-tokens", help="Prompt guidance for what counts as a 'substantial' section."),
+                typer.Option(
+                    "--summary-min-tokens", help="Prompt guidance for what counts as a 'substantial' section."
+                ),
             ] = 800,
             outline_cache_dir: Annotated[
                 str | None,
@@ -565,33 +580,140 @@ class DocGraphCommands(CliTopCommand):
 
         @cli_app.command("search")
         def search(
-            keyword: Annotated[str, typer.Argument(help="Keyword to search for in section titles/text.")],
+            keyword: Annotated[str, typer.Argument(help="Keyword or query to search for in section titles/text.")],
             db_path: Annotated[
                 str | None,
                 typer.Option(
                     "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
                 ),
             ] = None,
-            limit: Annotated[int, typer.Option("--limit", help="Max number of matches.")] = 20,
+            limit: Annotated[int, typer.Option("--limit", "-l", help="Max number of matches.")] = 20,
             folder: Annotated[
                 str | None,
-                typer.Option("--folder", help="Restrict the search to this folder's subtree (hash, prefix, or name)."),
+                typer.Option(
+                    "--folder", "-f", help="Restrict the search to this folder's subtree (hash, prefix, or name)."
+                ),
+            ] = None,
+            doc: Annotated[
+                str | None,
+                typer.Option(
+                    "--doc",
+                    "--document",
+                    "-d",
+                    help="Restrict the search to this document (hash, prefix, filename, or path).",
+                ),
+            ] = None,
+            node: Annotated[
+                str | None,
+                typer.Option(
+                    "--node", "-n", help="Restrict the search to a folder or document node (hash, prefix, or name)."
+                ),
+            ] = None,
+            mode: Annotated[
+                str,
+                typer.Option(
+                    "--mode",
+                    "-m",
+                    help="Search mode: 'hybrid' (vector + BM25, default), 'vector' (semantic only), 'bm25' (FTS only), or 'cypher' (native CONTAINS search).",
+                ),
+            ] = "hybrid",
+            embeddings: Annotated[
+                str | None,
+                typer.Option(
+                    "--embeddings",
+                    "--model",
+                    help="Embeddings model ID or tag for vector/hybrid search (e.g. 'default', 'bge-small-en@local').",
+                ),
             ] = None,
         ) -> None:
-            """Search section titles and text across ingested documents, optionally within one folder."""
+            """Search section titles and text across ingested documents, with hybrid, vector, BM25, or native Cypher mode."""
             db_path = _resolve_db_path(db_path)
             from genai_graph.kg.backend import KuzuBackend
-            from genai_graph.kg.query.document_graph_tools import search_sections
+            from genai_graph.kg.query.document_graph_tools import (
+                get_available_indexes,
+                resolve_node_ref,
+                search_sections,
+            )
 
             backend = KuzuBackend()
             backend.connect(db_path)
-            folder_id = _resolve_folder_ref_or_exit(backend, folder)
-            rows = search_sections(backend, keyword, limit, folder_id=folder_id)
+
+            folder_id: str | None = None
+            doc_id: str | None = None
+
+            if node is not None:
+                node_type, n_id = resolve_node_ref(backend, node)
+                if node_type == "folder":
+                    folder_id = n_id
+                elif node_type == "document":
+                    doc_id = n_id
+                else:
+                    console.print(f"[red]No folder or document found matching --node: {node}[/red]")
+                    raise typer.Exit(1)
+
+            if folder is not None:
+                folder_id = _resolve_folder_ref_or_exit(backend, folder)
+
+            if doc is not None:
+                doc_id = _resolve_doc_ref_or_exit(backend, doc)
+
+            mode_norm = mode.lower().strip()
+            valid_modes = {
+                "hybrid",
+                "all",
+                "vector",
+                "semantic",
+                "bm25",
+                "fts",
+                "cypher",
+                "native",
+                "keyword",
+                "contains",
+            }
+            if mode_norm not in valid_modes:
+                console.print(
+                    f"[red]Invalid search mode '{mode}'. Choose one of: 'hybrid' (default), 'vector', 'bm25', 'cypher'.[/red]"
+                )
+                raise typer.Exit(1)
+
+            available = get_available_indexes(backend)
+
+            # Inform user if indexes are unavailable for the requested/default mode
+            if mode_norm in ("hybrid", "all"):
+                if not available["vector"]:
+                    console.print("[dim]ℹ Vector index not found in database; using BM25 keyword search.[/dim]")
+                if not available["fts"]:
+                    console.print("[dim]ℹ BM25 (FTS) index not found in database; using native Cypher search.[/dim]")
+            elif mode_norm in ("vector", "semantic"):
+                if not available["vector"]:
+                    console.print(
+                        "[yellow]⚠ Vector index ('chunk_embedding_index') not found in database. Search may return no results.[/yellow]"
+                    )
+            elif mode_norm in ("bm25", "fts"):
+                if not available["fts"]:
+                    console.print(
+                        "[yellow]⚠ BM25 FTS index ('section_fts') not found in database; falling back to native Cypher search.[/yellow]"
+                    )
+
+            rows = search_sections(
+                backend,
+                keyword,
+                limit=limit,
+                folder_id=folder_id,
+                document_id=doc_id,
+                mode=mode_norm,
+                embeddings_id=embeddings,
+            )
             if not rows:
-                console.print(f"[yellow]No sections matched keyword: {keyword!r}[/yellow]")
+                console.print(f"[yellow]No sections matched query: {keyword!r}[/yellow]")
                 return
             for r in rows:  # type: ignore[union-attr]
-                console.print(f"- [{r['section_id']}] {r['title']} (line {r['line_start']}) — {r['markdown_hash']}")
+                score_str = f", score: {r['score']}" if r.get("score") and r["score"] > 0 else ""
+                console.print(
+                    f"- [{r['section_id']}] {r['title']} (line {r['line_start']}{score_str}) — {r['markdown_hash']}"
+                )
+                if r.get("matched_chunk"):
+                    console.print(f"    [dim]Chunk: {r['matched_chunk']}[/dim]")
 
         @cli_app.command("folders")
         def folders(

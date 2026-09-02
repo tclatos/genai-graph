@@ -75,6 +75,7 @@ from genai_graph.kg.factories import MarkdownBamlFactory
 from genai_graph.kg.schema import GraphSchema
 from pydantic import BaseModel
 
+
 class MyEntityGraph(MarkdownBamlFactory):
     def build_schema(self) -> GraphSchema:
         nodes, relations = self.get_document_schema_elements(MyEntityNode)
@@ -82,6 +83,7 @@ class MyEntityGraph(MarkdownBamlFactory):
 
     def extract_from_markdown(self, md_text: str) -> BaseModel:
         from genai_tk.extra.structured.baml_processor import BamlStructuredProcessor
+
         processor = BamlStructuredProcessor(model_cls=MyEntity, function_name="ExtractMyEntity", kvstore_id="")
         return processor.analyze_document("doc", md_text)
 ```
@@ -309,8 +311,13 @@ CLI, an agent's tools, and the Textual TUI:
 
 ```python
 from genai_graph.kg.query.document_graph_tools import (
-    list_documents, get_document_toc, get_section_content, reconstruct_document, search_sections,
-    document_toc_yaml, folder_toc_yaml,
+    list_documents,
+    get_document_toc,
+    get_section_content,
+    reconstruct_document,
+    search_sections,
+    document_toc_yaml,
+    folder_toc_yaml,
 )
 ```
 

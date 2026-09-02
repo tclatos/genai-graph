@@ -22,30 +22,33 @@ The decomposition pipeline uses a multi-tier fallback cascade:
 
 ```mermaid
 flowchart TD
-    Doc[Document Source] --> Strat{structure_strategy}
-    
-    Strat -->|algo| T1[Tier 1: Markdown-it + Heuristics\nFast, deterministic, 0 LLM tokens]
-    Strat -->|toc_preamble| T2[Tier 2: Preamble TOC LLM Extraction\nReads first 250-350 lines (~1-2k tokens)]
-    Strat -->|llm_full| T4[Tier 4: Full-Document LLM Call\nCondenses tables, parses full text]
-    
-    Strat -->|auto (Default)| AutoCheck{Analyze Preamble & Headings}
-    
-    AutoCheck -->|Rich `#` Headings >= 10| T1
-    AutoCheck -->|Printed TOC in preamble| T2
-    AutoCheck -->|Small doc < 35k tokens| T4
-    AutoCheck -->|Fallback| T3[Tier 3: Domain Heuristics & Regexp]
 
-    T1 --> HeadingAnchors[Heading Line Anchors\n(title, level, line_start)]
+    Doc[Document Source] --> Strat{structure strategy}
+
+    Strat -->|algo| T1["Tier 1: Markdown-it + Heuristics"]
+    Strat -->|toc preamble| T2["Tier 2: Preamble TOC LLM Extraction"]
+    Strat -->|llm full| T4["Tier 4: Full Document LLM Call"]
+
+    Strat -->|auto default| AutoCheck{Analyze Preamble and Headings}
+
+    AutoCheck -->|many headings| T1
+    AutoCheck -->|toc detected| T2
+    AutoCheck -->|small document| T4
+    AutoCheck -->|fallback| T3["Tier 3: Domain Heuristics and Regexp"]
+
+    T1 --> HeadingAnchors["Heading Anchors"]
     T2 --> HeadingAnchors
     T3 --> HeadingAnchors
     T4 --> HeadingAnchors
 
-    HeadingAnchors --> Slicing[slice_sections\nNon-overlapping, byte-exact reconstruction]
-    
-    Slicing --> SumCheck{generate_summaries?}
-    SumCheck -->|false| DoneNoSum[DocumentGraph with 0 summary tokens]
-    SumCheck -->|true| Enrich[Enrich Sections with Descriptions & Summaries]
-    Enrich --> Graph[(Ladybug Graph DB)]
+    HeadingAnchors --> Slicing["slice sections"]
+
+    Slicing --> SumCheck{"generate summaries"}
+
+    SumCheck -->|false| DoneNoSum["DocumentGraph"]
+    SumCheck -->|true| Enrich["Enrich Sections"]
+
+    Enrich --> Graph["Ladybug Graph DB"]
 ```
 
 ---
@@ -61,7 +64,7 @@ flowchart TD
 - **When used**: Documents containing a Table of Contents near the top (detected by `_TOC_HEADER_RE` in the first 500 lines) but lacking rich `#` headings in the body.
 - **Mechanism**:
   1. `_extract_toc_excerpt(raw)` extracts candidate TOC lines (first ~250–350 lines).
-  2. A lightweight/flash model (`deepseek-v4-flash-0731@openrouter`) extracts a structured `DocumentTocPreamble` containing ordered `TocPreambleEntry(title, level, page)`.
+  2. A lightweight/flash model extracts a structured `DocumentTocPreamble` containing ordered `TocPreambleEntry(title, level, page)`.
   3. `anchor_toc_preamble` scans the document body following the TOC block to anchor each title to its exact line number.
 - **Cost**: ~1,000–2,000 input tokens total, even for 100,000+ token documents.
 

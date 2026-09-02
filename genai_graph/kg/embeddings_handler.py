@@ -76,6 +76,25 @@ class EmbeddingsHandler:
             logger.error(f"Failed to compute embedding for text: {e}")
             raise
 
+    def compute_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
+        """Compute embeddings for a batch of text strings.
+
+        Args:
+            texts: List of text strings to embed
+
+        Returns:
+            List of embedding vectors (list of floats)
+        """
+        if not texts:
+            return []
+        try:
+            embeddings = self.factory.embed_documents(texts)
+            logger.debug("Computed batch embeddings for {} texts", len(texts))
+            return embeddings
+        except Exception as e:
+            logger.error(f"Failed to compute batch embeddings for {len(texts)} texts: {e}")
+            raise
+
     def compute_field_embeddings(self, node_data: dict[str, Any], index_fields: list[str]) -> dict[str, list[float]]:
         """Compute embeddings for specified fields in node data.
 

@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from genai_graph.kg.backend import KgBackend, KuzuBackend
 from genai_graph.kg.document_graph.retrieval import (
     RetrievalConfig,
-    build_section_chunks,
+    build_sections_chunks,
     ensure_chunk_embedding_column,
     ensure_section_fts_index,
     resolve_embedding_dimension,
@@ -96,8 +96,7 @@ def _sections_described(backend: KgBackend, markdown_hash: str) -> bool:
     """
     try:
         df = backend.execute_get_as_df(
-            f"MATCH (s:{_SECTION_TYPE} {{markdown_hash: $h}}) WHERE s.description IS NOT NULL "
-            "RETURN count(s) AS c",
+            f"MATCH (s:{_SECTION_TYPE} {{markdown_hash: $h}}) WHERE s.description IS NOT NULL RETURN count(s) AS c",
             {"h": markdown_hash},
             union=False,
         )
@@ -169,7 +168,10 @@ def ingest_document_graph(
     seen_folder_edges: set[tuple[str, str]] = set()
     seen_markdown: set[str] = set()
 
-    for key in factory.get_keys():
+    keys = factory.get_keys()
+    total_keys = len(keys)
+
+    for doc_idx, key in enumerate(keys, 1):
         try:
             bundle = factory.get_struct_data_by_key(key)
         except Exception as exc:  # noqa: BLE001
@@ -266,28 +268,37 @@ def ingest_document_graph(
         result.sections_created += len(bundle.sections)
         result.sections_summarized += sum(1 for s in bundle.sections if s.summary)
 
+        doc_chunks_count = 0
         if chunks_enabled and retrieval_config is not None:
-            for section in bundle.sections:
-                chunk_dicts = build_section_chunks(
-                    section,
-                    handler=embeddings_handler,  # type: ignore[arg-type]
-                    chunk_size_tokens=retrieval_config.chunk_size_tokens,
-                )
-                for cd in chunk_dicts:
-                    nodes.add(_CHUNK_TYPE, cd)
-                    relationships.append(
-                        RelationshipRecord(
-                            _SECTION_TYPE,
-                            section.section_id,
-                            _CHUNK_TYPE,
-                            cd["chunk_id"],
-                            HAS_CHUNK.name,
-                            {},
-                        )
+            section_chunks = build_sections_chunks(
+                bundle.sections,
+                handler=embeddings_handler,  # type: ignore[arg-type]
+                chunk_size_tokens=retrieval_config.chunk_size_tokens,
+            )
+            for section_id, cd in section_chunks:
+                nodes.add(_CHUNK_TYPE, cd)
+                relationships.append(
+                    RelationshipRecord(
+                        _SECTION_TYPE,
+                        section_id,
+                        _CHUNK_TYPE,
+                        cd["chunk_id"],
+                        HAS_CHUNK.name,
+                        {},
                     )
-                result.chunks_created += len(chunk_dicts)
+                )
+            doc_chunks_count = len(section_chunks)
+            result.chunks_created += doc_chunks_count
 
         result.documents_processed += 1
+        logger.info(
+            "Ingested [{}/{}]: {} (sections={}, chunks={})",
+            doc_idx,
+            total_keys,
+            document.filename,
+            len(bundle.sections),
+            doc_chunks_count,
+        )
 
     merge_result = merge_nodes_batch(backend, nodes, registry)
     result.relationships_created = merge_relationships_batch(backend, relationships, registry, merge_result.id_mapping)
@@ -297,9 +308,7 @@ def ingest_document_graph(
     # as warnings rather than aborting an otherwise-successful ingest.
     if chunks_enabled and isinstance(backend, KuzuBackend):
         try:
-            backend.create_vector_index(
-                _CHUNK_TYPE, "chunk_embedding", "chunk_embedding_index", metric="cosine"
-            )
+            backend.create_vector_index(_CHUNK_TYPE, "chunk_embedding", "chunk_embedding_index", metric="cosine")
         except Exception as exc:  # noqa: BLE001
             msg = f"Could not create HNSW index on {_CHUNK_TYPE}.chunk_embedding: {exc}"
             logger.warning(msg)

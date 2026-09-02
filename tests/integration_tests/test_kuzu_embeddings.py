@@ -65,6 +65,19 @@ class TestEmbeddingsHandler:
         assert len(embedding) > 0
         assert all(isinstance(x, float) for x in embedding)
 
+    def test_compute_batch_embeddings(self, embeddings_handler):
+        """Test computing embeddings for a batch of texts."""
+        texts = [
+            "This is a test document about cloud services",
+            "Database management systems and graph databases",
+        ]
+        embeddings = embeddings_handler.compute_embeddings_batch(texts)
+
+        assert isinstance(embeddings, list)
+        assert len(embeddings) == 2
+        assert all(isinstance(e, list) and len(e) > 0 for e in embeddings)
+        assert embeddings_handler.compute_embeddings_batch([]) == []
+
     def test_compute_field_embeddings(self, embeddings_handler):
         """Test computing embeddings for multiple fields."""
         node_data = {

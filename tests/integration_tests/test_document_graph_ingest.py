@@ -244,6 +244,24 @@ class TestDocumentGraphTools:
         assert "Document" not in list(df["name"])
         assert "Folder" not in list(df["name"])
 
+    def test_ingest_with_retrieval_batch_chunks(
+        self, graph_backend: KuzuBackend, doc_factory: DocumentGraphFactory
+    ) -> None:
+        """Ingest with RetrievalConfig computes chunk embeddings in batch."""
+        from genai_graph.kg.document_graph.retrieval import RetrievalConfig
+
+        drop_document_graph(graph_backend, drop_documents=True)
+        config = RetrievalConfig(embeddings_id="embeddings_768@fake", fts=True)
+        result = ingest_document_graph(graph_backend, doc_factory, retrieval_config=config)
+
+        assert result.documents_processed == 2
+        assert result.chunks_created > 0
+        assert result.warnings == []
+
+        # Verify chunks were written
+        df = graph_backend.execute_get_as_df("MATCH (c:SectionChunk) RETURN count(c) AS cnt", union=False)
+        assert int(df["cnt"].iloc[0]) == result.chunks_created
+
 
 @pytest.fixture
 def nested_md_corpus(tmp_path: Path) -> Path:

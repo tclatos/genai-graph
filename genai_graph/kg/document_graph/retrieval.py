@@ -138,9 +138,63 @@ def ensure_section_fts_index(backend: KgBackend, index_name: str = _DEFAULT_FTS_
     return index_name
 
 
-def build_section_chunks(
-    section: Any, *, handler: EmbeddingsHandler, chunk_size_tokens: int
-) -> list[dict[str, Any]]:
+def build_sections_chunks(
+    sections: list[Any], *, handler: EmbeddingsHandler, chunk_size_tokens: int
+) -> list[tuple[str, dict[str, Any]]]:
+    """Chunk multiple sections in batch, computing contextualized embeddings in a single batch call.
+
+    Args:
+        sections: List of MarkdownSection instances to chunk.
+        handler: EmbeddingsHandler instance for computing embeddings.
+        chunk_size_tokens: Target chunk size in tokens.
+
+    Returns:
+        List of ``(section_id, chunk_dict)`` pairs.
+    """
+    items: list[tuple[str, str, str, int, str, int, str]] = []
+    for section in sections:
+        pieces = chunk_section_text(section.text, size_tokens=chunk_size_tokens)
+        desc = section.description or ""
+        header = section.title + (f" | {desc}" if desc else "")
+        for idx, (chunk_text, token_count) in enumerate(pieces):
+            embed_input = f"{header}\n\n{chunk_text}"
+            chunk_id = f"{section.section_id}::c{idx}"
+            items.append(
+                (section.section_id, section.markdown_hash, chunk_id, idx, chunk_text, token_count, embed_input)
+            )
+
+    if not items:
+        return []
+
+    embed_inputs = [item[6] for item in items]
+    try:
+        embeddings = handler.compute_embeddings_batch(embed_inputs)
+    except Exception as exc:  # noqa: BLE001
+        raise RetrievalError(f"Batch embedding failed for {len(embed_inputs)} chunks: {exc}") from exc
+
+    results: list[tuple[str, dict[str, Any]]] = []
+    for (section_id, md_hash, chunk_id, idx, chunk_text, token_count, _), embedding in zip(
+        items, embeddings, strict=True
+    ):
+        results.append(
+            (
+                section_id,
+                {
+                    "chunk_id": chunk_id,
+                    "section_id": section_id,
+                    "markdown_hash": md_hash,
+                    "chunk_index": idx,
+                    "chunk_text": chunk_text,
+                    "token_count": token_count,
+                    "chunk_embedding": embedding,
+                    "name": chunk_id,
+                },
+            )
+        )
+    return results
+
+
+def build_section_chunks(section: Any, *, handler: EmbeddingsHandler, chunk_size_tokens: int) -> list[dict[str, Any]]:
     """Chunk a section, compute contextualized embeddings, return SectionChunk data dicts.
 
     Each chunk's embedding input is ``"{title} | {description}\\n\\n{chunk_text}"``
@@ -148,27 +202,4 @@ def build_section_chunks(
     chunk body. The returned dicts include a ``chunk_embedding`` key (a list of
     floats) that the merge path picks up as a dynamic embedding column.
     """
-    pieces = chunk_section_text(section.text, size_tokens=chunk_size_tokens)
-    desc = section.description or ""
-    header = section.title + (f" | {desc}" if desc else "")
-    chunks: list[dict[str, Any]] = []
-    for idx, (chunk_text, token_count) in enumerate(pieces):
-        embed_input = f"{header}\n\n{chunk_text}"
-        chunk_id = f"{section.section_id}::c{idx}"
-        try:
-            embedding = handler.compute_embeddings(embed_input)
-        except Exception as exc:  # noqa: BLE001
-            raise RetrievalError(f"Embedding failed for chunk {chunk_id}: {exc}") from exc
-        chunks.append(
-            {
-                "chunk_id": chunk_id,
-                "section_id": section.section_id,
-                "markdown_hash": section.markdown_hash,
-                "chunk_index": idx,
-                "chunk_text": chunk_text,
-                "token_count": token_count,
-                "chunk_embedding": embedding,
-                "name": chunk_id,
-            }
-        )
-    return chunks
+    return [cd for _, cd in build_sections_chunks([section], handler=handler, chunk_size_tokens=chunk_size_tokens)]

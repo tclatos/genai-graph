@@ -477,34 +477,56 @@ def anchor_toc_preamble(
 def _call_toc_preamble_llm(
     *, llm_id: str, filename: str, toc_text: str, max_tokens: int | None = None
 ) -> DocumentTocPreamble:
-    """Call LLM with structured output to extract table of contents from preamble text."""
-    from genai_tk.core.factories.llm_factory import get_llm
-    from genai_tk.core.prompts import def_prompt
+    """Call BAML function to extract table of contents from preamble text.
 
-    system = """
-        You extract the structured Table of Contents from the preamble or beginning of a document.
-        Return all sections/items/parts/tables in the EXACT order they appear in the Table of Contents as a JSON object.
-        For each entry:
-        - `title`: the exact heading/section text as listed in the Table of Contents.
-        - `level`: hierarchical depth: 1 (top-level Part/Chapter/Major Section), 2 (Item/Section/Sub-chapter), 3 (Table/Chart/Note/Subsection).
-        - `page`: reported page number or identifier if given, else null.
-
-        Do not invent sections not present in the Table of Contents.
+    Uses the BAML client (`b.ExtractTocPreamble`) with LLM routing via `create_baml_options`.
     """
-    user = """
-        Document: {filename}
+    from genai_graph.baml_client import b
+    from genai_tk.extra.structured.baml_util import create_baml_options
 
-        --- Table of Contents excerpt ---
-        {toc_text}
-        --- end excerpt ---
-    """
-    prompt = def_prompt(system=system, user=user)
-    llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
-    structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentTocPreamble)
-    result = (prompt | structured_llm).invoke({"filename": filename, "toc_text": toc_text})
-    if isinstance(result, DocumentTocPreamble):
-        return result
-    return DocumentTocPreamble.model_validate(result)
+    baml_options = create_baml_options(llm_id) or {}
+    baml_result = b.ExtractTocPreamble(
+        filename=filename,
+        toc_text=toc_text,
+        baml_options=baml_options,
+    )
+    if isinstance(baml_result, DocumentTocPreamble):
+        return baml_result
+    return DocumentTocPreamble.model_validate(baml_result.model_dump())
+
+
+# LangChain implementation (replaced by BAML version above, preserved for reference / future reuse):
+# def _call_toc_preamble_llm_langchain(
+#     *, llm_id: str, filename: str, toc_text: str, max_tokens: int | None = None
+# ) -> DocumentTocPreamble:
+#     """Call LLM with LangChain structured output to extract table of contents from preamble text."""
+#     from genai_tk.core.factories.llm_factory import get_llm
+#     from genai_tk.core.prompts import def_prompt
+#
+#     system = """
+#         You extract the structured Table of Contents from the preamble or beginning of a document.
+#         Return all sections/items/parts/tables in the EXACT order they appear in the Table of Contents as a JSON object.
+#         For each entry:
+#         - `title`: the exact heading/section text as listed in the Table of Contents.
+#         - `level`: hierarchical depth: 1 (top-level Part/Chapter/Major Section), 2 (Item/Section/Sub-chapter), 3 (Table/Chart/Note/Subsection).
+#         - `page`: reported page number or identifier if given, else null.
+#
+#         Do not invent sections not present in the Table of Contents.
+#     """
+#     user = """
+#         Document: {filename}
+#
+#         --- Table of Contents excerpt ---
+#         {toc_text}
+#         --- end excerpt ---
+#     """
+#     prompt = def_prompt(system=system, user=user)
+#     llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
+#     structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentTocPreamble)
+#     result = (prompt | structured_llm).invoke({"filename": filename, "toc_text": toc_text})
+#     if isinstance(result, DocumentTocPreamble):
+#         return result
+#     return DocumentTocPreamble.model_validate(result)
 
 
 def extract_toc_from_preamble(

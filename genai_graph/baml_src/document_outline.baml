@@ -41,6 +41,8 @@ function ExtractTocPreamble(filename: string, toc_text: string) -> DocumentTocPr
     --- Table of Contents excerpt ---
     {{ toc_text }}
     --- end excerpt ---
+
+    {{ ctx.output_format }}
   "#
 }
 
@@ -79,5 +81,7 @@ function ExtractOutline(
     --- full document ---
     {{ raw }}
     --- end document ---
+
+    {{ ctx.output_format }}
   "#
 }

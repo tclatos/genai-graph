@@ -37,7 +37,7 @@ dependencies = [
     "baml-lib>=0.42.0",
     "chonkie>=1.5.2",
     "tokenizers>=0.21.0",           # Hugging Face tokenizers (for chonkie)
-    "ladybug>=0.16.1",              
+    "ladybug>=0.16.1",
     "markdown-it-py>=3.0.0",        # CommonMark parser with line-number tracking (Markdown Knowledge Tree)
 ]
 

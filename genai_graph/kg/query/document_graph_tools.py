@@ -26,7 +26,6 @@ from langchain_core.tools import BaseTool, tool
 from loguru import logger
 
 from genai_graph.kg.backend import KgBackend, KuzuBackend, LadybugBackend
-from genai_graph.kg.embeddings_handler import EmbeddingsHandler
 from genai_graph.kg.nodes.document import DocumentNode, FolderNode
 from genai_graph.kg.nodes.document_section import SectionChunkNode, SectionNode
 

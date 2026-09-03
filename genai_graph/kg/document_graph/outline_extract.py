@@ -28,7 +28,8 @@ from pathlib import Path
 
 from genai_tk.utils.tokens import count_tokens
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from typing import Any
 
 from genai_graph.kg.document_graph.summarize import _clean_text, _is_length_limit_error
 from genai_graph.kg.document_graph.tree_parser import _TOC_HEADER_RE, detect_headings
@@ -78,12 +79,36 @@ class TocPreambleEntry(BaseModel):
     )
     page: str | None = Field(default=None, description="Page number or identifier if given in the TOC, otherwise None")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_entry(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"title": data.strip(), "level": 1}
+        if isinstance(data, dict):
+            # If page is int or float, convert to str
+            if "page" in data and data["page"] is not None and not isinstance(data["page"], str):
+                data["page"] = str(data["page"])
+        return data
+
 
 class DocumentTocPreamble(BaseModel):
     """Structured-output schema for TOC extraction from document preamble."""
 
     document_title: str | None = Field(default=None, description="Title of the document if identified")
     entries: list[TocPreambleEntry] = Field(default_factory=list, description="Ordered list of TOC entries")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_input(cls, data: Any) -> Any:
+        if isinstance(data, list):
+            return {"entries": data}
+        if isinstance(data, dict):
+            if "entries" not in data:
+                for alt_key in ("sections", "toc", "items", "table_of_contents", "content", "tables"):
+                    if alt_key in data and isinstance(data[alt_key], list):
+                        data["entries"] = data[alt_key]
+                        break
+        return data
 
 
 class OutlineEntry(BaseModel):
@@ -458,7 +483,7 @@ def _call_toc_preamble_llm(
 
     system = """
         You extract the structured Table of Contents from the preamble or beginning of a document.
-        Return all sections/items/parts/tables in the EXACT order they appear in the Table of Contents.
+        Return all sections/items/parts/tables in the EXACT order they appear in the Table of Contents as a JSON object.
         For each entry:
         - `title`: the exact heading/section text as listed in the Table of Contents.
         - `level`: hierarchical depth: 1 (top-level Part/Chapter/Major Section), 2 (Item/Section/Sub-chapter), 3 (Table/Chart/Note/Subsection).
@@ -477,8 +502,9 @@ def _call_toc_preamble_llm(
     llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
     structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentTocPreamble)
     result = (prompt | structured_llm).invoke({"filename": filename, "toc_text": toc_text})
-    assert isinstance(result, DocumentTocPreamble)
-    return result
+    if isinstance(result, DocumentTocPreamble):
+        return result
+    return DocumentTocPreamble.model_validate(result)
 
 
 def extract_toc_from_preamble(

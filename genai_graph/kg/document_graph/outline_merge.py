@@ -120,10 +120,15 @@ def merge_outline(raw: str, outline: DocumentOutline, algo_headings: list[tuple[
     # Fallback: title-anchored reconciliation for unaligned / hand-crafted outlines.
     lines = raw.splitlines()
 
+    # If document has a TOC preamble, skip past it so we don't match entries inside the TOC itself
+    from genai_graph.kg.document_graph.outline_extract import _extract_toc_excerpt
+
+    _toc_text, _s, end_line = _extract_toc_excerpt(raw)
+    cursor = max(0, end_line - 1) if _toc_text else 0  # 0-based line index consumed up to (exclusive)
+
     # entry_idx -> (line_start 1-indexed, entry); only for matched entries.
     matched: dict[int, tuple[int, OutlineEntry]] = {}
     unmatched_idx: set[int] = set()
-    cursor = 0  # 0-based line index consumed up to (exclusive)
 
     for entry_idx, entry in enumerate(outline.sections):
         line_idx = _find_heading_line(lines, entry.title, cursor) if entry.title else None

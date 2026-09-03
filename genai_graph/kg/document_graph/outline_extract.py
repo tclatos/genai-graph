@@ -25,11 +25,11 @@ import hashlib
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from genai_tk.utils.tokens import count_tokens
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
-from typing import Any
 
 from genai_graph.kg.document_graph.summarize import _clean_text, _is_length_limit_error
 from genai_graph.kg.document_graph.tree_parser import _TOC_HEADER_RE, detect_headings
@@ -481,8 +481,9 @@ def _call_toc_preamble_llm(
 
     Uses the BAML client (`b.ExtractTocPreamble`) with LLM routing via `create_baml_options`.
     """
-    from genai_graph.baml_client import b
     from genai_tk.extra.structured.baml_util import create_baml_options
+
+    from genai_graph.baml_client import b
 
     baml_options = create_baml_options(llm_id) or {}
     baml_result = b.ExtractTocPreamble(

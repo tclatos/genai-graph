@@ -902,77 +902,35 @@ def search_sections(
             for r in kw
         ]
 
-    effective_embeddings_id = embeddings_id or _resolve_default_embeddings_id()
-    indexes = get_available_indexes(backend)
+    # Native Cypher keyword search over section titles and body text
+    kw_hits = _contains_section_hits(backend, query, limit, folder_id=folder_id, allowed=allowed)
+    if not kw_hits:
+        # Fallback to splitting query into individual search tokens if combined query yields 0
+        words = [w for w in query.split() if len(w) >= 3 and not w.lower().startswith("the")]
+        seen_sids = set()
+        for w in words[:4]:
+            sub_hits = _contains_section_hits(backend, w, limit=limit, folder_id=folder_id, allowed=allowed)
+            for sh in sub_hits:
+                if sh["section_id"] not in seen_sids:
+                    seen_sids.add(sh["section_id"])
+                    kw_hits.append(sh)
+            if len(kw_hits) >= limit:
+                break
 
-    sem: list[dict[str, Any]] = []
-    if (
-        mode in ("hybrid", "all", "semantic", "vector")
-        and indexes.get("vector")
-        and effective_embeddings_id
-        and isinstance(backend, KuzuBackend)
-    ):
-        try:
-            handler = EmbeddingsHandler(embeddings_id=effective_embeddings_id)
-            query_vec = handler.compute_embeddings(query)
-            sem = _semantic_section_hits(backend, query_vec, limit, allowed)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("Semantic search unavailable: {}", exc)
-            sem = []
-
-    kw: list[dict[str, Any]] = []
-    if mode in ("hybrid", "all", "bm25", "fts") or (mode in ("semantic", "vector") and not sem):
-        if mode in ("bm25", "fts"):
-            kw = _keyword_section_hits(backend, query, limit, folder_id=folder_id, allowed=allowed)
-        elif mode in ("hybrid", "all"):
-            kw = _keyword_section_hits(backend, query, limit, folder_id=folder_id, allowed=allowed)
-
-    sem_sorted = sorted(sem, key=lambda r: r["distance"])
-    sem_rank = {r["section_id"]: i for i, r in enumerate(sem_sorted)}
-    sem_by_sid = {r["section_id"]: r for r in sem_sorted}
-
-    kw_sorted = sorted(kw, key=lambda r: (r.get("score") is None, -(r.get("score") or 0)))
-    kw_rank = {r["section_id"]: i for i, r in enumerate(kw_sorted)}
-    kw_by_sid = {r["section_id"]: r for r in kw}
-
-    sem_available = bool(sem)
-    all_sids = set(sem_rank) | set(kw_rank)
-    meta = _fetch_section_meta(backend, list(all_sids))
-
-    results: list[dict[str, Any]] = []
-    for sid in all_sids:
-        m = meta.get(sid, {})
-        srow = sem_by_sid.get(sid, {})
-        krow = kw_by_sid.get(sid, {})
-        if mode in ("hybrid", "all") and sem_available:
-            sc = 0.0
-            if sid in sem_rank:
-                sc += 1.0 / (_RRF_K + sem_rank[sid] + 1)
-            if sid in kw_rank:
-                sc += 1.0 / (_RRF_K + kw_rank[sid] + 1)
-        elif mode in ("semantic", "vector") and sem_available:
-            d = srow.get("distance")
-            sc = (1.0 - (d / 2.0)) if d is not None else 0.0
-        else:  # bm25 / keyword, or hybrid/semantic degraded to keyword-only
-            sc = krow.get("score") or 0.0
-        chunk = srow.get("chunk_text")
-        if chunk and len(chunk) > _MAX_CHUNK_SNIPPET:
-            chunk = chunk[:_MAX_CHUNK_SNIPPET] + "…"
-        results.append(
-            {
-                "section_id": sid,
-                "markdown_hash": m.get("markdown_hash") or srow.get("markdown_hash") or krow.get("markdown_hash"),
-                "title": m.get("title") or krow.get("title"),
-                "level": m.get("level") or krow.get("level"),
-                "line_start": m.get("line_start") or krow.get("line_start"),
-                "score": round(sc, 6),
-                "matched_chunk": chunk,
-                "distance": srow.get("distance"),
-            }
-        )
-
-    results.sort(key=lambda r: r["score"], reverse=True)
-    return results[:limit]
+    meta = _fetch_section_meta(backend, [r["section_id"] for r in kw_hits[:limit]])
+    return [
+        {
+            "section_id": r["section_id"],
+            "markdown_hash": meta.get(r["section_id"], {}).get("markdown_hash") or r.get("markdown_hash"),
+            "title": meta.get(r["section_id"], {}).get("title") or r.get("title"),
+            "level": meta.get(r["section_id"], {}).get("level") or r.get("level"),
+            "line_start": meta.get(r["section_id"], {}).get("line_start") or r.get("line_start"),
+            "score": 1.0 / (1 + idx),
+            "matched_chunk": None,
+            "distance": None,
+        }
+        for idx, r in enumerate(kw_hits[:limit])
+    ]
 
 
 def _connect(db_path: str) -> KgBackend:

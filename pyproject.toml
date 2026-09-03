@@ -51,6 +51,10 @@ Repository = "https://github.com/tclatos/genai-graph"
 # Install with: uv sync --extra harnessing
 harnessing = ["genai-tk[harnessing]"]
 
+# Everything (for full installs / CI images)
+all = ["genai-graph[harnessing]"]
+
+
 [dependency-groups]
 # UI and web application dependencies
 

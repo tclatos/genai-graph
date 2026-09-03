@@ -1,4 +1,22 @@
 
+# Language detection
+ Detect the language of the inhected document with 
+https://github.com/pemistahl/lingua-py 
+
+(restrict to common language  for business : European languages, Chinese, ...)
+
+Also get the stopwords.  I sugest using Spacy:  from spacy.lang.fr import French, ...
+stopwords = French.Defaults.stop_words
+
+Add the language code in the Document field. 
+Use code and stopwords to configure Ladybug BM25 : https://docs.ladybugdb.com/extensions/full-text-search/ 
+
+Put generic code in /home/tcl/prj/genai-tk/genai_tk/extra/nlp 
+
+
+# refactor genai_tk/utils
+- move trace, monitoring and trajectories files in a genai_tk/extra/monitoring
+
 
 
 # Middleware
@@ -32,6 +50,11 @@ Update doc
 
 # CLI
  ? Merge cli docgraph folder-toc and cli docgraph folders 
+
+ 
+
+- need better 'docgraph cat' commmand -> section range, section separator 
+
 
 # Benchmarks
 - Analyse https://github.com/NanoNets/nanoindex and see what can be taken

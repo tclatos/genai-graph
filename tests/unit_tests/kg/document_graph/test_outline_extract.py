@@ -323,6 +323,20 @@ class TestSectionBranching:
         assert result.outline.document_description == "Overall doc description"
         assert result.llm_calls == 4  # 3 branches + 1 document synthesis
 
+    def test_branch_outline_coerces_bare_list(self) -> None:
+        # Some models return the section entries as a bare JSON array instead of
+        # the {"sections": [...]} wrapper — validation must still succeed.
+        from genai_graph.kg.document_graph.outline_extract import BranchOutline
+
+        raw_list = [
+            {"title": "Table PDO-2.--Offerings of Bills", "level": 3, "description": "Offerings of bills.", "summary": None}
+        ]
+        coerced = BranchOutline.model_validate(raw_list)
+        assert len(coerced.sections) == 1
+        assert coerced.sections[0].title == "Table PDO-2.--Offerings of Bills"
+        wrapper = BranchOutline.model_validate({"sections": raw_list})
+        assert len(wrapper.sections) == 1
+
     def test_clean_outline_drops_restatements_keeps_substantive(self, tmp_path: Path) -> None:
         from genai_graph.kg.document_graph.outline_extract import _clean_outline
 

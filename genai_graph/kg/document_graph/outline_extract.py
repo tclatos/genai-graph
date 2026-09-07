@@ -145,6 +145,15 @@ class BranchOutline(BaseModel):
 
     sections: list[OutlineEntry] = Field(..., description="Every requested section in this branch, in exact order")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_input(cls, data: Any) -> Any:
+        # Some models return the entries as a bare JSON array instead of the
+        # expected {"sections": [...]} wrapper object.
+        if isinstance(data, list):
+            return {"sections": data}
+        return data
+
 
 class DocumentSummarySynthesis(BaseModel):
     """Structured output for whole-document description and summary."""
@@ -550,6 +559,13 @@ def anchor_toc_preamble(
     return anchored
 
 
+def _baml_result_to_model(model_cls: type[BaseModel], baml_result: Any) -> BaseModel:
+    """Convert a BAML-generated pydantic object into the project model of the same shape."""
+    if isinstance(baml_result, model_cls):
+        return baml_result
+    return model_cls.model_validate(baml_result.model_dump())
+
+
 def _call_toc_preamble_llm(
     *, llm_id: str, filename: str, toc_text: str, max_tokens: int | None = None
 ) -> DocumentTocPreamble:
@@ -805,6 +821,28 @@ def _call_branch_llm(
     config: OutlineConfig,
     max_tokens: int | None,
 ) -> BranchOutline:
+    """One branch-enrichment LLM call: BAML first (robust JSON parsing), LangChain fallback."""
+    headings_block = _render_headings_block(branch_headings)
+    try:
+        from genai_tk.extra.structured.baml_util import create_baml_options
+
+        from genai_graph.baml_client import b
+
+        baml_options = create_baml_options(llm_id) or {}
+        baml_result = b.ExtractBranchOutline(
+            filename=filename,
+            branch_title=branch_title,
+            headings=headings_block,
+            raw=branch_raw,
+            max_description_words=config.max_description_words,
+            max_summary_words=config.max_summary_words,
+            summary_min_tokens=config.summary_min_tokens,
+            baml_options=baml_options,
+        )
+        return _baml_result_to_model(BranchOutline, baml_result)  # type: ignore[return-value]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("BAML branch extraction unavailable ({}); using LangChain structured output", exc)
+
     from genai_tk.core.factories.llm_factory import get_llm
 
     system, user = _build_branch_prompt(
@@ -817,8 +855,9 @@ def _call_branch_llm(
     llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
     structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(BranchOutline)
     out = structured_llm.invoke([("system", system), ("user", user)])
-    assert isinstance(out, BranchOutline)
-    return out
+    if isinstance(out, BranchOutline):
+        return out
+    return BranchOutline.model_validate(out)
 
 
 def _call_branch_llm_with_retry(
@@ -873,6 +912,28 @@ def _synthesize_document_summary(
     from genai_tk.core.factories.llm_factory import get_llm
 
     top_level_desc = "\n".join(f"- {e.title}: {e.description}" for e in section_entries[:15] if e.description)
+    preamble_excerpt = preamble_text[:1500]
+    try:
+        from genai_tk.extra.structured.baml_util import create_baml_options
+
+        from genai_graph.baml_client import b
+
+        baml_options = create_baml_options(llm_id) or {}
+        baml_result = b.SynthesizeDocumentSummary(
+            filename=filename,
+            preamble_text=preamble_excerpt,
+            top_level_descriptions=top_level_desc,
+            max_description_words=config.max_description_words,
+            max_summary_words=config.max_summary_words,
+            baml_options=baml_options,
+        )
+        res = _baml_result_to_model(DocumentSummarySynthesis, baml_result)  # type: ignore[assignment]
+        return _clean_text(res.document_description, config.max_description_chars), _clean_text(
+            res.document_summary, config.max_summary_chars
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("BAML summary synthesis unavailable ({}); using LangChain structured output", exc)
+
     system = f"""
         You generate the top-level document description and summary for a document library.
         - `document_description`: exactly ONE sentence, at most {config.max_description_words} words, stating what the document is and its scope.
@@ -882,7 +943,7 @@ def _synthesize_document_summary(
         Document: {filename}
 
         Preamble excerpt:
-        {preamble_text[:1500]}
+        {preamble_excerpt}
 
         Major Sections / Tables:
         {top_level_desc}
@@ -890,10 +951,11 @@ def _synthesize_document_summary(
     try:
         structured_llm = get_llm(llm_id).with_structured_output(DocumentSummarySynthesis)
         res = structured_llm.invoke([("system", system), ("user", user)])
-        if isinstance(res, DocumentSummarySynthesis):
-            return _clean_text(res.document_description, config.max_description_chars), _clean_text(
-                res.document_summary, config.max_summary_chars
-            )
+        if not isinstance(res, DocumentSummarySynthesis):
+            res = DocumentSummarySynthesis.model_validate(res)
+        return _clean_text(res.document_description, config.max_description_chars), _clean_text(
+            res.document_summary, config.max_summary_chars
+        )
     except Exception as exc:  # noqa: BLE001
         logger.debug("Document summary synthesis failed for {}: {}", filename, exc)
     return f"Document: {filename}", ""
@@ -1084,7 +1146,25 @@ def _call_llm(
     target_headings = headings if headings is not None else detect_headings(raw)
     system, _ = _build_prompt(filename=filename, raw=raw, config=config)
     headings_block = _render_headings_block(target_headings)
-    cleaned_doc = _clean_markdown_for_prompt(raw, config.table_sample_head_rows, config.table_sample_tail_rows)
+    cleaned_doc = _clean_markdown_for_prompt(raw)
+    try:
+        from genai_tk.extra.structured.baml_util import create_baml_options
+
+        from genai_graph.baml_client import b
+
+        baml_options = create_baml_options(llm_id) or {}
+        baml_result = b.ExtractOutline(
+            filename=filename,
+            headings=headings_block,
+            raw=cleaned_doc,
+            max_description_words=config.max_description_words,
+            max_summary_words=config.max_summary_words,
+            baml_options=baml_options,
+        )
+        return _baml_result_to_model(DocumentOutline, baml_result)  # type: ignore[return-value]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("BAML outline extraction unavailable ({}); using LangChain structured output", exc)
+
     user = f"""Document: {filename}
 
 --- headings detected in this document (return one section per heading, in this order) ---
@@ -1095,8 +1175,9 @@ def _call_llm(
     llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
     structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentOutline)
     result = structured_llm.invoke([("system", system), ("user", user)])
-    assert isinstance(result, DocumentOutline)
-    return result
+    if isinstance(result, DocumentOutline):
+        return result
+    return DocumentOutline.model_validate(result)
 
 
 def _call_llm_with_retry(

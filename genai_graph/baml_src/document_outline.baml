@@ -26,6 +26,15 @@ class DocumentOutline {
   sections OutlineEntry[] @description("Every section in document order; titles must appear verbatim")
 }
 
+class BranchOutline {
+  sections OutlineEntry[] @description("Every requested section in this branch, in exact order")
+}
+
+class DocumentSummarySynthesis {
+  document_description string @description("ONE plain-text sentence, at most 20 words, on the whole document")
+  document_summary string @description("2-4 plain-text sentences, at most 60 words, abstracting the document")
+}
+
 function ExtractTocPreamble(filename: string, toc_text: string) -> DocumentTocPreamble {
   client CustomClient
   prompt #"
@@ -83,6 +92,75 @@ function ExtractOutline(
     --- full document ---
     {{ raw }}
     --- end document ---
+
+    {{ ctx.output_format }}
+  "#
+}
+
+function ExtractBranchOutline(
+  filename: string,
+  branch_title: string,
+  headings: string,
+  raw: string,
+  max_description_words: int,
+  max_summary_words: int,
+  summary_min_tokens: int
+) -> BranchOutline {
+  client CustomClient
+  prompt #"
+    You enrich the table of contents for a document section branch that an AI agent reads
+    to decide which section or table to open. The Markdown headings for this branch have
+    ALREADY been detected and are listed in the user message (numbered, with their
+    Markdown level as `[Llevel]`). Return EXACTLY one `sections` entry per
+    listed heading, in the same order, using each heading's verbatim title and its
+    listed level, plus a description (and, for substantial sections, a summary).
+
+    For every listed heading, return (in the same order as the list):
+    - `title`: the heading text EXACTLY as listed (verbatim).
+    - `level`: the level listed for that heading.
+    - `description`: ONE plain-text sentence, at most {{ max_description_words }} words, naming the CONCRETE subject matter under that heading — the specific entities, products, metrics, line items, time periods, or scope found in the body text.
+      - If a heading is a Table (e.g. "Table 1", "Table 2", "Table FFO-1"), inspect the table headers and sample rows to state what metrics and categories the table covers (e.g., "Monthly receipts from individual income tax, corporation tax, and customs.").
+      - NEVER restate or paraphrase the title alone (e.g. "Table 1" -> "Describes Table 1" is invalid).
+      - If the heading is a structural divider with no real body text, set `description` to null.
+    - `summary`: ONLY for substantial sections (more than roughly {{ summary_min_tokens }} tokens): 2-3 plain-text sentences, at most {{ max_summary_words }} words. Leave null otherwise.
+
+    HARD RULES:
+    - Return exactly one `sections` entry per listed heading in exact order.
+    - Never include a section's body text in your answer.
+
+    Document: {{ filename }}
+    Branch / Major Section: {{ branch_title }}
+
+    --- headings in this branch (return one section per heading, in this order) ---
+    {{ headings }}
+    --- branch content ---
+    {{ raw }}
+    --- end branch content ---
+
+    {{ ctx.output_format }}
+  "#
+}
+
+function SynthesizeDocumentSummary(
+  filename: string,
+  preamble_text: string,
+  top_level_descriptions: string,
+  max_description_words: int,
+  max_summary_words: int
+) -> DocumentSummarySynthesis {
+  client CustomClient
+  prompt #"
+    You generate the top-level document description and summary for a document library.
+    - `document_description`: exactly ONE sentence, at most {{ max_description_words }} words, stating what the document is and its scope.
+    - `document_summary`: 2-4 sentences, at most {{ max_summary_words }} words, abstracting the main topics, entities, and periods covered.
+
+    Document: {{ filename }}
+
+    Preamble excerpt:
+    {{ preamble_text }}
+
+    Major Sections / Tables:
+    {{ top_level_descriptions }}
 
     {{ ctx.output_format }}
   "#

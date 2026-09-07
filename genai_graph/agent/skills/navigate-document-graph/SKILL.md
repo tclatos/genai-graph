@@ -5,77 +5,74 @@ description: Answer questions over a Document Graph (Folders → Documents → M
 
 # Navigate the Document Graph
 
-You answer by **reading** documents from the graph — never from memory. The graph
-holds Folders → Documents → Markdown sections; every section has a one-line
-`description` that is your routing signal.
+You answer questions by **reading** documents from the graph — never from memory or training assumptions.
+The graph models: `Folder ──CONTAINS──▶ Document ──HAS_SECTION──▶ MarkdownSection ──HAS_SUBSECTION──▶ MarkdownSection`.
+Every section carries a one-line `description` (and optional `summary`) that serves as your routing signal.
 
-## Core loop
+---
 
-1. **Orient.** Call `get_folder_toc(folder_id=<id>)` to list the documents in the
-   target folder, each with a content hash id and a one-line description. If no
-   folder was given, call `list_documents()` to see every ingested document.
-   Read the descriptions and pick the document(s) most likely to answer.
+## 1. Core Navigation Loop
 
-2. **Get the map.** Call `get_document_toc(document_id=<hash-or-filename>)` to get
-   that document's section tree as YAML: each section's `id`, `title`, and
-   `description` (and `summary` if you pass `include_summaries=true`). Do NOT read
-   every section — use the descriptions to pick the few that matter.
+1. **Orient**:
+   - Call `get_folder_toc(folder_id=<id>)` to list documents in the target folder with their content hashes, filenames, and descriptions.
+   - If no folder is specified, call `list_documents()` to view all ingested documents.
+   - Pick the document(s) most relevant to the question based on title, date, or description.
 
-3. **Read only what matters.** Call `get_section_content(section_ids="<id1>,<id2>")`
-   with the comma-separated section ids you selected. This returns the raw
-   Markdown text of those sections only.
+2. **Get the Map (Outline)**:
+   - Call `get_document_toc(document_id="<hash-or-filename>", max_level=2)` to inspect the top-level section hierarchy.
+   - Each entry provides the section `id` (`[hash::sequence]`), `title`, `level`, and routing `description`.
+   - Use `include_summaries=true` when you want synthesized descriptions and key metrics without reading full markdown tables.
+   - Do NOT read all sections; use the TOC to select the specific section IDs that answer the question.
 
-4. **Search when lost.** If the TOC descriptions do not point you to an answer,
-   call `search_sections(query="<natural-language question>", folder_id=<id>)`.
-   This runs a hybrid search (vector similarity over SectionChunks fused with
-   BM25 keyword search) and returns ranked sections best-first with a relevance
-   score and, when a chunk matched, a short snippet of the matching text. Use the
-   returned section ids with `get_section_content`. Prefer one good search plus
-   `get_document_toc` over many blind searches — see the map-first rule below.
+3. **Read Only What Matters**:
+   - Call `get_section_content(section_ids="<id1>,<id2>")` with comma-separated section IDs to read raw Markdown body text.
+   - For long sections or large tables (spanning 50+ lines), use `start_line` and `max_lines` (e.g. `get_section_content(section_ids="<id>", start_line=1, max_lines=40)`) to paginate or inspect headers without overflowing context.
 
-5. **Iterate.** A single document rarely answers a complex question. Repeat
-   across the relevant documents and sections, refining keywords, until you have
-   grounded evidence for every part of the answer.
+4. **Targeted Search When Lost**:
+   - If the TOC outline does not point directly to the answer, call `search_sections(query="<search term>", document_id="<doc_id>")`.
+   - This performs hybrid search (vector similarity over SectionChunks fused with BM25 keyword search via RRF) and returns ranked sections with relevance scores and matching text snippets.
+   - Always supply `document_id` when the document is already known to eliminate cross-document false positives.
 
-## Choosing tools
+5. **Iterate & Synthesize**:
+   - For multi-period, multi-table, or multi-document questions, repeat across the relevant sections until grounded evidence is obtained for every part of the question.
 
-- `get_folder_toc` / `list_documents` → "which documents exist?"
-- `get_document_toc` → "what sections does this document have?" (the map)
-- `get_section_content` → "show me the actual text of these sections"
-- `search_sections` → "where does the graph mention <query>?" (ranked hybrid vector + keyword)
+---
 
-## Rules
+## 2. Tool Discipline & Execution Rules
 
-- **Cite your sources.** Reference each fact with its section id `[hash::sequence]`
-  and name the source document filename.
-- **No hallucination.** If a tool returns "No ... found" or a section does not
-  contain the answer, say the information is not present rather than guessing.
-- **Corpus only via the graph.** The document corpus is reachable ONLY through
-  the graph tools (`get_folder_toc`, `get_document_toc`, `get_section_content`,
-  `search_sections`). Do NOT use `read_file`, `grep`, `glob`, or `ls` to read the
-  source documents or their markdown — those file tools, when present, are for
-  reading skill and reference files only, never for reading the corpus.
-- **Be economical.** Do not dump whole documents into your answer — synthesize.
-  Read only the sections you need; the TOC descriptions exist to keep you from
-  reading everything.
-- **Large documents.** If a document has many sections, pass `max_level=2` to
-  `get_document_toc` first for the top-level outline, then drill into the
-  relevant subtree.
-- **Map before you re-search.** Do not call `search_sections` more than three
-  times in a row. If two searches have not landed on the answer, stop and call
-  `get_document_toc` on the most relevant document to see its section map, then
-  read the specific section with `get_section_content`. One grounded read beats
-  another blind search.
-- **Do not re-fetch the TOC.** Once you call `get_document_toc` for a document,
-  its full section tree and section IDs remain in your conversation history above.
-  Do NOT call `get_document_toc` again for the same document — refer to the
-  earlier output to pick subsequent section IDs.
+- **Multi-Step Continuity & Tool Calling Discipline**:
+  - When multi-turn lookups or multiple tool calls are required, **ALWAYS invoke the next tool call directly**.
+  - **Do NOT output intermediate commentary or conversational filler** (e.g., *"Let me check the next section..."*, *"Now looking at the table..."*) without a tool call. Producing text without tool calls terminates the execution loop and returns your incomplete status comment as the final answer.
+  - Only emit plain text when you have retrieved all necessary data, completed any required calculations, and are ready to deliver your final answer.
 
-## Example: "What SLAs does the RFP require?"
+- **Search Query Formulation**:
+  - Formulate **compact, keyword-dense or conceptual queries** (e.g., `"Consolidated Balance Sheets"`, `"Table FFO-1"`, `"Currency in Circulation"`, `"Note 12 Leases"`).
+  - **Do NOT** pass long conversational questions into `search_sections`.
+  - Prefer specific table numbers, section titles, line item names, or distinct phrases.
 
-1. `get_folder_toc(folder_id="folder_273e65da416b2e72")` → see the documents.
-2. Spot an "Appendix 6. SLA" document → `get_document_toc(document_id="<its hash>")`.
-3. Read its section descriptions → `get_section_content(section_ids="<sla section ids>")`.
-4. Also `search_sections(query="availability", folder_id="folder_273e65da416b2e72")`
-   to catch SLA clauses mentioned inside the main RFP body.
-5. Answer, citing each SLA with its section id and the document it came from.
+- **Circuit Breaker — Map Before Re-Search**:
+  - Do not call `search_sections` more than 2–3 times in a row. If two searches fail to land on the answer, stop searching and inspect `get_document_toc(document_id, max_level=2)` to understand the section structure, then read the target section directly with `get_section_content`.
+
+- **Do NOT Re-Fetch Document TOC**:
+  - Once `get_document_toc` has been executed for a document, its complete section outline and section IDs remain in your conversation history above. Do NOT call `get_document_toc` multiple times for the same document.
+
+- **Corpus Access Only via Graph Tools**:
+  - The document corpus is accessible ONLY through the graph tools (`get_folder_toc`, `get_document_toc`, `get_section_content`, `search_sections`, `list_documents`).
+  - Do NOT attempt to use `read_file`, `grep`, `glob`, or `ls` to access source files or their underlying markdown.
+
+- **Grounded Citation & Verification**:
+  - Reference each fact with its exact section ID `[hash::sequence]` and source document filename.
+  - Always verify column headers, dates, and reporting scale/units ($ thousands, $ millions, $ billions, %).
+  - If a metric or table is genuinely absent from the graph, explicitly state that it is not present rather than extrapolating or guessing.
+
+---
+
+## 3. Tool Quick Reference
+
+| Tool | Purpose | Key Arguments |
+|------|---------|---------------|
+| `get_folder_toc` | List documents in a folder | `folder_id: str \| None` |
+| `list_documents` | List all ingested documents | None |
+| `get_document_toc` | Get section outline / hierarchy | `document_id: str`, `max_level: int = 2`, `include_summaries: bool = False` |
+| `get_section_content` | Read raw Markdown body text | `section_ids: str`, `start_line: int \| None`, `max_lines: int \| None` |
+| `search_sections` | Hybrid vector + BM25 search | `query: str`, `document_id: str \| None`, `folder_id: str \| None`, `limit: int = 20` |

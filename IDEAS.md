@@ -1,4 +1,7 @@
 
+# Generalize skills on doc navigation
+ex: skills/custom/officeqa-qa/SKILL.md "Targeted Search with `search_sections(query="<query>", document_id="<id>")`**:
+
 # Language detection
  Detect the language of the inhected document with 
 https://github.com/pemistahl/lingua-py 

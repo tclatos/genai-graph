@@ -18,6 +18,8 @@ raw Cypher binder error. Truly-missing structures surface as
 
 from __future__ import annotations
 
+import os
+import threading
 from typing import Any
 
 import yaml
@@ -26,12 +28,25 @@ from langchain_core.tools import BaseTool, tool
 from loguru import logger
 
 from genai_graph.kg.backend import KgBackend, KuzuBackend, LadybugBackend
+from genai_graph.kg.embeddings_handler import EmbeddingsHandler
 from genai_graph.kg.nodes.document import DocumentNode, FolderNode
 from genai_graph.kg.nodes.document_section import SectionChunkNode, SectionNode
 
 _DOCUMENT_LABEL = DocumentNode.node_class.__name__
 _SECTION_LABEL = SectionNode.node_class.__name__
 _FOLDER_LABEL = FolderNode.node_class.__name__
+
+# Native index queries (CALL QUERY_FTS_INDEX / QUERY_VECTOR_INDEX) corrupt the
+# native heap in ladybug 0.16.1's pybind backend — every process that runs one
+# (even single-threaded, even when the query only raises a catalog error)
+# SIGSEGVs later at teardown. Set GENAI_GRAPH_DISABLE_NATIVE_INDEX_QUERIES=1
+# to serve the keyword leg via plain Cypher CONTAINS instead until the native
+# bug is fixed upstream.
+_native_index_queries_disabled = os.getenv("GENAI_GRAPH_DISABLE_NATIVE_INDEX_QUERIES", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 # Columns a caller can reasonably expect on each row type. Rows are normalized
 # so every key is present (``None`` when the column does not exist in the DB),
@@ -673,6 +688,8 @@ _MAX_CHUNK_SNIPPET = 180
 
 def get_available_indexes(backend: KgBackend) -> dict[str, bool]:
     """Check which indexes (vector, FTS) are available in the database."""
+    if _native_index_queries_disabled:
+        return {"vector": False, "fts": False}
     fts_available = False
     vector_available = False
     try:
@@ -768,22 +785,46 @@ def _contains_section_hits(
     folder_id: str | None = None,
     allowed: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """CONTAINS search (native Cypher substring search over section title/text)."""
-    where = "(s.title CONTAINS $keyword OR s.text CONTAINS $keyword)"
-    ret = (
-        "RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
-        "s.level AS level, s.line_start AS line_start "
-        "ORDER BY s.markdown_hash, s.line_start LIMIT $limit"
-    )
+    """CONTAINS search (native Cypher substring search over section title/text).
+
+    Multi-word queries are split into terms OR-ed together and ranked by how
+    many terms match, since a verbatim substring match of a whole
+    natural-language phrase is almost never present in the text.
+    """
+    terms = [t for t in dict.fromkeys(keyword.split()) if len(t) >= 3][:8]
+    params: dict[str, Any] = {"limit": limit}
+    if len(terms) > 1:
+        params.update({f"t{i}": t for i, t in enumerate(terms)})
+        where = "(" + " OR ".join(
+            f"(s.title CONTAINS $t{i} OR s.text CONTAINS $t{i})" for i in range(len(terms))
+        ) + ")"
+        score = " + ".join(
+            f"(CASE WHEN s.title CONTAINS $t{i} OR s.text CONTAINS $t{i} THEN 1 ELSE 0 END)"
+            for i in range(len(terms))
+        )
+        ret = (
+            "RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
+            "s.level AS level, s.line_start AS line_start, "
+            f"({score}) AS score "
+            "ORDER BY score DESC, s.markdown_hash, s.line_start LIMIT $limit"
+        )
+    else:
+        params["keyword"] = keyword
+        where = "(s.title CONTAINS $keyword OR s.text CONTAINS $keyword)"
+        ret = (
+            "RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
+            "s.level AS level, s.line_start AS line_start, 1 AS score "
+            "ORDER BY s.markdown_hash, s.line_start LIMIT $limit"
+        )
     if allowed is not None:
         if not allowed:
             return []
         if len(allowed) == 1:
             query = f"MATCH (s:{_SECTION_LABEL}) WHERE s.markdown_hash = $mh AND {where} {ret}"
-            params: dict[str, Any] = {"keyword": keyword, "limit": limit, "mh": next(iter(allowed))}
+            params["mh"] = next(iter(allowed))
         else:
             query = f"MATCH (s:{_SECTION_LABEL}) WHERE s.markdown_hash IN $allowed AND {where} {ret}"
-            params = {"keyword": keyword, "limit": limit, "allowed": list(allowed)}
+            params["allowed"] = list(allowed)
     elif folder_id is not None:
         if _has_relationship(backend, "HAS_SUBFOLDER"):
             query = (
@@ -796,10 +837,9 @@ def _contains_section_hits(
                 f"MATCH (f:{_FOLDER_LABEL} {{folder_id: $folder_id}})-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) "
                 f"MATCH (s:{_SECTION_LABEL} {{markdown_hash: d.markdown_hash}}) WHERE {where} {ret}"
             )
-        params = {"keyword": keyword, "limit": limit, "folder_id": folder_id}
+        params["folder_id"] = folder_id
     else:
         query = f"MATCH (s:{_SECTION_LABEL}) WHERE {where} {ret}"
-        params = {"keyword": keyword, "limit": limit}
     rows, _ = _query_rows(backend, query, params)
     return rows
 
@@ -814,7 +854,7 @@ def _keyword_section_hits(
     """BM25 (FTS) search over MarkdownSection; falls back to CONTAINS."""
     if allowed is not None and not allowed:
         return []
-    if isinstance(backend, KuzuBackend):
+    if not _native_index_queries_disabled and isinstance(backend, KuzuBackend):
         try:
             backend.ensure_fts_extension()
             fetch_k = max(limit * 5, 50) if allowed is not None else limit
@@ -901,42 +941,105 @@ def search_sections(
             for r in kw
         ]
 
-    # Native Cypher keyword search over section titles and body text
-    kw_hits = _contains_section_hits(backend, query, limit, folder_id=folder_id, allowed=allowed)
-    if not kw_hits:
-        # Fallback to splitting query into individual search tokens if combined query yields 0
-        words = [w for w in query.split() if len(w) >= 3 and not w.lower().startswith("the")]
-        seen_sids = set()
-        for w in words[:4]:
-            sub_hits = _contains_section_hits(backend, w, limit=limit, folder_id=folder_id, allowed=allowed)
-            for sh in sub_hits:
-                if sh["section_id"] not in seen_sids:
-                    seen_sids.add(sh["section_id"])
-                    kw_hits.append(sh)
-            if len(kw_hits) >= limit:
-                break
+    effective_embeddings_id = embeddings_id or _resolve_default_embeddings_id()
+    indexes = get_available_indexes(backend)
 
-    meta = _fetch_section_meta(backend, [r["section_id"] for r in kw_hits[:limit]])
-    return [
-        {
-            "section_id": r["section_id"],
-            "markdown_hash": meta.get(r["section_id"], {}).get("markdown_hash") or r.get("markdown_hash"),
-            "title": meta.get(r["section_id"], {}).get("title") or r.get("title"),
-            "level": meta.get(r["section_id"], {}).get("level") or r.get("level"),
-            "line_start": meta.get(r["section_id"], {}).get("line_start") or r.get("line_start"),
-            "score": 1.0 / (1 + idx),
-            "matched_chunk": None,
-            "distance": None,
-        }
-        for idx, r in enumerate(kw_hits[:limit])
-    ]
+    sem: list[dict[str, Any]] = []
+    if (
+        mode in ("hybrid", "all", "semantic", "vector")
+        and indexes.get("vector")
+        and effective_embeddings_id
+        and isinstance(backend, KuzuBackend)
+    ):
+        try:
+            handler = EmbeddingsHandler(embeddings_id=effective_embeddings_id)
+            query_vec = handler.compute_embeddings(query)
+            sem = _semantic_section_hits(backend, query_vec, limit, allowed)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Semantic search unavailable: {}", exc)
+            sem = []
+
+    kw: list[dict[str, Any]] = []
+    if mode in ("hybrid", "all", "bm25", "fts") or (mode in ("semantic", "vector") and not sem):
+        kw = _keyword_section_hits(backend, query, limit, folder_id=folder_id, allowed=allowed)
+
+    sem_sorted = sorted(sem, key=lambda r: r["distance"])
+    sem_rank = {r["section_id"]: i for i, r in enumerate(sem_sorted)}
+    sem_by_sid = {r["section_id"]: r for r in sem_sorted}
+
+    kw_sorted = sorted(kw, key=lambda r: (r.get("score") is None, -(r.get("score") or 0)))
+    kw_rank = {r["section_id"]: i for i, r in enumerate(kw_sorted)}
+    kw_by_sid = {r["section_id"]: r for r in kw}
+
+    sem_available = bool(sem)
+    all_sids = set(sem_rank) | set(kw_rank)
+    meta = _fetch_section_meta(backend, list(all_sids))
+
+    results: list[dict[str, Any]] = []
+    for sid in all_sids:
+        m = meta.get(sid, {})
+        srow = sem_by_sid.get(sid, {})
+        krow = kw_by_sid.get(sid, {})
+        if mode in ("hybrid", "all") and sem_available:
+            sc = 0.0
+            if sid in sem_rank:
+                sc += 1.0 / (_RRF_K + sem_rank[sid] + 1)
+            if sid in kw_rank:
+                sc += 1.0 / (_RRF_K + kw_rank[sid] + 1)
+        elif mode in ("semantic", "vector") and sem_available:
+            d = srow.get("distance")
+            sc = (1.0 - (d / 2.0)) if d is not None else 0.0
+        else:  # bm25 / keyword, or hybrid/semantic degraded to keyword-only
+            sc = krow.get("score") or 0.0
+        chunk = srow.get("chunk_text")
+        if chunk and len(chunk) > _MAX_CHUNK_SNIPPET:
+            chunk = chunk[:_MAX_CHUNK_SNIPPET] + "…"
+        results.append(
+            {
+                "section_id": sid,
+                "markdown_hash": m.get("markdown_hash") or srow.get("markdown_hash") or krow.get("markdown_hash"),
+                "title": m.get("title") or krow.get("title"),
+                "level": m.get("level") or krow.get("level"),
+                "line_start": m.get("line_start") or krow.get("line_start"),
+                "score": round(sc, 6),
+                "matched_chunk": chunk,
+                "distance": srow.get("distance"),
+            }
+        )
+
+    results.sort(key=lambda r: r["score"], reverse=True)
+    return results[:limit]
+
+
+# One Ladybug connection per (thread, db): tool calls reuse their thread's
+# connection instead of churning a new native one per call.
+_TOOL_CONN_LOCAL = threading.local()
+
+# Process-lifetime references to every shared-DB backend created. Ladybug
+# native code corrupts the heap when a Connection object is garbage-collected
+# while other threads still query the shared Database (observed as SIGSEGV /
+# "free(): invalid size"), so connections are never dropped mid-run; they are
+# closed in ordered fashion by genai_tk.utils.ladybug.shared at interpreter
+# shutdown.
+_KEEPALIVE_BACKENDS: list[KgBackend] = []
 
 
 def _connect(db_path: str) -> KgBackend:
-    """Connect to the Document Graph reusing the process-shared ladybug.Database handle."""
-    backend = LadybugBackend()
-    shared_db = get_shared_database(db_path)
-    backend.attach(shared_db)
+    """Return the calling thread's Document Graph connection, creating it once.
+
+    Reuses the process-shared ``ladybug.Database`` handle and keeps the native
+    connection alive for the whole process (see ``_KEEPALIVE_BACKENDS``).
+    """
+    backends: dict[str, KgBackend] | None = getattr(_TOOL_CONN_LOCAL, "backends", None)
+    if backends is None:
+        backends = {}
+        _TOOL_CONN_LOCAL.backends = backends
+    backend = backends.get(db_path)
+    if backend is None:
+        backend = LadybugBackend()
+        backend.attach(get_shared_database(db_path))
+        backends[db_path] = backend
+        _KEEPALIVE_BACKENDS.append(backend)
     return backend
 
 

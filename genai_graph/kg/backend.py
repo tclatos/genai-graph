@@ -4,11 +4,33 @@ This module provides an abstract interface for graph databases and concrete
 implementations for different backends (Kuzu, Neo4j, etc.).
 """
 
+import re
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+# Process-wide lock serializing native extension INSTALL/LOAD calls.
+#
+# Kuzu/Ladybug native code corrupts the heap when extensions are installed or
+# loaded concurrently from several connections/threads (observed as SIGSEGV /
+# "malloc(): unsorted double linked list corrupted" during parallel hybrid
+# searches). All INSTALL/LOAD EXTENSION statements must therefore run while
+# holding this lock, one extension at a time, process-wide.
+_EXTENSION_LOCK = threading.RLock()
+
+# Process-wide lock serializing native CALL operations (FTS / HNSW vector index
+# queries, SHOW_INDEXES, table_info, show_tables, ...).
+#
+# Concurrent native CALL statements against one shared Ladybug Database corrupt
+# the native heap (observed as SIGSEGV / "free(): invalid size" during parallel
+# hybrid searches — even with zero concurrent extension loading). All CALL
+# statements therefore execute one-at-a-time process-wide; ordinary MATCH/RETURN
+# Cypher reads remain fully concurrent.
+_NATIVE_CALL_LOCK = threading.RLock()
+_CALL_RE = re.compile(r"\bCALL\b", re.IGNORECASE)
 
 
 class QueryExecutor(ABC):
@@ -204,6 +226,8 @@ class LadybugBackend(KgBackend):
         """Initialize Ladybug backend."""
         self.db: Any = None
         self.conn: Any = None
+        # Extensions already loaded on ``self.conn`` (per-connection cache).
+        self._loaded_extensions: set[str] = set()
 
     def connect(self, connection_string: str, *, enable_multi_writes: bool = False) -> None:
         """Connect to a Ladybug database file, owning the underlying ``Database``.
@@ -259,7 +283,28 @@ class LadybugBackend(KgBackend):
         # TODO : replace with "" CALL enable_cached_prepared_statement='none' ""
         if parameters and hasattr(self.conn, "_pybind_implicit_prepared_cache"):
             self.conn._pybind_implicit_prepared_cache.clear()
+        if _CALL_RE.search(query):
+            # Native CALL operations (index queries, introspection) are not
+            # thread-safe on a shared Database — serialize them process-wide
+            # (see _NATIVE_CALL_LOCK).
+            with _NATIVE_CALL_LOCK:
+                return self.conn.execute(query, parameters)
         return self.conn.execute(query, parameters)
+
+    def execute_get_as_df(
+        self, query: str, parameters: dict[str, Any] | None = None, union: bool = True
+    ) -> pd.DataFrame:
+        """Execute a query and return results as a DataFrame, CALL-locked end-to-end.
+
+        Native CALL statements (FTS/HNSW index queries, introspection) are
+        serialized across execute *and* the result materialization (``get_as_df``
+        walks the native result), so the whole read happens under
+        ``_NATIVE_CALL_LOCK``.
+        """
+        if _CALL_RE.search(query):
+            with _NATIVE_CALL_LOCK:
+                return super().execute_get_as_df(query, parameters, union=union)
+        return super().execute_get_as_df(query, parameters, union=union)
 
     def create_node_table(
         self,
@@ -415,29 +460,50 @@ class LadybugBackend(KgBackend):
         # Note: Simplified return - actual was_created status would require checking result
         return (True, str(merge_value))
 
+    def _ensure_extension(self, name: str) -> bool:
+        """Install and load *name* once per connection, serialized process-wide.
+
+        Concurrent INSTALL/LOAD EXTENSION calls corrupt the native heap, so all
+        extension statements run under the process-wide ``_EXTENSION_LOCK`` and
+        each connection loads every extension at most once.
+
+        Args:
+            name: Extension name (e.g. ``VECTOR``, ``FTS``).
+
+        Returns:
+            True if the extension is loaded and available, False otherwise.
+        """
+        from loguru import logger
+
+        if name in self._loaded_extensions:
+            return True
+        with _EXTENSION_LOCK:
+            # Re-check inside the lock: another thread may have loaded it while
+            # we were waiting (still for a different connection, so LOAD is
+            # still required here, but INSTALL/LOAD pairs stay serialized).
+            try:
+                self.execute(f"INSTALL {name};")
+            except Exception as e:
+                if "already" not in str(e).lower():
+                    logger.warning(f"{name} extension install failed: {e}")
+            try:
+                self.execute(f"LOAD EXTENSION {name};")
+                self._loaded_extensions.add(name)
+                return True
+            except Exception as e:
+                if "already loaded" in str(e).lower():
+                    self._loaded_extensions.add(name)
+                    return True
+                logger.warning(f"{name} extension load failed (features relying on it will be unavailable): {e}")
+                return False
+
     def ensure_vector_extension(self) -> bool:
         """Install and load the Ladybug vector extension.
 
         Returns:
             True if the vector extension is loaded and available, False otherwise.
         """
-        from loguru import logger
-
-        try:
-            self.execute("INSTALL VECTOR;")
-        except Exception as e:
-            msg = str(e)
-            if "already" not in msg.lower():
-                logger.warning(f"Vector extension install failed (vector indexes will be unavailable): {e}")
-        try:
-            self.execute("LOAD EXTENSION VECTOR;")
-            return True
-        except Exception as e:
-            msg = str(e)
-            if "already loaded" in msg.lower():
-                return True
-            logger.warning(f"Vector extension load failed (vector indexes will be unavailable): {e}")
-            return False
+        return self._ensure_extension("VECTOR")
 
     def ensure_fts_extension(self) -> bool:
         """Install and load the Ladybug FTS (full-text search) extension.
@@ -448,21 +514,7 @@ class LadybugBackend(KgBackend):
         Returns:
             True if the FTS extension is loaded and available, False otherwise.
         """
-        from loguru import logger
-
-        try:
-            self.execute("INSTALL FTS;")
-        except Exception as e:
-            if "already" not in str(e).lower():
-                logger.warning(f"FTS extension install failed (BM25 search will be unavailable): {e}")
-        try:
-            self.execute("LOAD EXTENSION FTS;")
-            return True
-        except Exception as e:
-            if "already loaded" in str(e).lower():
-                return True
-            logger.warning(f"FTS extension load failed (BM25 search will be unavailable): {e}")
-            return False
+        return self._ensure_extension("FTS")
 
     def create_vector_index(
         self,
@@ -576,10 +628,24 @@ class LadybugBackend(KgBackend):
             raise
 
     def close(self) -> None:
-        """Close Ladybug connection."""
-        # Ladybug doesn't require explicit closing
+        """Close the Ladybug connection in an ordered, explicit way.
+
+        Letting the Connection be garbage-collected while other threads still
+        query the shared Database corrupts the native heap, so teardown goes
+        through ``Connection.close()`` (which closes cached query results and
+        prepared statements, then unregisters from the Database) before the
+        references are dropped.
+        """
+        conn = self.conn
         self.db = None
         self.conn = None
+        if conn is not None:
+            close = getattr(conn, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001 - connection may already be closed
+                    pass
 
     def get_query_language(self) -> str:
         """Get query language."""

@@ -571,7 +571,6 @@ def _call_toc_preamble_llm(
     except Exception as exc:  # noqa: BLE001
         logger.debug("BAML preamble TOC extraction unavailable ({}); using LangChain structured output", exc)
         from genai_tk.core.factories.llm_factory import get_llm
-        from genai_tk.core.prompts import def_prompt
 
         system = """
             You extract the structured Table of Contents from the preamble or beginning of a document.
@@ -584,17 +583,16 @@ def _call_toc_preamble_llm(
 
             Do not invent sections not present in the Table of Contents.
         """
-        user = """
+        user = f"""
             Document: {filename}
 
             --- Table of Contents excerpt ---
             {toc_text}
             --- end excerpt ---
         """
-        prompt = def_prompt(system=system, user=user)
         llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
         structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentTocPreamble)
-        result = (prompt | structured_llm).invoke({"filename": filename, "toc_text": toc_text})
+        result = structured_llm.invoke([("system", system), ("user", user)])
         if isinstance(result, DocumentTocPreamble):
             return result
         return DocumentTocPreamble.model_validate(result)
@@ -808,7 +806,6 @@ def _call_branch_llm(
     max_tokens: int | None,
 ) -> BranchOutline:
     from genai_tk.core.factories.llm_factory import get_llm
-    from genai_tk.core.prompts import def_prompt
 
     system, user = _build_branch_prompt(
         filename=filename,
@@ -817,11 +814,9 @@ def _call_branch_llm(
         branch_raw=branch_raw,
         config=config,
     )
-    prompt = def_prompt(system=system, user=user)
     llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
     structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(BranchOutline)
-    result = prompt | structured_llm
-    out = result.invoke({})
+    out = structured_llm.invoke([("system", system), ("user", user)])
     assert isinstance(out, BranchOutline)
     return out
 
@@ -876,7 +871,6 @@ def _synthesize_document_summary(
     config: OutlineConfig,
 ) -> tuple[str, str]:
     from genai_tk.core.factories.llm_factory import get_llm
-    from genai_tk.core.prompts import def_prompt
 
     top_level_desc = "\n".join(f"- {e.title}: {e.description}" for e in section_entries[:15] if e.description)
     system = f"""
@@ -894,9 +888,8 @@ def _synthesize_document_summary(
         {top_level_desc}
     """
     try:
-        prompt = def_prompt(system=system, user=user)
         structured_llm = get_llm(llm_id).with_structured_output(DocumentSummarySynthesis)
-        res = (prompt | structured_llm).invoke({})
+        res = structured_llm.invoke([("system", system), ("user", user)])
         if isinstance(res, DocumentSummarySynthesis):
             return _clean_text(res.document_description, config.max_description_chars), _clean_text(
                 res.document_summary, config.max_summary_chars
@@ -1087,15 +1080,21 @@ def _call_llm(
 ) -> DocumentOutline:
     """The LLM call boundary — isolated so tests can substitute a fake implementation."""
     from genai_tk.core.factories.llm_factory import get_llm
-    from genai_tk.core.prompts import def_prompt
 
     target_headings = headings if headings is not None else detect_headings(raw)
-    system, user = _build_prompt(filename=filename, raw=raw, config=config)
+    system, _ = _build_prompt(filename=filename, raw=raw, config=config)
     headings_block = _render_headings_block(target_headings)
-    prompt = def_prompt(system=system, user=user)
+    cleaned_doc = _clean_markdown_for_prompt(raw, config.table_sample_head_rows, config.table_sample_tail_rows)
+    user = f"""Document: {filename}
+
+--- headings detected in this document (return one section per heading, in this order) ---
+{headings_block}
+--- full document ---
+{cleaned_doc}
+--- end document ---"""
     llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
     structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentOutline)
-    result = (prompt | structured_llm).invoke({"filename": filename, "raw": raw, "headings": headings_block})
+    result = structured_llm.invoke([("system", system), ("user", user)])
     assert isinstance(result, DocumentOutline)
     return result
 

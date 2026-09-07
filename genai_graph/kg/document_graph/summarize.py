@@ -385,7 +385,6 @@ def _call_llm(
 ) -> DocumentIndex:
     """The LLM call boundary — isolated so tests can substitute a fake implementation."""
     from genai_tk.core.factories.llm_factory import get_llm
-    from genai_tk.core.prompts import def_prompt
 
     system, user = _build_prompt(
         filename=filename,
@@ -394,11 +393,9 @@ def _call_llm(
         plans=plans,
         config=config,
     )
-    prompt = def_prompt(system=system, user=user)
     llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
     structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentIndex)
-    chain = prompt | structured_llm
-    result = chain.invoke({})
+    result = structured_llm.invoke([("system", system), ("user", user)])
     assert isinstance(result, DocumentIndex)
     return result
 

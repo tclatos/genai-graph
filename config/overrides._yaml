@@ -17,7 +17,7 @@ ekg_local:
 
   llm:
     models:
-      default: minimax_m25@openrouter
+      default: minimax_3@openrouter
   
   embeddings:
     models:

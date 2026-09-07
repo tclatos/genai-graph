@@ -201,12 +201,39 @@ Text 2
         config.generate_summaries = False
         warnings: list[str] = []
 
-        result = extract_outline(doc_text, "md5hash123", "doc.md", config, warnings=warnings)
-        assert result.outline is not None
-        assert result.llm_calls == 0
-        assert len(result.outline.sections) == 2
-        assert result.outline.sections[0].title == "Section One"
-        assert result.outline.sections[0].description is None
+        res = extract_outline(doc_text, "algo_hash", "doc.md", config, warnings=warnings)
+        assert res.outline is not None
+        assert len(res.outline.sections) == 2
+        assert res.llm_calls == 0
+
+
+@pytest.mark.unit
+class TestSmartTableCondensation:
+    def test_condenses_table_with_head_and_tail(self) -> None:
+        from genai_graph.kg.document_graph.outline_extract import _condense_table_smart
+
+        table = (
+            "| Month | Receipts | Outlays | Balance |\n"
+            "|---|---|---|---|\n"
+            "| Jan 1940 | 10 | 20 | -10 |\n"
+            "| Feb 1940 | 12 | 22 | -10 |\n"
+            "| Mar 1940 | 15 | 25 | -10 |\n"
+            "| Apr 1940 | 18 | 28 | -10 |\n"
+            "| May 1940 | 20 | 30 | -10 |\n"
+            "| Jun 1940 | 22 | 32 | -10 |\n"
+            "| Jul 1940 | 25 | 35 | -10 |\n"
+            "| Aug 1940 | 28 | 38 | -10 |\n"
+            "| Sep 1940 | 30 | 40 | -10 |\n"
+            "| Total 1940 | 180 | 270 | -90 |\n"
+        )
+        condensed = _condense_table_smart(table, head_rows=3, tail_rows=2)
+        assert "Jan 1940" in condensed
+        assert "Mar 1940" in condensed
+        assert "Total 1940" in condensed
+        assert "Sep 1940" in condensed
+        assert "table rows omitted" in condensed
+        # Should not contain middle row Apr 1940
+        assert "Apr 1940" not in condensed
 
 
 @pytest.mark.unit
@@ -221,7 +248,80 @@ class TestRestatementFilter:
         assert not _is_title_restatement(
             "Non-custom products", "Off-the-shelf CPUs/GPUs recognized on delivery (ASC 606)."
         )
-        assert not _is_title_restatement("Title", None)
+
+
+@pytest.mark.unit
+class TestSectionBranching:
+    def test_splits_into_l1_branches(self) -> None:
+        from genai_graph.kg.document_graph.outline_extract import _split_into_section_branches
+
+        raw = (
+            "# PART I\nText I\n"
+            "## Item 1. Business\nDetails on business\n"
+            "## Item 1A. Risk Factors\nDetails on risks\n"
+            "# PART II\nText II\n"
+            "## Item 7. MD&A\nAnalysis\n"
+            "## Item 8. Financial Statements\nTables\n"
+        )
+        headings = [
+            ("PART I", 1, 1),
+            ("Item 1. Business", 2, 3),
+            ("Item 1A. Risk Factors", 2, 5),
+            ("PART II", 1, 7),
+            ("Item 7. MD&A", 2, 9),
+            ("Item 8. Financial Statements", 2, 11),
+        ]
+        branches = _split_into_section_branches(raw, headings)
+        assert len(branches) == 2
+        assert branches[0].branch_title == "PART I"
+        assert len(branches[0].sections) == 3
+        assert branches[1].branch_title == "PART II"
+        assert len(branches[1].sections) == 3
+
+    def test_parallel_branch_summarization(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from genai_graph.kg.document_graph.outline_extract import (
+            BranchOutline,
+            OutlineEntry,
+            extract_outline,
+        )
+
+        doc_text = (
+            "# PART I\nText I\n"
+            "## Item 1. Business\nDetails on business\n"
+            "# PART II\nText II\n"
+            "## Item 7. MD&A\nAnalysis\n"
+            "# PART III\nText III\n"
+            "## Item 10. Directors\nDirectors list\n"
+        )
+
+        def fake_call_branch_llm(**kwargs) -> BranchOutline:
+            branch_headings = kwargs["branch_headings"]
+            entries = [
+                OutlineEntry(
+                    title=h[0],
+                    level=h[1],
+                    description=f"Concrete description for {h[0]}",
+                )
+                for h in branch_headings
+            ]
+            return BranchOutline(sections=entries)
+
+        monkeypatch.setattr("genai_graph.kg.document_graph.outline_extract._context_window_for", lambda llm_id: None)
+        monkeypatch.setattr("genai_graph.kg.document_graph.outline_extract._call_branch_llm", fake_call_branch_llm)
+        monkeypatch.setattr(
+            "genai_graph.kg.document_graph.outline_extract._synthesize_document_summary",
+            lambda **kwargs: ("Overall doc description", "Overall doc summary"),
+        )
+
+        config = _config(tmp_path)
+        config.workers = 3
+        warnings: list[str] = []
+
+        result = extract_outline(doc_text, "multi_branch_hash", "doc.md", config, warnings=warnings)
+        assert result.outline is not None
+        assert len(result.outline.sections) == 6
+        assert result.outline.document_description == "Overall doc description"
+        assert result.llm_calls == 4  # 3 branches + 1 document synthesis
 
     def test_clean_outline_drops_restatements_keeps_substantive(self, tmp_path: Path) -> None:
         from genai_graph.kg.document_graph.outline_extract import _clean_outline

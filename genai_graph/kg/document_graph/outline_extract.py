@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,12 @@ from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
 from genai_graph.kg.document_graph.summarize import _clean_text, _is_length_limit_error
-from genai_graph.kg.document_graph.tree_parser import _TOC_HEADER_RE, detect_headings
+from genai_graph.kg.document_graph.tree_parser import (
+    _TOC_HEADER_RE,
+    FlatSection,
+    detect_headings,
+    slice_sections,
+)
 
 _DEFAULT_LLM_TAG = "default"
 
@@ -95,6 +101,12 @@ class DocumentTocPreamble(BaseModel):
     """Structured-output schema for TOC extraction from document preamble."""
 
     document_title: str | None = Field(default=None, description="Title of the document if identified")
+    document_description: str | None = Field(
+        default=None, description="ONE plain-text sentence, at most 20 words, on the whole document"
+    )
+    document_summary: str | None = Field(
+        default=None, description="2-4 plain-text sentences, at most 60 words, abstracting the whole document"
+    )
     entries: list[TocPreambleEntry] = Field(default_factory=list, description="Ordered list of TOC entries")
 
     @model_validator(mode="before")
@@ -128,6 +140,23 @@ class OutlineEntry(BaseModel):
     )
 
 
+class BranchOutline(BaseModel):
+    """Structured output for one branch's section descriptions."""
+
+    sections: list[OutlineEntry] = Field(..., description="Every requested section in this branch, in exact order")
+
+
+class DocumentSummarySynthesis(BaseModel):
+    """Structured output for whole-document description and summary."""
+
+    document_description: str = Field(
+        ..., description="ONE plain-text sentence, at most 20 words, on the whole document"
+    )
+    document_summary: str = Field(
+        ..., description="2-4 plain-text sentences, at most 60 words, abstracting the whole document"
+    )
+
+
 class DocumentOutline(BaseModel):
     """Structured-output schema for one outline-extraction LLM call."""
 
@@ -153,6 +182,10 @@ class OutlineConfig(BaseModel):
     generate_summaries: bool = Field(
         default=True,
         description="Whether to generate section routing descriptions and summaries with LLM",
+    )
+    workers: int = Field(
+        default=4,
+        description="Parallel LLM workers for branch summarization",
     )
     context_safety_ratio: float = Field(
         default=0.9,
@@ -237,30 +270,73 @@ def _cache_path(config: OutlineConfig, llm_id: str, markdown_hash: str) -> Path 
     return root / f"{markdown_hash}.json"
 
 
-def _clean_markdown_for_prompt(raw: str) -> str:
-    """Drop ``Page N`` artifacts and condense bulky tables/numeric runs for the LLM input."""
+def _condense_table_smart(table_block: str, head_rows: int = 3, tail_rows: int = 2) -> str:
+    """Condense a Markdown table by keeping header + first head_rows + last tail_rows with an omission row."""
+    lines = table_block.strip().splitlines()
+    if len(lines) <= head_rows + tail_rows + 2:
+        return table_block
+
+    # Find where header separator is (e.g. |---|---|)
+    sep_idx = -1
+    for i, line in enumerate(lines[:5]):
+        stripped = line.strip()
+        if re.match(r"^\s*\|?[\s:|-]+\|?\s*$", stripped) and set(stripped.replace("|", "")) <= set(" :-"):
+            sep_idx = i
+            break
+
+    if sep_idx == -1:
+        header_lines = lines[:1]
+        data_lines = lines[1:]
+    else:
+        header_lines = lines[: sep_idx + 1]
+        data_lines = lines[sep_idx + 1 :]
+
+    if len(data_lines) <= head_rows + tail_rows:
+        return table_block
+
+    kept_head = data_lines[:head_rows]
+    kept_tail = data_lines[-tail_rows:] if tail_rows > 0 else []
+    omitted = len(data_lines) - head_rows - len(kept_tail)
+
+    col_names = []
+    if header_lines:
+        col_names = [c.strip() for c in header_lines[0].split("|") if c.strip()]
+
+    col_info = f"; columns: {', '.join(col_names[:6])}" if col_names else ""
+    omission_line = f"| ... ({omitted} table rows omitted for brevity{col_info}) |"
+
+    res = header_lines + kept_head + [omission_line] + kept_tail
+    return "\n" + "\n".join(res) + "\n"
+
+
+def _clean_markdown_for_prompt(raw: str, head_rows: int = 3, tail_rows: int = 2) -> str:
+    """Drop ``Page N`` artifacts and condense bulky tables/numeric runs with head + tail row sampling."""
     # 1. Drop page markers
     text = _PAGE_MARKER_RE.sub("", raw)
 
-    # 2. Condense Markdown pipe tables: keep header + 2 rows, replace rest with placeholder
-    def _condense_table(match: re.Match) -> str:
-        table_lines = match.group(0).strip().splitlines()
-        if len(table_lines) <= 4:
-            return match.group(0)
-        kept = table_lines[:3]
-        omitted = len(table_lines) - 3
-        return "\n" + "\n".join(kept) + f"\n| ... ({omitted} table rows omitted for outline extraction) |\n"
-
+    # 2. Condense Markdown pipe tables: keep header + head_rows + tail_rows
     table_re = re.compile(r"(?:^[ \t]*\|[^\n]+\|[ \t]*\n){4,}", re.MULTILINE)
-    text = table_re.sub(_condense_table, text)
+
+    def _replace_table(m: re.Match) -> str:
+        return _condense_table_smart(m.group(0), head_rows=head_rows, tail_rows=tail_rows)
+
+    text = table_re.sub(_replace_table, text)
 
     # 3. Condense runs of 5+ numeric/currency lines (OCR plain-text tabular listings)
     def _condense_numbers(match: re.Match) -> str:
         num_lines = match.group(0).strip().splitlines()
-        if len(num_lines) <= 4:
+        if len(num_lines) <= head_rows + tail_rows:
             return match.group(0)
-        omitted = len(num_lines)
-        return f"\n[... {omitted} numeric data lines omitted ...]\n"
+        kept_head = num_lines[:head_rows]
+        kept_tail = num_lines[-tail_rows:] if tail_rows > 0 else []
+        omitted = len(num_lines) - head_rows - len(kept_tail)
+        return (
+            "\n"
+            + "\n".join(kept_head)
+            + f"\n[... {omitted} numeric data lines omitted ...]\n"
+            + "\n".join(kept_tail)
+            + "\n"
+        )
 
     num_run_re = re.compile(
         r"(?:^[ \t]*(?:\$[\s\d,\.\(\)\-]+|\d[\d,\.\(\)\-\%\s]*|\([0-9,\.\s]+\))[ \t]*\n){5,}", re.MULTILINE
@@ -477,57 +553,51 @@ def anchor_toc_preamble(
 def _call_toc_preamble_llm(
     *, llm_id: str, filename: str, toc_text: str, max_tokens: int | None = None
 ) -> DocumentTocPreamble:
-    """Call BAML function to extract table of contents from preamble text.
+    """Extract table of contents and document overview from preamble text."""
+    try:
+        from genai_tk.extra.structured.baml_util import create_baml_options
 
-    Uses the BAML client (`b.ExtractTocPreamble`) with LLM routing via `create_baml_options`.
-    """
-    from genai_tk.extra.structured.baml_util import create_baml_options
+        from genai_graph.baml_client import b
 
-    from genai_graph.baml_client import b
+        baml_options = create_baml_options(llm_id) or {}
+        baml_result = b.ExtractTocPreamble(
+            filename=filename,
+            toc_text=toc_text,
+            baml_options=baml_options,
+        )
+        if isinstance(baml_result, DocumentTocPreamble):
+            return baml_result
+        return DocumentTocPreamble.model_validate(baml_result.model_dump())
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("BAML preamble TOC extraction unavailable ({}); using LangChain structured output", exc)
+        from genai_tk.core.factories.llm_factory import get_llm
+        from genai_tk.core.prompts import def_prompt
 
-    baml_options = create_baml_options(llm_id) or {}
-    baml_result = b.ExtractTocPreamble(
-        filename=filename,
-        toc_text=toc_text,
-        baml_options=baml_options,
-    )
-    if isinstance(baml_result, DocumentTocPreamble):
-        return baml_result
-    return DocumentTocPreamble.model_validate(baml_result.model_dump())
+        system = """
+            You extract the structured Table of Contents from the preamble or beginning of a document.
+            Return all sections/items/parts/tables in the EXACT order they appear in the Table of Contents as a JSON object.
+            Also return `document_title`, `document_description` (1 sentence, <= 20 words), and `document_summary` (2-4 sentences, <= 60 words).
+            For each entry:
+            - `title`: the exact heading/section text as listed in the Table of Contents.
+            - `level`: hierarchical depth: 1 (top-level Part/Chapter/Major Section), 2 (Item/Section/Sub-chapter), 3 (Table/Chart/Note/Subsection).
+            - `page`: reported page number or identifier if given, else null.
 
+            Do not invent sections not present in the Table of Contents.
+        """
+        user = """
+            Document: {filename}
 
-# LangChain implementation (replaced by BAML version above, preserved for reference / future reuse):
-# def _call_toc_preamble_llm_langchain(
-#     *, llm_id: str, filename: str, toc_text: str, max_tokens: int | None = None
-# ) -> DocumentTocPreamble:
-#     """Call LLM with LangChain structured output to extract table of contents from preamble text."""
-#     from genai_tk.core.factories.llm_factory import get_llm
-#     from genai_tk.core.prompts import def_prompt
-#
-#     system = """
-#         You extract the structured Table of Contents from the preamble or beginning of a document.
-#         Return all sections/items/parts/tables in the EXACT order they appear in the Table of Contents as a JSON object.
-#         For each entry:
-#         - `title`: the exact heading/section text as listed in the Table of Contents.
-#         - `level`: hierarchical depth: 1 (top-level Part/Chapter/Major Section), 2 (Item/Section/Sub-chapter), 3 (Table/Chart/Note/Subsection).
-#         - `page`: reported page number or identifier if given, else null.
-#
-#         Do not invent sections not present in the Table of Contents.
-#     """
-#     user = """
-#         Document: {filename}
-#
-#         --- Table of Contents excerpt ---
-#         {toc_text}
-#         --- end excerpt ---
-#     """
-#     prompt = def_prompt(system=system, user=user)
-#     llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
-#     structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentTocPreamble)
-#     result = (prompt | structured_llm).invoke({"filename": filename, "toc_text": toc_text})
-#     if isinstance(result, DocumentTocPreamble):
-#         return result
-#     return DocumentTocPreamble.model_validate(result)
+            --- Table of Contents excerpt ---
+            {toc_text}
+            --- end excerpt ---
+        """
+        prompt = def_prompt(system=system, user=user)
+        llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
+        structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentTocPreamble)
+        result = (prompt | structured_llm).invoke({"filename": filename, "toc_text": toc_text})
+        if isinstance(result, DocumentTocPreamble):
+            return result
+        return DocumentTocPreamble.model_validate(result)
 
 
 def extract_toc_from_preamble(
@@ -599,21 +669,376 @@ def _align_outline(outline: DocumentOutline, algo_headings: list[tuple[str, int,
     return outline.model_copy(update={"sections": aligned})
 
 
-def _build_prompt(*, filename: str, raw: str, config: OutlineConfig) -> tuple[str, str]:
-    """Build the (system, user) prompt for heading-anchored outline enrichment.
+class SectionBranch(BaseModel):
+    """A branch or group of sections to summarize in one LLM call."""
 
-    The Markdown headings have already been detected algorithmically (reliable)
-    and are listed for the model in the user message. The model returns ONE
-    section entry per listed heading, reusing each heading's verbatim title and
-    listed level, plus a one-sentence description and (for substantial sections)
-    a short summary based on the document content under that heading.
+    branch_title: str
+    sections: list[FlatSection]
 
-    The user message references the document through ``{filename}``/``{raw}``/``{headings}``
-    template variables (filled at invoke time in :func:`_call_llm`) rather than
-    baking the source text into the template string, so braces in the Markdown
-    (e.g. LaTeX superscripts ``^{(1)}``) are not interpreted as prompt-template
-    variables.
+
+def _split_into_section_branches(
+    raw: str,
+    algo_headings: list[tuple[str, int, int]],
+    max_tokens_per_branch: int = 5000,
+    max_sections_per_branch: int = 10,
+) -> list[SectionBranch]:
+    """Group sliced sections into hierarchical branches (Level 1 + nested L2-L6)."""
+    if not algo_headings:
+        return []
+
+    sections = slice_sections(raw, algo_headings)
+    heading_sections = [s for s in sections if s.level > 0]
+    if not heading_sections:
+        return []
+
+    has_l1 = any(s.level == 1 for s in heading_sections)
+    branches: list[SectionBranch] = []
+
+    if has_l1:
+        current_branch_title = heading_sections[0].title
+        current_sections: list[FlatSection] = []
+        current_tokens = 0
+
+        for s in heading_sections:
+            is_new_l1 = (s.level == 1) and len(current_sections) > 0
+            is_oversized = (
+                len(current_sections) >= max_sections_per_branch
+                or current_tokens + s.token_count > max_tokens_per_branch
+            )
+            if is_new_l1 or (is_oversized and len(current_sections) >= 3):
+                branches.append(SectionBranch(branch_title=current_branch_title, sections=current_sections))
+                current_branch_title = s.title if s.level == 1 else f"{current_branch_title} (cont.)"
+                current_sections = []
+                current_tokens = 0
+
+            current_sections.append(s)
+            current_tokens += s.token_count
+
+        if current_sections:
+            branches.append(SectionBranch(branch_title=current_branch_title, sections=current_sections))
+    else:
+        current_sections = []
+        current_tokens = 0
+        branch_idx = 1
+        for s in heading_sections:
+            if current_sections and (
+                len(current_sections) >= max_sections_per_branch
+                or current_tokens + s.token_count > max_tokens_per_branch
+            ):
+                branches.append(
+                    SectionBranch(
+                        branch_title=f"Section Group {branch_idx}: {current_sections[0].title}",
+                        sections=current_sections,
+                    )
+                )
+                branch_idx += 1
+                current_sections = []
+                current_tokens = 0
+
+            current_sections.append(s)
+            current_tokens += s.token_count
+
+        if current_sections:
+            branches.append(
+                SectionBranch(
+                    branch_title=f"Section Group {branch_idx}: {current_sections[0].title}",
+                    sections=current_sections,
+                )
+            )
+
+    return branches
+
+
+def _build_branch_prompt(
+    *,
+    filename: str,
+    branch_title: str,
+    branch_headings: list[tuple[str, int, int]],
+    branch_raw: str,
+    config: OutlineConfig,
+) -> tuple[str, str]:
+    system = f"""
+        You enrich the table of contents for a document section branch that an AI agent reads
+        to decide which section or table to open. The Markdown headings for this branch have
+        ALREADY been detected and are listed in the user message (numbered, with their
+        Markdown level as ``[Llevel]``). Return EXACTLY one ``sections`` entry per
+        listed heading, in the same order, using each heading's verbatim title and its
+        listed level, plus a description (and, for substantial sections, a summary).
+
+        For every listed heading, return (in the same order as the list):
+        - `title`: the heading text EXACTLY as listed (verbatim).
+        - `level`: the level listed for that heading.
+        - `description`: ONE plain-text sentence, at most {config.max_description_words}
+          words, naming the CONCRETE subject matter under that heading — the specific
+          entities, products, metrics, line items, time periods, or scope found in the body text.
+          - If a heading is a Table (e.g. "Table 1", "Table 2", "Table FFO-1"), inspect the table
+            headers and sample rows to state what metrics and categories the table covers
+            (e.g., "Monthly receipts from individual income tax, corporation tax, and customs.").
+          - NEVER restate or paraphrase the title alone (e.g. "Table 1" -> "Describes Table 1" is invalid).
+          - If the heading is a structural divider with no real body text, set `description` to null.
+        - `summary`: ONLY for substantial sections (more than roughly {config.summary_min_tokens} tokens):
+          2-3 plain-text sentences, at most {config.max_summary_words} words. Leave null otherwise.
+
+        HARD RULES:
+        - Return exactly one ``sections`` entry per listed heading in exact order.
+        - Never include a section's body text in your answer.
     """
+    headings_block = _render_headings_block(branch_headings)
+    user = f"""
+        Document: {filename}
+        Branch / Major Section: {branch_title}
+
+        --- headings in this branch (return one section per heading, in this order) ---
+        {headings_block}
+        --- branch content ---
+        {branch_raw}
+        --- end branch content ---
+    """
+    return system, user
+
+
+def _call_branch_llm(
+    *,
+    llm_id: str,
+    filename: str,
+    branch_title: str,
+    branch_headings: list[tuple[str, int, int]],
+    branch_raw: str,
+    config: OutlineConfig,
+    max_tokens: int | None,
+) -> BranchOutline:
+    from genai_tk.core.factories.llm_factory import get_llm
+    from genai_tk.core.prompts import def_prompt
+
+    system, user = _build_branch_prompt(
+        filename=filename,
+        branch_title=branch_title,
+        branch_headings=branch_headings,
+        branch_raw=branch_raw,
+        config=config,
+    )
+    prompt = def_prompt(system=system, user=user)
+    llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(BranchOutline)
+    result = prompt | structured_llm
+    out = result.invoke({})
+    assert isinstance(out, BranchOutline)
+    return out
+
+
+def _call_branch_llm_with_retry(
+    *,
+    llm_id: str,
+    filename: str,
+    branch_title: str,
+    branch_headings: list[tuple[str, int, int]],
+    branch_raw: str,
+    config: OutlineConfig,
+    warnings: list[str],
+) -> BranchOutline | None:
+    max_tokens = config.llm_max_tokens
+    context = f"{filename} branch [{branch_title}]"
+    for attempt in range(2):
+        started = time.monotonic()
+        try:
+            res = _call_branch_llm(
+                llm_id=llm_id,
+                filename=filename,
+                branch_title=branch_title,
+                branch_headings=branch_headings,
+                branch_raw=branch_raw,
+                config=config,
+                max_tokens=max_tokens,
+            )
+            if attempt > 0:
+                logger.info("{}: branch retry succeeded ({:.1f}s)", context, time.monotonic() - started)
+            return res
+        except Exception as exc:  # noqa: BLE001
+            if attempt == 0 and _is_length_limit_error(exc):
+                max_tokens = max(max_tokens or 0, config.retry_max_tokens)
+                msg = f"{context}: completion token limit reached; retrying with max_tokens={max_tokens}."
+                warnings.append(msg)
+                logger.warning(msg)
+                continue
+            msg = f"LLM call failed for {context}: {exc}"
+            warnings.append(msg)
+            logger.error(msg)
+            return None
+    return None
+
+
+def _synthesize_document_summary(
+    *,
+    llm_id: str,
+    filename: str,
+    preamble_text: str,
+    section_entries: list[OutlineEntry],
+    config: OutlineConfig,
+) -> tuple[str, str]:
+    from genai_tk.core.factories.llm_factory import get_llm
+    from genai_tk.core.prompts import def_prompt
+
+    top_level_desc = "\n".join(f"- {e.title}: {e.description}" for e in section_entries[:15] if e.description)
+    system = f"""
+        You generate the top-level document description and summary for a document library.
+        - `document_description`: exactly ONE sentence, at most {config.max_description_words} words, stating what the document is and its scope.
+        - `document_summary`: 2-4 sentences, at most {config.max_summary_words} words, abstracting the main topics, entities, and periods covered.
+    """
+    user = f"""
+        Document: {filename}
+
+        Preamble excerpt:
+        {preamble_text[:1500]}
+
+        Major Sections / Tables:
+        {top_level_desc}
+    """
+    try:
+        prompt = def_prompt(system=system, user=user)
+        structured_llm = get_llm(llm_id).with_structured_output(DocumentSummarySynthesis)
+        res = (prompt | structured_llm).invoke({})
+        if isinstance(res, DocumentSummarySynthesis):
+            return _clean_text(res.document_description, config.max_description_chars), _clean_text(
+                res.document_summary, config.max_summary_chars
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Document summary synthesis failed for {}: {}", filename, exc)
+    return f"Document: {filename}", ""
+
+
+def _summarize_branch_one(
+    branch: SectionBranch,
+    filename: str,
+    config: OutlineConfig,
+    llm_id: str,
+    warnings: list[str],
+) -> list[OutlineEntry]:
+    branch_headings = [(s.title, s.level, s.line_start) for s in branch.sections]
+    branch_text_parts = []
+    for s in branch.sections:
+        branch_text_parts.append(f"### {s.title}\n{_clean_markdown_for_prompt(s.text)}")
+    branch_raw = "\n\n".join(branch_text_parts)
+
+    try:
+        res = _call_branch_llm_with_retry(
+            llm_id=llm_id,
+            filename=filename,
+            branch_title=branch.branch_title,
+            branch_headings=branch_headings,
+            branch_raw=branch_raw,
+            config=config,
+            warnings=warnings,
+        )
+        if res is not None and res.sections:
+            entry_map = {e.title: e for e in res.sections}
+            out: list[OutlineEntry] = []
+            for h_title, h_level, _ in branch_headings:
+                if h_title in entry_map:
+                    matched = entry_map[h_title]
+                    out.append(
+                        OutlineEntry(
+                            title=h_title,
+                            level=h_level,
+                            description=_clean_text(matched.description, config.max_description_chars)
+                            if matched.description
+                            else None,
+                            summary=_clean_text(matched.summary, config.max_summary_chars) if matched.summary else None,
+                        )
+                    )
+                else:
+                    out.append(OutlineEntry(title=h_title, level=h_level, description=None, summary=None))
+            return out
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("{}: branch '{}' summarization failed: {}", filename, branch.branch_title, exc)
+
+    return [OutlineEntry(title=s.title, level=s.level, description=None, summary=None) for s in branch.sections]
+
+
+def _summarize_branches_parallel(
+    raw: str,
+    algo_headings: list[tuple[str, int, int]],
+    filename: str,
+    config: OutlineConfig,
+    warnings: list[str],
+    preamble_toc: DocumentTocPreamble | None = None,
+) -> OutlineResult:
+    llm_id = _resolve_llm_id(config)
+    branches = _split_into_section_branches(raw, algo_headings)
+
+    # If only 1 small branch and <= 4 headings (or 0 headings as in plain prose):
+    if len(branches) <= 1 and len(algo_headings) <= 4:
+        cleaned = _clean_markdown_for_prompt(raw)
+        outline = _call_llm_with_retry(
+            llm_id=llm_id,
+            filename=filename,
+            raw=cleaned,
+            config=config,
+            warnings=warnings,
+            headings=algo_headings,
+        )
+        if outline is None:
+            return OutlineResult(outline=None, degraded=True, reason="llm_call_failed", llm_calls=1)
+        aligned = _align_outline(outline, algo_headings)
+        return OutlineResult(outline=aligned, llm_calls=1)
+
+    if not branches:
+        entries = [OutlineEntry(title=title, level=level) for title, level, _ in algo_headings]
+        return OutlineResult(
+            outline=DocumentOutline(
+                document_description=f"Document: {filename}",
+                document_summary="",
+                sections=entries,
+            ),
+            llm_calls=0,
+        )
+
+    workers = min(len(branches), max(1, config.workers))
+    total_llm_calls = 0
+
+    def _run_branch(b: SectionBranch) -> list[OutlineEntry]:
+        return _summarize_branch_one(b, filename, config, llm_id, warnings)
+
+    if workers <= 1:
+        branch_results = [_run_branch(b) for b in branches]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            branch_results = list(pool.map(_run_branch, branches))
+
+    total_llm_calls += len(branches)
+    all_entries: list[OutlineEntry] = []
+    for br in branch_results:
+        all_entries.extend(br)
+
+    doc_desc = None
+    doc_sum = None
+    if preamble_toc:
+        doc_desc = preamble_toc.document_description
+        doc_sum = preamble_toc.document_summary
+
+    if not doc_desc:
+        sections = slice_sections(raw, algo_headings)
+        preamble_text = sections[0].text if sections and sections[0].level == 0 else ""
+        doc_desc, doc_sum = _synthesize_document_summary(
+            llm_id=llm_id,
+            filename=filename,
+            preamble_text=preamble_text,
+            section_entries=all_entries,
+            config=config,
+        )
+        total_llm_calls += 1
+
+    doc_outline = DocumentOutline(
+        document_description=doc_desc or f"Document: {filename}",
+        document_summary=doc_sum or "",
+        sections=all_entries,
+    )
+    cleaned_outline = _clean_outline(doc_outline, config)
+    aligned_outline = _align_outline(cleaned_outline, algo_headings)
+    return OutlineResult(outline=aligned_outline, llm_calls=total_llm_calls)
+
+
+def _build_prompt(*, filename: str, raw: str, config: OutlineConfig) -> tuple[str, str]:
+    """Build the (system, user) prompt for heading-anchored outline enrichment."""
     system = f"""
         You enrich the table of contents for a document library that an AI agent reads
         to decide which section to open. The document's Markdown headings have ALREADY
@@ -628,34 +1053,16 @@ def _build_prompt(*, filename: str, raw: str, config: OutlineConfig) -> tuple[st
         - `level`: the level listed for that heading.
         - `description`: ONE plain-text sentence, at most {config.max_description_words}
           words, naming the CONCRETE subject matter under that heading — the specific
-          entities, products, metrics, line items, years, or scope found in the body
-          text. No Markdown, no headings, no bullets, no line breaks.
-          - NEVER restate or paraphrase the title. If the title already names the
-            subject, your sentence must add facts not inferable from the title alone.
-          - If the heading is a structural divider with no real body text (e.g. "PART I",
-            "FORM 10-K", "INDEX", or a repeated company-name header above a statement),
-            set `description` to null — a restatement adds nothing for routing.
-          - Bad: title "PART I" -> "Begins Part I of the annual report."
-            Good: title "Data Center Products" -> "Lists server CPUs (Genoa), GPUs
-            (Instinct MI300), DPUs and adaptive SoCs with their target workloads."
-          - Bad: title "Non-custom products" -> "Describes revenue recognition for
-            non-custom products."
-            Good: title "Non-custom products" -> "Off-the-shelf CPUs/GPUs recognized
-            as revenue on delivery and transfer of control (ASC 606)."
+          entities, products, metrics, line items, years, or scope found in the body text.
         - `summary`: ONLY for substantial sections (more than roughly
           {config.summary_min_tokens} tokens, or {config.summary_min_tokens * 4} words):
-          2-3 plain-text sentences, at most {config.max_summary_words} words. Leave null
-          otherwise.
+          2-3 plain-text sentences, at most {config.max_summary_words} words. Leave null otherwise.
 
         HARD RULES:
-        - Return exactly one ``sections`` entry per listed heading. Do not omit, merge,
-          reorder, rename, or invent headings.
-        - Never include a section's body text in your answer (token cost). Output only
-          the title, level, description and (when warranted) summary for each section,
-          plus the two document-level fields.
-        - Also return `document_description` (one sentence, at most
-          {config.max_description_words} words) and `document_summary` (2-4 sentences,
-          at most {config.max_summary_words} words) describing the whole document.
+        - Return exactly one ``sections`` entry per listed heading in exact order.
+        - Never include a section's body text in your answer.
+        - Also return `document_description` (one sentence, at most {config.max_description_words} words)
+          and `document_summary` (2-4 sentences, at most {config.max_summary_words} words).
     """
     user = """
         Document: {filename}
@@ -678,12 +1085,7 @@ def _call_llm(
     max_tokens: int | None,
     headings: list[tuple[str, int, int]] | None = None,
 ) -> DocumentOutline:
-    """The LLM call boundary — isolated so tests can substitute a fake implementation.
-
-    The detected headings block is computed from ``headings`` or ``raw`` (the LLM input text)
-    and passed as the ``{headings}`` template variable; this keeps the call
-    signature stable for fakes while still giving the model the heading list.
-    """
+    """The LLM call boundary — isolated so tests can substitute a fake implementation."""
     from genai_tk.core.factories.llm_factory import get_llm
     from genai_tk.core.prompts import def_prompt
 
@@ -693,9 +1095,6 @@ def _call_llm(
     prompt = def_prompt(system=system, user=user)
     llm_kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
     structured_llm = get_llm(llm_id, **llm_kwargs).with_structured_output(DocumentOutline)
-    # Fill {filename}/{raw}/{headings} as template variables (not a literal template
-    # string) so braces in the source Markdown (e.g. LaTeX superscripts `^{(1)}`)
-    # are not parsed as variables.
     result = (prompt | structured_llm).invoke({"filename": filename, "raw": raw, "headings": headings_block})
     assert isinstance(result, DocumentOutline)
     return result
@@ -730,10 +1129,7 @@ def _call_llm_with_retry(
         except Exception as exc:  # noqa: BLE001
             if attempt == 0 and _is_length_limit_error(exc):
                 max_tokens = max(max_tokens or 0, config.retry_max_tokens)
-                msg = (
-                    f"{context}: hit the completion token limit (likely a reasoning model spending its budget on "
-                    f"hidden reasoning tokens, not the input context window); retrying with max_tokens={max_tokens}."
-                )
+                msg = f"{context}: hit the completion token limit; retrying with max_tokens={max_tokens}."
                 warnings.append(msg)
                 logger.warning(msg)
                 continue
@@ -797,19 +1193,18 @@ def extract_outline(
     if cache_path is not None:
         cached = _load_cached(cache_path)
         if cached is not None:
-            # No LLM call was made this invocation; the stored llm_calls reflects the
-            # original extraction and is reset so callers' totals count fresh calls only.
             return cached.model_copy(update={"llm_calls": 0})
 
     strategy = config.structure_strategy
     algo_headings: list[tuple[str, int, int]] = []
     preamble_toc_used = False
+    toc_obj: DocumentTocPreamble | None = None
 
     # 1. Determine structure according to configured strategy
     if strategy == "algo":
         algo_headings = detect_headings(md_text)
     elif strategy == "toc_preamble":
-        anchored, _ = extract_toc_from_preamble(md_text, filename, config, warnings=warnings)
+        anchored, toc_obj = extract_toc_from_preamble(md_text, filename, config, warnings=warnings)
         algo_headings = anchored or detect_headings(md_text)
         preamble_toc_used = bool(anchored)
     elif strategy == "llm_full":
@@ -819,7 +1214,7 @@ def extract_outline(
         toc_text, _s, _e = _extract_toc_excerpt(md_text)
         # If a printed TOC exists and there are few native markdown headings (<10), extract via preamble
         if toc_text is not None and len([h for h in raw_headings if h[1] > 0]) < 10:
-            anchored, _ = extract_toc_from_preamble(md_text, filename, config, warnings=warnings)
+            anchored, toc_obj = extract_toc_from_preamble(md_text, filename, config, warnings=warnings)
             if len(anchored) >= 3:
                 algo_headings = anchored
                 preamble_toc_used = True
@@ -864,28 +1259,18 @@ def extract_outline(
             _write_cached(cache_path, result)
         return result
 
-    outline = _call_llm_with_retry(
-        llm_id=llm_id,
+    # Summaries requested: use hierarchical parallel branch summarization
+    result = _summarize_branches_parallel(
+        raw=md_text,
+        algo_headings=algo_headings,
         filename=filename,
-        raw=cleaned,
         config=config,
         warnings=warnings,
-        headings=algo_headings,
+        preamble_toc=toc_obj,
     )
-    if outline is None:
-        result = OutlineResult(
-            outline=None,
-            degraded=True,
-            reason="llm_call_failed",
-            llm_calls=(1 if preamble_toc_used else 0),
-        )
-    else:
-        # Anchor the LLM's entries onto the detected headings: the
-        # heading's verbatim title and level are authoritative (the LLM only
-        # supplies description/summary), so the cached outline matches the
-        # structure the downstream merge slices on (one entry per heading).
-        aligned = _align_outline(outline, algo_headings)
-        result = OutlineResult(outline=aligned, llm_calls=(2 if preamble_toc_used else 1))
+    if preamble_toc_used:
+        result = result.model_copy(update={"llm_calls": result.llm_calls + 1})
+
     if cache_path is not None:
         _write_cached(cache_path, result)
     return result

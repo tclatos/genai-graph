@@ -8,6 +8,8 @@ class TocPreambleEntry {
 
 class DocumentTocPreamble {
   document_title string? @description("Title of the document if identified")
+  document_description string? @description("ONE plain-text sentence, at most 20 words, on the whole document")
+  document_summary string? @description("2-4 plain-text sentences, at most 60 words, abstracting the document")
   entries TocPreambleEntry[] @description("Ordered list of TOC entries")
 }
 

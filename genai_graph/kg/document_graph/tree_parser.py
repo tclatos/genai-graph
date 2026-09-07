@@ -28,6 +28,78 @@ ROOT_SECTION_TITLE = "(document root)"
 # "## Page 12"). These carry no structural meaning and must not become sections.
 _PAGE_MARKER_RE = re.compile(r"^page\s+\d+$", re.IGNORECASE)
 
+# Spurious headings (dates, standalone prepositions, publisher/cover metadata):
+# These often get falsely flagged as headings on OCR cover pages and preambles.
+_SPURIOUS_HEADING_PATTERNS = re.compile(
+    r"^(?:"
+    # Date / Month-Year lines (e.g. "JANUARY 1944", "March 2011", "1944", "Fiscal Year 1944")
+    r"(?:(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)(?:[,\s]+\d{4})?)"
+    r"|(?:(?:FISCAL\s+YEAR|FY|QUARTER|FIRST\s+QUARTER|SECOND\s+QUARTER|THIRD\s+QUARTER|FOURTH\s+QUARTER)\s+\d{4})"
+    r"|(?:\d{4})"
+    # Preposition / connector fragments (e.g. "OF THE", "FOR THE", "AND THE", "IN THE")
+    r"|(?:(?:OF|FOR|IN|TO|AND|BY|ON|AT|WITH|FROM|ABOUT|UNDER|PER|AS)\s+(?:THE|A|AN))"
+    r"|(?:(?:PART|ITEM)\s+OF)"
+    # Cover / publisher metadata
+    r"|(?:(?:UNITED\s+STATES\s+)?(?:TREASURY\s+DEPARTMENT|DEPARTMENT\s+OF\s+THE\s+TREASURY))"
+    r"|(?:OFFICE\s+OF\s+THE\s+SECRETARY)"
+    r"|(?:GOVERNMENT\s+PRINTING\s+OFFICE)"
+    r"|(?:SUPERINTENDENT\s+OF\s+DOCUMENTS)"
+    r"|(?:LIBRARY\s+OF\s+CONGRESS)"
+    r"|(?:WASHINGTON\s*:\s*\d{4})"
+    r"|(?:(?:ANNUAL|MONTHLY|QUARTERLY)\s+(?:REPORT|BULLETIN|STATEMENT))"
+    r")$",
+    re.IGNORECASE,
+)
+
+_SPURIOUS_WORDS = frozenset(
+    {
+        "OF",
+        "THE",
+        "AND",
+        "A",
+        "AN",
+        "IN",
+        "ON",
+        "AT",
+        "TO",
+        "FOR",
+        "BY",
+        "WITH",
+        "FROM",
+        "ITS",
+        "IS",
+        "ARE",
+        "AS",
+        "OR",
+        "PAGE",
+        "N/A",
+        "NONE",
+    }
+)
+
+
+def _is_spurious_heading(title: str, line_idx: int | None = None) -> bool:
+    """True when *title* is a spurious false-positive heading (dates, prepositions, cover metadata)."""
+    s = _strip_surrounding_emphasis(title).strip()
+    if not s:
+        return False
+    if s.startswith("(untitled H"):
+        return False
+    if _PAGE_MARKER_RE.match(s):
+        return True
+    if _SPURIOUS_HEADING_PATTERNS.match(s):
+        return True
+    # If all words in the title are stop words or punctuation
+    words = [w.upper() for w in re.findall(r"[A-Za-z0-9]+", s)]
+    if not words or set(words) <= _SPURIOUS_WORDS:
+        return True
+    # Near the very top of document (lines 1-40), reject library stamps / room numbers
+    if line_idx is not None and line_idx <= 40:
+        if any(tok in s.upper() for tok in ("LIBRARY", "ROOM 5030", "CIRCULAR NO", "WASHINGTON :", "PRINTING OFFICE")):
+            return True
+    return False
+
+
 # Multilingual Table of Contents (TOC) header pattern:
 # Matches common TOC titles in English, French, German, Spanish, Italian, etc.
 _TOC_HEADER_RE = re.compile(
@@ -161,6 +233,8 @@ def _dedupe_page_header_headings(
     seen: set[str] = set()
     n = len(headings)
     for i, (title, level, line_start) in enumerate(headings):
+        if _is_spurious_heading(title, line_start):
+            continue
         next_start = headings[i + 1][2] if i + 1 < n else None
         norm = _normalize_title_for_dedup(title)
         is_repeat = bool(norm) and norm in seen
@@ -170,7 +244,12 @@ def _dedupe_page_header_headings(
             # (excluding) the next heading's line.
             body = raw_lines[line_start : next_start - 1]
             empty_body = all(not line.strip() for line in body)
-        if is_repeat and empty_body:
+            # Preamble fragment check: if in the first 120 lines and body is essentially empty/trivial (< 5 words, no table)
+            if not empty_body and line_start < 120:
+                body_joined = " ".join(body).strip()
+                if len(body_joined.split()) < 5 and "|" not in body_joined:
+                    empty_body = True
+        if (is_repeat and empty_body) or (line_start < 120 and empty_body and is_repeat):
             continue
         kept.append((title, level, line_start))
         seen.add(norm)
@@ -312,8 +391,9 @@ def _detect_heuristic_headings(raw: str) -> list[tuple[str, int, int]]:
             else:
                 level = 2
             title = _strip_surrounding_emphasis(s)
-            headings.append((title, level, i + 1))
-            seen_titles.add(title.lower())
+            if not _is_spurious_heading(title, i + 1):
+                headings.append((title, level, i + 1))
+                seen_titles.add(title.lower())
             continue
 
         # Rule 2: Standalone multi-word uppercase titles surrounded by blank lines
@@ -328,8 +408,9 @@ def _detect_heuristic_headings(raw: str) -> list[tuple[str, int, int]]:
                     continue
                 if not any(token in s for token in _NON_HEADING_UPPERCASE_TOKENS):
                     title = _strip_surrounding_emphasis(s)
-                    headings.append((title, 2, i + 1))
-                    seen_titles.add(s.lower())
+                    if not _is_spurious_heading(title, i + 1):
+                        headings.append((title, 2, i + 1))
+                        seen_titles.add(s.lower())
 
     return headings
 
@@ -363,8 +444,8 @@ def detect_headings(raw: str) -> list[tuple[str, int, int]]:
             title = ""
             if i + 1 < len(tokens) and tokens[i + 1].type == "inline":
                 title = _strip_surrounding_emphasis(tokens[i + 1].content.strip())
-            # Drop page-marker headings ("Page 12"): their text stays inline.
-            if not _PAGE_MARKER_RE.match(title):
+            # Drop page-marker headings ("Page 12") and spurious headings
+            if not _PAGE_MARKER_RE.match(title) and not _is_spurious_heading(title, line_start):
                 headings.append((title, level, line_start))
         depth += tok.nesting
 

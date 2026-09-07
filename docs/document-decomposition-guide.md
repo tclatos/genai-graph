@@ -64,19 +64,28 @@ flowchart TD
 - **When used**: Documents containing a Table of Contents near the top (detected by `_TOC_HEADER_RE` in the first 500 lines) but lacking rich `#` headings in the body.
 - **Mechanism**:
   1. `_extract_toc_excerpt(raw)` extracts candidate TOC lines (first ~250–350 lines).
-  2. A lightweight/flash model extracts a structured `DocumentTocPreamble` containing ordered `TocPreambleEntry(title, level, page)`.
+  2. A lightweight/flash model extracts a structured `DocumentTocPreamble` containing document overview (`document_description`, `document_summary`) and ordered `TocPreambleEntry(title, level, page)`.
   3. `anchor_toc_preamble` scans the document body following the TOC block to anchor each title to its exact line number.
 - **Cost**: ~1,000–2,000 input tokens total, even for 100,000+ token documents.
 
 ---
 
-### Tier 3: Domain Pattern Heuristics
+### Tier 3: Domain Pattern Heuristics & Preamble Filtering
 - **When used**: Filings without markdown `#` markers or printed TOC blocks.
 - **Mechanism**: Uses `_HEURISTIC_HEADING_RE` in `tree_parser.py` to recognize:
   - Document structural prefixes: `PART`, `ITEM`, `SECTION`, `CHAPTER`, `NOTE`, `EXHIBIT`, `APPENDIX`.
   - Tabular listings & charts: `TABLE FFO-1`, `CHART A`, `SCHEDULE 14A`.
   - Financial statements: `CONSOLIDATED STATEMENTS OF OPERATIONS`, `BALANCE SHEETS`, `BILAN`.
-  - Standalone multi-word uppercase titles surrounded by blank lines.
+  - Standalone multi-word uppercase titles surrounded by blank lines, while filtering spurious cover boilerplate, publisher headers, and standalone date lines.
+
+---
+
+### Smart Table Condensation & Hierarchical Parallel Summarization
+
+To achieve fast, high-quality summarization without blowing up prompt budgets or losing critical aggregate metrics:
+1. **Smart Table Condensation**: Markdown tables retain column headers, delimiter rows, the first 3 data rows (categories), and the last 2 data rows (totals/closing figures), replacing middle rows with an informative row-count and column-name omission line.
+2. **Hierarchical L1 Branch Grouping**: Sections are grouped by top-level Level 1 headings with their nested Level 2–6 descendant subsections.
+3. **Parallel LLM Worker Pool**: Each branch is summarized concurrently across worker threads, instructing the LLM to inspect table headers and sampled rows to produce specific routing descriptions (e.g. resolving `Table 1` to *"Monthly receipts from individual income tax, corporation tax, and customs"*).
 
 ---
 

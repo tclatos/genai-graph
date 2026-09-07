@@ -118,6 +118,32 @@ class TestInferLevels:
         titles = ["Alpha", "Beta", "Gamma", "Delta"]
         assert _infer_levels(titles, [1, 1, 1, 1]) == [1, 1, 1, 1]
 
+
+@pytest.mark.unit
+class TestPreambleHeadingPruning:
+    def test_prunes_spurious_cover_and_date_headings(self) -> None:
+        raw = (
+            "TREASURY DEPARTMENT\n\n"
+            "OF THE\n\n"
+            "JANUARY 1944\n\n"
+            "UNITED STATES TREASURY DEPARTMENT\n\n"
+            "OFFICE OF THE SECRETARY\n\n"
+            "SUMMARY OF FISCAL STATISTICS\n\n"
+            "Some narrative text under summary.\n\n"
+            "TABLE 1.- Summary by Major Classifications\n\n"
+            "| Month | Receipts | Expenditures |\n"
+            "|---|---|---|\n"
+            "| Jan 1944 | 100 | 80 |\n"
+        )
+        sections = parse_markdown_tree(raw)
+        titles = [s.title for s in sections]
+        assert "OF THE" not in titles
+        assert "JANUARY 1944" not in titles
+        assert "UNITED STATES TREASURY DEPARTMENT" not in titles
+        assert "OFFICE OF THE SECRETARY" not in titles
+        assert any("SUMMARY OF FISCAL STATISTICS" in t for t in titles)
+        assert any("TABLE 1" in t.upper() for t in titles)
+
     def test_interest_rate_is_not_an_outline_number(self) -> None:
         assert _outline_depth("3.924% Senior Notes") is None
         assert _outline_depth("1. Financial Statements") == 1

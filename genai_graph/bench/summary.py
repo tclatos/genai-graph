@@ -82,6 +82,10 @@ def compute_bench_summary(
     num_rate = round(numeric_matched / numeric_total, 4) if numeric_total > 0 else None
     ground_rate = round(grounded_count / total, 4)
 
+    ocr_errors = error_counter.get("missing_ocr_or_visual_chart", 0)
+    ocr_adj_n = max(0, total - ocr_errors)
+    ocr_adj_acc = round(correct / ocr_adj_n, 4) if ocr_adj_n > 0 else (acc if total == 0 else 0.0)
+
     return BenchSummary(
         profile=profile_name,
         total_questions=total,
@@ -90,6 +94,9 @@ def compute_bench_summary(
         incorrect=incorrect,
         accuracy=acc,
         partial_accuracy=part_acc,
+        ocr_errors=ocr_errors,
+        ocr_adjusted_n=ocr_adj_n,
+        ocr_adjusted_accuracy=ocr_adj_acc,
         numeric_match_rate=num_rate,
         numeric_total=numeric_total,
         numeric_matched=numeric_matched,

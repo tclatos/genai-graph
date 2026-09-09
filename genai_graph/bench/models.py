@@ -145,6 +145,9 @@ class BenchSummary(BaseModel):
     incorrect: int = 0
     accuracy: float = Field(default=0.0, alias="accuracy_correct")
     partial_accuracy: float = Field(default=0.0, alias="accuracy_correct_or_partial")
+    ocr_errors: int = 0
+    ocr_adjusted_n: int = 0
+    ocr_adjusted_accuracy: float = Field(default=0.0, alias="ocr_adjusted_accuracy_correct")
     numeric_match_rate: float | None = None
     numeric_total: int = Field(default=0, alias="numeric_questions")
     numeric_matched: int = 0

@@ -2,6 +2,8 @@
 
 This document provides a technical description of the architecture, data engineering pipelines, agent runtimes, and evaluation methodologies developed in **GenAI Toolkit (`genai-tk`)** and **GenAI Graph (`genai-graph`)** to process two demanding enterprise QA benchmarks: **FinanceBench** and **OfficeQA Pro**.
 
+> 💡 **Unified Benchmark Framework**: For full technical reference on the mutualized benchmark execution engine, Prefect flows, CLI suite, and Textual TUI dataset browser, see [docs/benchmark_framework.md](docs/benchmark_framework.md).
+
 ---
 
 ## 1. Benchmark Challenges and Question Typologies
@@ -228,6 +230,8 @@ All language models and document transformation engines are fully decoupled from
 
 | Package / Module | Role / Short Description | Technical Rationale | Repository / Documentation URL |
 |---|---|---|---|
+| `genai_graph.bench` | Shared Multi-Dataset Benchmark Engine | Mutualized evaluation engine: dynamic adapters, graph ingestion, agent streaming runner, LLM-as-judge grader, summary metrics, and Textual TUI. | [docs/benchmark_framework.md](docs/benchmark_framework.md) |
+| `genai_graph.core.commands_bench` | Unified Benchmark CLI Command Group (`cli bench ...`) | Shared Typer commands (`list`, `run`, `grade`, `report`, `questions`, `tui`) registered in all benchmark applications. | [docs/benchmark_framework.md](docs/benchmark_framework.md) |
 | `genai_tk.core.factories` | Unified LLM & Embeddings Factory (`get_llm`, `get_embeddings`) | Multi-provider model abstraction (`name@provider` format) with built-in caching, cost tracking, and retry fallbacks. | [https://github.com/tclatos/genai-tk](https://github.com/tclatos/genai-tk) |
 | `genai_tk.agents.harness` | Deep Agent Execution Harness (`LangChainHarness`) | Manages agent lifecycles, execution limits, event streams, and runtime tool/middleware injection. | [https://github.com/tclatos/genai-tk](https://github.com/tclatos/genai-tk) |
 | `genai_tk.agents.tools.langchain.python_executor` | Python CodeAct & Sandbox Arithmetic Executor | Executes Python code in a controlled environment to guarantee 100% precision on complex financial math. | [https://github.com/tclatos/genai-tk](https://github.com/tclatos/genai-tk) |
@@ -242,7 +246,35 @@ All language models and document transformation engines are fully decoupled from
 
 ---
 
-## 6. Problems Encountered & Lessons Learned
+## 6. Mutualized Benchmark Implementations in Detail
+
+Both `financebench` and `officeqa` repositories rely on the shared `genai_graph.bench` engine while encapsulating only their dataset-specific adapters, configuration, and tools.
+
+### A. FinanceBench Setup
+- **Repository**: [financebench/](financebench)
+- **Adapter**: `financebench.adapter.FinanceBenchAdapter` implementing `BaseBenchmarkAdapter`:
+  - `load_dataset()`: Fetches `PatronusAI/financebench` from Hugging Face and caches it as `financebench_merged.parquet`.
+  - `fetch_document()`: Downloads raw 10-K/10-Q filing PDFs from the Patronus GitHub repository.
+  - `get_judge_rubric()`: Injects `FINANCEBENCH_JUDGE_RUBRIC` applying Mafin 2.5 accounting equivalence rules.
+- **Document Staging & Conversion**: Uses `saved_markdown_dir` (`~/OneDrive/prj/financebench/markdown`) for pre-converted Mistral OCR Markdown files.
+- **Graph Database**: Builds [data/kg/financebench_multi.db](financebench/data/kg/financebench_multi.db) containing 84 SEC corporate filings.
+- **Evaluation CLI**: Commands (`cli bench list`, `cli bench run`, `cli bench report`, `cli bench questions`, `cli bench tui`) registered via `genai_graph.core.commands_bench.BenchCommands`.
+- **Results**: 91.3% strict accuracy, 96.0% weighted accuracy across 150 SEC corporate filing questions.
+
+### B. OfficeQA Pro Setup
+- **Repository**: [officeqa/](officeqa)
+- **Adapter**: `officeqa.adapter.OfficeQAAdapter` implementing `BaseBenchmarkAdapter`:
+  - `load_dataset()`: Fetches `databricks/officeqa` (`officeqa_pro.csv`) from Hugging Face and caches it as `officeqa_pro.parquet`.
+  - `fetch_document()`: Downloads historical Treasury Bulletin PDFs from Hugging Face repository `databricks/officeqa`.
+  - `get_judge_rubric()`: Injects `OFFICEQA_JUDGE_RUBRIC` tailored for Treasury bulletins, currency statistics, and macroeconomic series.
+- **Document Staging & Conversion**: Uses `saved_markdown_dir` (`~/OneDrive/prj/officeqa/markdown`) for pre-converted high-density Markdown text corpus.
+- **Graph Database**: Builds [data/kg/officeqa.db](officeqa/data/kg/officeqa.db) containing historical Treasury Bulletins.
+- **Evaluation CLI**: Commands registered via `genai_graph.core.commands_bench.BenchCommands`.
+- **Results**: 67.7% strict accuracy, 76.7% weighted accuracy across 133 multi-decade federal financial questions.
+
+---
+
+## 7. Problems Encountered & Lessons Learned
 
 Analyzing hundreds of evaluation runs across both benchmarks produced key architectural insights:
 

@@ -523,7 +523,8 @@ def render_toc_outline(toc_rows: list[dict[str, Any]]) -> str:
         if int(row.get("level") or 0) == 0:
             continue  # synthetic root: not a navigable heading
         indent = "  " * max(int(row["level"]) - 1, 0)
-        lines.append(f"{indent}- [{row['section_id']}] {row['title']} (line {row['line_start']})")
+        desc = f" — {row['description']}" if row.get("description") else ""
+        lines.append(f"{indent}- [{row['section_id']}] {row['title']} (line {row['line_start']}){desc}")
     return "\n".join(lines)
 
 
@@ -791,20 +792,19 @@ def _contains_section_hits(
     many terms match, since a verbatim substring match of a whole
     natural-language phrase is almost never present in the text.
     """
+    cols = _table_columns(backend, _SECTION_LABEL)
+    desc_field = ", s.description AS description" if "description" in cols else ""
     terms = [t for t in dict.fromkeys(keyword.split()) if len(t) >= 3][:8]
     params: dict[str, Any] = {"limit": limit}
     if len(terms) > 1:
         params.update({f"t{i}": t for i, t in enumerate(terms)})
-        where = "(" + " OR ".join(
-            f"(s.title CONTAINS $t{i} OR s.text CONTAINS $t{i})" for i in range(len(terms))
-        ) + ")"
+        where = "(" + " OR ".join(f"(s.title CONTAINS $t{i} OR s.text CONTAINS $t{i})" for i in range(len(terms))) + ")"
         score = " + ".join(
-            f"(CASE WHEN s.title CONTAINS $t{i} OR s.text CONTAINS $t{i} THEN 1 ELSE 0 END)"
-            for i in range(len(terms))
+            f"(CASE WHEN s.title CONTAINS $t{i} OR s.text CONTAINS $t{i} THEN 1 ELSE 0 END)" for i in range(len(terms))
         )
         ret = (
-            "RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
-            "s.level AS level, s.line_start AS line_start, "
+            f"RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
+            f"s.level AS level, s.line_start AS line_start{desc_field}, "
             f"({score}) AS score "
             "ORDER BY score DESC, s.markdown_hash, s.line_start LIMIT $limit"
         )
@@ -812,8 +812,8 @@ def _contains_section_hits(
         params["keyword"] = keyword
         where = "(s.title CONTAINS $keyword OR s.text CONTAINS $keyword)"
         ret = (
-            "RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
-            "s.level AS level, s.line_start AS line_start, 1 AS score "
+            f"RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
+            f"s.level AS level, s.line_start AS line_start{desc_field}, 1 AS score "
             "ORDER BY s.markdown_hash, s.line_start LIMIT $limit"
         )
     if allowed is not None:
@@ -858,10 +858,12 @@ def _keyword_section_hits(
         try:
             backend.ensure_fts_extension()
             fetch_k = max(limit * 5, 50) if allowed is not None else limit
+            cols = _table_columns(backend, _SECTION_LABEL)
+            desc_field = ", node.description AS description" if "description" in cols else ""
             fts = (
                 f"CALL QUERY_FTS_INDEX('{_SECTION_LABEL}','{_SECTION_FTS_INDEX}', $query) "
                 "RETURN node.markdown_hash AS markdown_hash, node.section_id AS section_id, "
-                "node.title AS title, node.level AS level, node.line_start AS line_start, "
+                f"node.title AS title, node.level AS level, node.line_start AS line_start{desc_field}, "
                 "score AS score ORDER BY score DESC LIMIT $limit"
             )
             rows, _ = _query_rows(backend, fts, {"query": query, "limit": fetch_k})
@@ -880,13 +882,15 @@ def _keyword_section_hits(
 
 
 def _fetch_section_meta(backend: KgBackend, section_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """Return section_id -> {title, level, line_start, markdown_hash} for the given ids."""
+    """Return section_id -> {title, level, line_start, markdown_hash, description} for the given ids."""
     if not section_ids:
         return {}
+    cols = _table_columns(backend, _SECTION_LABEL)
+    desc_field = ", s.description AS description" if "description" in cols else ""
     query = (
         f"MATCH (s:{_SECTION_LABEL}) WHERE s.section_id IN $ids "
-        "RETURN s.section_id AS section_id, s.title AS title, s.level AS level, "
-        "s.line_start AS line_start, s.markdown_hash AS markdown_hash"
+        f"RETURN s.section_id AS section_id, s.title AS title, s.level AS level, "
+        f"s.line_start AS line_start, s.markdown_hash AS markdown_hash{desc_field}"
     )
     rows, _ = _query_rows(backend, query, {"ids": section_ids})
     return {r["section_id"]: r for r in rows}
@@ -936,6 +940,7 @@ def search_sections(
                 "section_id": r["section_id"],
                 "markdown_hash": meta.get(r["section_id"], {}).get("markdown_hash") or r.get("markdown_hash"),
                 "title": meta.get(r["section_id"], {}).get("title") or r.get("title"),
+                "description": meta.get(r["section_id"], {}).get("description") or r.get("description"),
                 "level": meta.get(r["section_id"], {}).get("level") or r.get("level"),
                 "line_start": meta.get(r["section_id"], {}).get("line_start") or r.get("line_start"),
                 "score": 0.0,
@@ -1003,6 +1008,7 @@ def search_sections(
                 "section_id": sid,
                 "markdown_hash": m.get("markdown_hash") or srow.get("markdown_hash") or krow.get("markdown_hash"),
                 "title": m.get("title") or krow.get("title"),
+                "description": m.get("description") or krow.get("description"),
                 "level": m.get("level") or krow.get("level"),
                 "line_start": m.get("line_start") or krow.get("line_start"),
                 "score": round(sc, 6),

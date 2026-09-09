@@ -393,12 +393,18 @@ class DocGraphCommands(CliTopCommand):
             table.add_column("Filename", style="cyan")
             table.add_column("Folder", style="magenta")
             table.add_column("Sections", style="white")
+            table.add_column("Description", style="green")
             table.add_column("Markdown Hash", style="dim")
             table.add_column("Path", style="dim")
             for r in rows:
                 breadcrumb = str(PurePosixPath(r["path"]).parent) if r.get("path") else "."
                 table.add_row(
-                    str(r["filename"]), breadcrumb, str(r["section_count"]), str(r["markdown_hash"]), str(r["path"])
+                    str(r["filename"]),
+                    breadcrumb,
+                    str(r["section_count"]),
+                    str(r.get("description") or ""),
+                    str(r["markdown_hash"]),
+                    str(r["path"]),
                 )
             console.print(table)
 
@@ -460,9 +466,11 @@ class DocGraphCommands(CliTopCommand):
                     console.print(f"[yellow]Folder is empty: {document}[/yellow]")
                     return
                 for f in subfolders:
-                    console.print(f"- \U0001f4c1 {f['name']} ({f['folder_id']}, {f['doc_count']} doc(s))")
+                    desc = f" — {f['description']}" if f.get("description") else ""
+                    console.print(f"- \U0001f4c1 {f['name']} ({f['folder_id']}, {f['doc_count']} doc(s)){desc}")
                 for d in docs:
-                    console.print(f"- \U0001f4c4 {d['filename']} ({d['markdown_hash']})")
+                    desc = f" — {d['description']}" if d.get("description") else ""
+                    console.print(f"- \U0001f4c4 {d['filename']} ({d['markdown_hash']}){desc}")
                 return
 
             if yaml_out:
@@ -709,8 +717,9 @@ class DocGraphCommands(CliTopCommand):
                 return
             for r in rows:  # type: ignore[union-attr]
                 score_str = f", score: {r['score']}" if r.get("score") and r["score"] > 0 else ""
+                desc_suffix = f" — {r['description']}" if r.get("description") else ""
                 console.print(
-                    f"- [{r['section_id']}] {r['title']} (line {r['line_start']}{score_str}) — {r['markdown_hash']}"
+                    f"- [{r['section_id']}] {r['title']} (line {r['line_start']}{score_str}){desc_suffix} — {r['markdown_hash']}"
                 )
                 if r.get("matched_chunk"):
                     console.print(f"    [dim]Chunk: {r['matched_chunk']}[/dim]")
@@ -750,7 +759,8 @@ class DocGraphCommands(CliTopCommand):
             root_rows = [by_id[root_id]] if root_id else [r for r in rows if r["parent_folder_id"] is None]
 
             def add_node(parent: Tree, row: dict[str, Any]) -> None:
-                label = f"{row['name']} [dim]({row['folder_id']}, {row['doc_count']} doc(s))[/dim]"
+                desc = f" — {row['description']}" if row.get("description") else ""
+                label = f"{row['name']} [dim]({row['folder_id']}, {row['doc_count']} doc(s)){desc}[/dim]"
                 node = parent.add(label)
                 for child in sorted(by_parent.get(row["folder_id"], []), key=lambda r: r["name"]):
                     add_node(node, child)

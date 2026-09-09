@@ -10,6 +10,7 @@ degradation to algorithmic parsing.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -52,7 +53,14 @@ def _fake_outline(filename: str) -> DocumentOutline:
 
 
 def _fake_call_llm(
-    *, llm_id: str, filename: str, raw: str, config: OutlineConfig, max_tokens: int | None
+    *,
+    llm_id: str,
+    filename: str,
+    raw: str,
+    config: OutlineConfig,
+    max_tokens: int | None,
+    headings: list[tuple[str, int, int]] | None = None,
+    **kwargs: Any,
 ) -> DocumentOutline:
     return _fake_outline(filename)
 

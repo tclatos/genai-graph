@@ -134,3 +134,77 @@ async def test_document_graph_tui_rapid_navigation(sample_tui_db: str) -> None:
         content = app.query_one("#content", Markdown)
         assert content.display is True
         assert len(content._markdown) > 0
+
+
+@pytest.mark.anyio
+async def test_document_graph_tui_mouse_click_and_allow_select(sample_tui_db: str) -> None:
+    app = DocumentGraphApp(sample_tui_db)
+    assert app.ALLOW_SELECT is False
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.root.expand()
+        await pilot.pause()
+        folder_node = tree.root.children[0]
+        folder_node.expand()
+        await pilot.pause()
+        doc_node = folder_node.children[0]
+        tree.select_node(doc_node)
+
+        for _ in range(50):
+            await pilot.pause(0.02)
+            if not app.query_one("#loading").has_class("active"):
+                break
+
+        # Click on the Markdown content area — should not raise AttributeError
+        await pilot.click("#content")
+        await pilot.pause(0.05)
+
+
+@pytest.mark.anyio
+async def test_document_graph_tui_shows_descriptions(sample_tui_db: str) -> None:
+    from genai_graph.kg.query.document_graph_tools import (
+        apply_document_summary,
+        apply_section_summaries,
+        get_document_toc,
+        list_documents,
+    )
+
+    backend = KuzuBackend()
+    backend.connect(sample_tui_db)
+    docs = list_documents(backend)
+    assert len(docs) > 0
+    mh = docs[0]["markdown_hash"]
+    apply_document_summary(backend, mh, description="A guide to testing", summary="Summary of the testing guide.")
+    toc = get_document_toc(backend, mh)
+    if toc:
+        apply_section_summaries(
+            backend,
+            [
+                {
+                    "section_id": toc[0]["section_id"],
+                    "description": "Intro section",
+                    "summary": "Intro summary",
+                    "summary_source": "llm",
+                }
+            ],
+        )
+
+    app = DocumentGraphApp(sample_tui_db)
+    async with app.run_test() as pilot:
+        tree = app.query_one(Tree)
+        tree.root.expand()
+        await pilot.pause()
+        folder_node = tree.root.children[0]
+        folder_node.expand()
+        await pilot.pause()
+        doc_node = folder_node.children[0]
+        tree.select_node(doc_node)
+
+        for _ in range(50):
+            await pilot.pause(0.02)
+            if not app.query_one("#loading").has_class("active"):
+                break
+
+        meta = app.query_one("#meta")
+        assert "Description:" in str(meta._render())
+        assert "A guide to testing" in str(meta._render())

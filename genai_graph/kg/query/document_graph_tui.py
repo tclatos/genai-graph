@@ -54,6 +54,8 @@ class NodeData(BaseModel):
     section_id: str | None = None
     filename: str | None = None
     title: str | None = None
+    description: str | None = None
+    summary: str | None = None
     level: int | None = None
     line_start: int | None = None
     count: int | None = None
@@ -84,6 +86,8 @@ def _dedupe_documents(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 class DocumentGraphApp(App[None]):
     """Browse a Document Graph: folders → documents → sections."""
+
+    ALLOW_SELECT = False
 
     CSS = """
     Horizontal {
@@ -172,6 +176,9 @@ class DocumentGraphApp(App[None]):
                     path=row.get("path"),
                     markdown_hash=row["markdown_hash"],
                     filename=row["filename"],
+                    title=row.get("filename"),
+                    description=row.get("description"),
+                    summary=row.get("summary"),
                     count=row["section_count"],
                 ),
             )
@@ -193,6 +200,8 @@ class DocumentGraphApp(App[None]):
                         markdown_hash=markdown_hash,
                         section_id=row["section_id"],
                         title=row["title"],
+                        description=row.get("description"),
+                        summary=row.get("summary"),
                         level=row["level"],
                         line_start=row["line_start"],
                     ),
@@ -262,8 +271,12 @@ class DocumentGraphApp(App[None]):
         elif data.kind == "document":
             self._current_md_path = data.path
             self._current_origin_path = _read_origin_path(data.path)
+            desc_line = f"[italic green]Description:[/italic green] {data.description}\n" if data.description else ""
+            summary_line = f"[italic cyan]Summary:[/italic cyan] {data.summary}\n" if data.summary else ""
             meta_text = (
                 f"[b]Document[/b] {data.filename}\n"
+                f"{desc_line}"
+                f"{summary_line}"
                 f"markdown: {data.path}\n"
                 f"source: {self._current_origin_path or '(none recorded — not converted from a raw document)'}\n"
                 f"hash: {data.markdown_hash}\nsections: {data.count}\n"
@@ -276,8 +289,12 @@ class DocumentGraphApp(App[None]):
         elif data.kind == "section":
             self._current_md_path = self._path_for_markdown_hash(data.markdown_hash)
             self._current_origin_path = _read_origin_path(self._current_md_path)
+            desc_line = f"[italic green]Description:[/italic green] {data.description}\n" if data.description else ""
+            summary_line = f"[italic cyan]Summary:[/italic cyan] {data.summary}\n" if data.summary else ""
             meta_text = (
                 f"[b]Section[/b] {data.title}\n"
+                f"{desc_line}"
+                f"{summary_line}"
                 f"id: {data.section_id}\n"
                 f"doc hash: {data.markdown_hash}\n"
                 f"level: {data.level}   line: {data.line_start}\n"

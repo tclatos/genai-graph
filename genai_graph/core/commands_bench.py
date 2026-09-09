@@ -24,6 +24,12 @@ from genai_graph.bench.summary import (
     display_bench_summary,
     save_bench_summary,
 )
+from genai_graph.bench.tui import (
+    display_questions_table,
+    display_single_question_panel,
+    load_bench_dataset_with_results,
+    run_bench_tui,
+)
 
 console = Console()
 
@@ -263,3 +269,88 @@ class BenchCommands(CliTopCommand):
                     judge_llm=cfg.judge_llm,
                 )
                 display_bench_summary(summary)
+
+        @cli_app.command("questions")
+        def questions(
+            profile: Annotated[
+                str | None,
+                typer.Option("-p", "--profile", help="Bench run profile key"),
+            ] = None,
+            question_id: Annotated[
+                str | None,
+                typer.Option("-q", "--question-id", help="Select and inspect a single question by ID"),
+            ] = None,
+            tui: Annotated[
+                bool,
+                typer.Option("--tui/--no-tui", "-t", help="Launch interactive Textual TUI browser"),
+            ] = False,
+            limit: Annotated[
+                int | None,
+                typer.Option("-n", "--limit", help="Limit number of questions displayed in table mode"),
+            ] = None,
+            config_path: Annotated[
+                str | None,
+                typer.Option("-c", "--config", help="Path to bench YAML configuration file"),
+            ] = None,
+        ) -> None:
+            """List questions with gold answers, agent outputs, and grader comments.
+
+            Examples:
+                cli bench questions
+                cli bench questions -q FB_001
+                cli bench questions --tui
+                cli bench questions -n 20
+            """
+            load_env()
+            cfg_p = Path(config_path) if config_path else None
+            cfg = load_bench_profile(profile_name=profile, config_path=cfg_p)
+
+            if tui:
+                run_bench_tui(cfg, initial_question_id=question_id)
+                return
+
+            items = load_bench_dataset_with_results(cfg, question_id=question_id)
+            if not items:
+                if question_id:
+                    console.print(f"[yellow]No question found with ID:[/yellow] {question_id}")
+                else:
+                    console.print("[yellow]No questions found in benchmark dataset.[/yellow]")
+                return
+
+            if question_id or len(items) == 1:
+                display_single_question_panel(items[0])
+            else:
+                if limit and limit > 0:
+                    items = items[:limit]
+                display_questions_table(items, title=f"Benchmark Questions: {cfg.profile_name} ({len(items)} items)")
+                console.print(
+                    "[dim](Tip: run [bold cyan]cli bench questions -q <ID>[/bold cyan] to inspect one question, "
+                    "or [bold cyan]cli bench tui[/bold cyan] for interactive Textual browser)[/dim]"
+                )
+
+        @cli_app.command("tui")
+        def tui_command(
+            profile: Annotated[
+                str | None,
+                typer.Option("-p", "--profile", help="Bench run profile key"),
+            ] = None,
+            question_id: Annotated[
+                str | None,
+                typer.Option("-q", "--question-id", help="Focus on specific question ID on startup"),
+            ] = None,
+            config_path: Annotated[
+                str | None,
+                typer.Option("-c", "--config", help="Path to bench YAML configuration file"),
+            ] = None,
+        ) -> None:
+            """Launch the interactive Textual TUI to navigate the benchmark dataset.
+
+            Examples:
+                cli bench tui
+                cli bench tui -p glm_5.3_Flash
+                cli bench tui -q UID0056
+            """
+            load_env()
+            cfg_p = Path(config_path) if config_path else None
+            cfg = load_bench_profile(profile_name=profile, config_path=cfg_p)
+            run_bench_tui(cfg, initial_question_id=question_id)

@@ -10,7 +10,7 @@ from genai_tk.cli.base import CliTopCommand
 from rich.console import Console
 from rich.table import Table
 
-from genai_graph.bench.adapters.registry import get_benchmark_adapter
+from genai_graph.bench.adapters.base import get_benchmark_adapter
 from genai_graph.bench.config import (
     ALL_STEPS,
     list_bench_profiles,

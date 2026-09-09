@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from genai_graph.bench.adapters.base import BaseBenchmarkAdapter, match_docs_by_pathspecs
-from genai_graph.bench.adapters.financebench import FinanceBenchAdapter
+from genai_graph.bench.adapters.base import (
+    BaseBenchmarkAdapter,
+    download_hf_file,
+    download_http_file,
+    get_benchmark_adapter,
+    load_hf_dataset_to_pandas,
+    match_docs_by_pathspecs,
+    resolve_benchmark_adapter,
+)
 from genai_graph.bench.adapters.mmlongbench import MMLongBenchDocAdapter
-from genai_graph.bench.adapters.officeqa import OfficeQAAdapter
-from genai_graph.bench.adapters.registry import get_benchmark_adapter, register_benchmark_adapter
 from genai_graph.bench.build_graph import (
     MD_FILENAME_SUFFIX,
     build_document_graph,
@@ -60,11 +65,9 @@ __all__ = [
     "BenchScoreRecord",
     "BenchSummary",
     "ErrorCategory",
-    "FinanceBenchAdapter",
     "JudgeVerdict",
     "MD_FILENAME_SUFFIX",
     "MMLongBenchDocAdapter",
-    "OfficeQAAdapter",
     "append_run_record",
     "build_document_graph",
     "build_graph_flow",
@@ -73,6 +76,8 @@ __all__ = [
     "configure_bench_monitoring",
     "copy_markdown_to_project",
     "display_bench_summary",
+    "download_hf_file",
+    "download_http_file",
     "evaluate_single_run",
     "fetch_doc_task",
     "fetch_flow",
@@ -85,12 +90,13 @@ __all__ = [
     "load_env",
     "load_existing_runs",
     "load_existing_scores",
+    "load_hf_dataset_to_pandas",
     "load_raw_bench_yaml",
     "markdownize_doc_task",
     "markdownize_flow",
     "markdownize_target",
     "match_docs_by_pathspecs",
-    "register_benchmark_adapter",
+    "resolve_benchmark_adapter",
     "run_one_question",
     "run_question_task",
     "run_questions_flow",

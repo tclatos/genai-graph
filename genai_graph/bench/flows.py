@@ -14,7 +14,7 @@ from typing import Any
 from loguru import logger
 from prefect import flow, task
 
-from genai_graph.bench.adapters.registry import get_benchmark_adapter
+from genai_graph.bench.adapters.base import get_benchmark_adapter
 from genai_graph.bench.config import BenchConfig, configure_bench_monitoring
 from genai_graph.bench.judge import evaluate_single_run, load_existing_scores
 from genai_graph.bench.models import BenchQuestion, BenchRunRecord, BenchScoreRecord

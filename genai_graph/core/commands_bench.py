@@ -280,6 +280,14 @@ class BenchCommands(CliTopCommand):
                 str | None,
                 typer.Option("-q", "--question-id", help="Select and inspect a single question by ID"),
             ] = None,
+            trajectory: Annotated[
+                bool,
+                typer.Option(
+                    "--trajectory/--no-trajectory",
+                    "-T",
+                    help="Display recorded tool calls and execution trajectory in single-question view",
+                ),
+            ] = True,
             tui: Annotated[
                 bool,
                 typer.Option("--tui/--no-tui", "-t", help="Launch interactive Textual TUI browser"),
@@ -298,6 +306,7 @@ class BenchCommands(CliTopCommand):
             Examples:
                 cli bench questions
                 cli bench questions -q FB_001
+                cli bench questions -q UID0056 --no-trajectory
                 cli bench questions --tui
                 cli bench questions -n 20
             """
@@ -318,13 +327,13 @@ class BenchCommands(CliTopCommand):
                 return
 
             if question_id or len(items) == 1:
-                display_single_question_panel(items[0])
+                display_single_question_panel(items[0], show_trajectory=trajectory)
             else:
                 if limit and limit > 0:
                     items = items[:limit]
                 display_questions_table(items, title=f"Benchmark Questions: {cfg.profile_name} ({len(items)} items)")
                 console.print(
-                    "[dim](Tip: run [bold cyan]cli bench questions -q <ID>[/bold cyan] to inspect one question, "
+                    "[dim](Tip: run [bold cyan]cli bench questions -q <ID>[/bold cyan] to inspect one question with trajectory, "
                     "or [bold cyan]cli bench tui[/bold cyan] for interactive Textual browser)[/dim]"
                 )
 

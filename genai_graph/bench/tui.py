@@ -44,6 +44,7 @@ class BenchQuestionDetail(BaseModel):
     agent_answer: str | None = None
     agent_thinking: str | None = None
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
     n_tool_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -122,7 +123,8 @@ def load_bench_dataset_with_results(
             detail.agent_answer = run_rec.agent_answer
             detail.agent_thinking = run_rec.agent_thinking
             detail.tool_calls = run_rec.tool_calls
-            detail.n_tool_calls = run_rec.n_tool_calls
+            detail.tool_results = run_rec.tool_results
+            detail.n_tool_calls = run_rec.n_tool_calls or len(run_rec.tool_calls)
             detail.input_tokens = run_rec.input_tokens
             detail.output_tokens = run_rec.output_tokens
             detail.run_error = run_rec.error
@@ -143,7 +145,10 @@ def load_bench_dataset_with_results(
             if not detail.has_run and score_data.get("agent_answer"):
                 detail.has_run = True
                 detail.agent_answer = score_data.get("agent_answer")
-                detail.n_tool_calls = int(score_data.get("n_tool_calls") or 0)
+                detail.agent_thinking = score_data.get("agent_thinking")
+                detail.tool_calls = score_data.get("tool_calls") or []
+                detail.tool_results = score_data.get("tool_results") or []
+                detail.n_tool_calls = int(score_data.get("n_tool_calls") or len(detail.tool_calls))
                 detail.input_tokens = int(score_data.get("input_tokens") or 0)
                 detail.output_tokens = int(score_data.get("output_tokens") or 0)
                 detail.run_error = score_data.get("error")
@@ -153,8 +158,10 @@ def load_bench_dataset_with_results(
     return items
 
 
-def format_question_markdown(q: BenchQuestionDetail, show_tool_calls: bool = False) -> str:
+def format_question_markdown(q: BenchQuestionDetail, show_tool_calls: bool = True) -> str:
     """Render a comprehensive Markdown representation of a question detail."""
+    import json
+
     lines: list[str] = []
 
     # Status header
@@ -209,12 +216,32 @@ def format_question_markdown(q: BenchQuestionDetail, show_tool_calls: bool = Fal
         if q.run_error:
             lines.append(f"\n⚠️ **Error:** `{q.run_error}`")
 
-        if show_tool_calls and q.tool_calls:
-            lines.append("\n### 🛠️ Tool Calls Execution Trajectory")
+        # Agent Thinking / Reasoning
+        if q.agent_thinking:
+            lines.append("\n### 🧠 Agent Reasoning / Thinking")
+            lines.append(f"```text\n{q.agent_thinking.strip()}\n```")
+
+        # Recorded Trajectory
+        if q.tool_calls:
+            lines.append(
+                f"\n### 🛠️ Recorded Execution Trajectory ({len(q.tool_calls)} step{'s' if len(q.tool_calls) != 1 else ''})"
+            )
             for idx, tc in enumerate(q.tool_calls, 1):
-                name = tc.get("name", "tool")
-                args = tc.get("args") or tc.get("arguments") or ""
-                lines.append(f"{idx}. **`{name}`**({args})")
+                name = tc.get("tool") or tc.get("name") or "tool"
+                args = tc.get("args") or tc.get("arguments") or {}
+                args_str = json.dumps(args, indent=2, ensure_ascii=False) if isinstance(args, dict) else str(args)
+                lines.append(f"#### Step {idx}: `{name}`")
+                lines.append(f"**Arguments:**\n```json\n{args_str}\n```")
+
+                if idx - 1 < len(q.tool_results):
+                    res_item = q.tool_results[idx - 1]
+                    content = res_item.get("content") or res_item.get("result") or res_item.get("output") or ""
+                    content_str = str(content)
+                    max_len = 1500 if show_tool_calls else 200
+                    if len(content_str) > max_len:
+                        content_str = content_str[:max_len] + f"\n... [{len(content_str):,} characters total]"
+                    lines.append(f"**Result:**\n```text\n{content_str}\n```")
+                lines.append("")
     else:
         lines.append("*Question has not been executed yet.*")
     lines.append("")
@@ -241,6 +268,8 @@ def format_question_markdown(q: BenchQuestionDetail, show_tool_calls: bool = Fal
 
     return "\n".join(lines)
 
+    return "\n".join(lines)
+
 
 def display_questions_table(
     questions: list[BenchQuestionDetail],
@@ -250,6 +279,7 @@ def display_questions_table(
     table = Table(title=title, show_lines=True)
     table.add_column("ID", style="bold cyan", no_wrap=True)
     table.add_column("Status", no_wrap=True)
+    table.add_column("Calls", style="cyan", justify="right", no_wrap=True)
     table.add_column("Doc", style="yellow")
     table.add_column("Question", style="white", ratio=3)
     table.add_column("Gold Answer", style="green", ratio=2)
@@ -266,10 +296,12 @@ def display_questions_table(
         comment_snippet = (
             (q.rationale[:100] + "...") if q.rationale and len(q.rationale) > 100 else (q.rationale or "-")
         )
+        calls_str = str(q.n_tool_calls) if q.has_run or q.n_tool_calls > 0 else "-"
 
         table.add_row(
             q.id,
             status_styled,
+            calls_str,
             q.doc_name or (q.doc_names[0] if q.doc_names else "-"),
             q_snippet,
             gold_snippet,
@@ -280,8 +312,10 @@ def display_questions_table(
     console.print(table)
 
 
-def display_single_question_panel(q: BenchQuestionDetail) -> None:
-    """Print full detailed Rich view for a single question."""
+def display_single_question_panel(q: BenchQuestionDetail, show_trajectory: bool = True) -> None:
+    """Print full detailed Rich view for a single question including execution trajectory."""
+    import json
+
     status_styled = f"[{q.status_style}]{q.status_label}[/{q.status_style}]"
     doc_str = ", ".join(q.doc_names) if q.doc_names else q.doc_name
 
@@ -304,6 +338,25 @@ def display_single_question_panel(q: BenchQuestionDetail) -> None:
         body += f"[dim]Model: {q.run_llm or 'default'} | Tools: {q.n_tool_calls} | Tokens: In {q.input_tokens:,} / Out {q.output_tokens:,}[/dim]\n"
         if q.run_error:
             body += f"[bold red]Error:[/bold red] {q.run_error}\n"
+
+        if q.agent_thinking:
+            body += f"\n[dim italic]Agent Reasoning:[/dim italic]\n[dim]{q.agent_thinking.strip()}[/dim]\n"
+
+        if show_trajectory and q.tool_calls:
+            body += f"\n[bold cyan]Recorded Execution Trajectory ({len(q.tool_calls)} step{'s' if len(q.tool_calls) != 1 else ''}):[/bold cyan]\n"
+            for idx, tc in enumerate(q.tool_calls, 1):
+                name = tc.get("tool") or tc.get("name") or "tool"
+                args = tc.get("args") or tc.get("arguments") or {}
+                args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, dict) else str(args)
+                body += f"  [bold cyan]Step {idx}:[/bold cyan] [yellow]{name}[/yellow]({args_str})\n"
+
+                if idx - 1 < len(q.tool_results):
+                    res_item = q.tool_results[idx - 1]
+                    content = str(res_item.get("content") or res_item.get("result") or res_item.get("output") or "")
+                    preview = content.replace("\n", " ")
+                    if len(preview) > 140:
+                        preview = preview[:140] + "..."
+                    body += f"    [dim]↳ Result: {preview}[/dim]\n"
     else:
         body += "[dim]Not executed yet.[/dim]\n"
 
@@ -406,7 +459,7 @@ class BenchViewerApp(App):
         self.all_questions: list[BenchQuestionDetail] = []
         self.filtered_questions: list[BenchQuestionDetail] = []
         self.selected_question: BenchQuestionDetail | None = None
-        self.show_tool_calls: bool = False
+        self.show_tool_calls: bool = True
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -437,7 +490,7 @@ class BenchViewerApp(App):
         self.title = f"Benchmark Viewer: {self.cfg.profile_name}"
         self.sub_title = "Browse questions, gold answers, agent traces, and evaluations"
         table = self.query_one(DataTable)
-        table.add_columns("ID", "Status", "Doc", "Question")
+        table.add_columns("ID", "Status", "Calls", "Doc", "Question")
         self.load_data()
 
     def load_data(self) -> None:
@@ -507,7 +560,8 @@ class BenchViewerApp(App):
             status_text = q.status_label
             q_snip = (q.question[:45] + "...") if len(q.question) > 45 else q.question
             doc_snip = q.doc_name or (q.doc_names[0] if q.doc_names else "")
-            table.add_row(q.id, status_text, doc_snip, q_snip, key=q.id)
+            calls_text = str(q.n_tool_calls) if q.has_run or q.n_tool_calls > 0 else "-"
+            table.add_row(q.id, status_text, calls_text, doc_snip, q_snip, key=q.id)
 
             if self.initial_question_id and q.id.lower() == self.initial_question_id.lower():
                 initial_row_index = idx
@@ -567,8 +621,8 @@ class BenchViewerApp(App):
         self.show_tool_calls = not self.show_tool_calls
         if self.selected_question:
             self.render_detail(self.selected_question)
-        status = "enabled" if self.show_tool_calls else "disabled"
-        self.notify(f"Tool calls view {status}", timeout=2)
+        status = "expanded (full output)" if self.show_tool_calls else "compact preview"
+        self.notify(f"Trajectory view: {status}", timeout=2)
 
     def action_refresh_data(self) -> None:
         self.load_data()

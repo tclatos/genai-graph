@@ -1,0 +1,51 @@
+# ---------------------------------------------------------------------------
+# Generic Benchmark Workflows (DSL v2)
+#
+# Composable benchmark workflows supporting any dataset adapter (financebench,
+# officeqa, mmlongbench, etc.) via genai-graph.
+#
+# Usage:
+#   cli workflow run bench_full --set profile=mistral_glm
+#   cli workflow run bench_build --set profile=mistral_glm
+#   cli workflow run bench_run --set profile=mistral_glm --set limit=1
+# ---------------------------------------------------------------------------
+
+workflows:
+
+  bench_fetch:
+    description: "Fetch benchmark raw documents via the configured benchmark adapter"
+    run: genai_graph.bench.flows.fetch_flow
+    params:
+      cfg: {required: true}
+
+  bench_markdownize:
+    description: "Convert/OCR benchmark documents to Markdown"
+    run: genai_graph.bench.flows.markdownize_flow
+    params:
+      cfg: {required: true}
+
+  bench_build_graph:
+    description: "Build Ladybug Document Graph from Markdown files"
+    run: genai_graph.bench.flows.build_graph_flow
+    params:
+      cfg: {required: true}
+
+  bench_run_questions:
+    description: "Run questions through Document Graph deep agent"
+    run: genai_graph.bench.flows.run_questions_flow
+    params:
+      cfg: {required: true}
+
+  bench_grade:
+    description: "Grade benchmark question runs with LLM-as-judge"
+    run: genai_graph.bench.flows.grade_flow
+    params:
+      cfg: {required: true}
+
+  bench_full:
+    description: "End-to-end benchmark workflow: fetch -> markdownize -> build -> run -> grade"
+    run: genai_graph.bench.flows.full_bench_flow
+    params:
+      cfg: {required: true}
+      step: {default: null}
+      skip: {default: null}

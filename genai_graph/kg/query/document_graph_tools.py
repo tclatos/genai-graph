@@ -867,8 +867,12 @@ def _keyword_section_hits(
             rows, _ = _query_rows(backend, fts, {"query": query, "limit": fetch_k})
             if rows:
                 if allowed is not None:
+                    # The corpus-wide FTS top-k is often dominated by other documents
+                    # (scope starvation); when the scope filter empties it, fall through
+                    # to the scoped CONTAINS search instead of returning nothing.
                     rows = [r for r in rows if r.get("markdown_hash") in allowed]
-                return rows[:limit]
+                if rows:
+                    return rows[:limit]
         except Exception as exc:  # noqa: BLE001
             logger.debug("FTS search unavailable, falling back to CONTAINS: {}", exc)
     rows = _contains_section_hits(backend, query, limit, folder_id=folder_id, allowed=allowed)
@@ -1192,7 +1196,11 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
         except Exception as exc:  # noqa: BLE001
             return _tool_error(exc)
         if not rows:
-            return f"No sections matched: {query!r}"
+            return (
+                f"No sections matched: {query!r} (tried hybrid vector + BM25 and keyword fallback). "
+                "Try 2-3 simpler keywords instead of a long phrase, or map the document with "
+                "`get_document_toc` and read the likely sections via `get_section_content`."
+            )
         lines = []
         for r in rows:
             line = f"- [{r['section_id']}] {r['title']} (line {r['line_start']}) — score {r['score']}"

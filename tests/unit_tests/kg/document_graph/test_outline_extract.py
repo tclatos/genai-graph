@@ -329,7 +329,12 @@ class TestSectionBranching:
         from genai_graph.kg.document_graph.outline_extract import BranchOutline
 
         raw_list = [
-            {"title": "Table PDO-2.--Offerings of Bills", "level": 3, "description": "Offerings of bills.", "summary": None}
+            {
+                "title": "Table PDO-2.--Offerings of Bills",
+                "level": 3,
+                "description": "Offerings of bills.",
+                "summary": None,
+            }
         ]
         coerced = BranchOutline.model_validate(raw_list)
         assert len(coerced.sections) == 1

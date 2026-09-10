@@ -1,20 +1,28 @@
+# LightRAG
+We have a well working docgraph construction process, efficient (SOA on benchmarks).
+On the other side, we have graph fabrics to extract entitoes and relationship from docs through a BAML schema. That's  fine.
 
-# Mutialize Bench
+But my feeling is that we could without too much effort extract entities and relationship using technique inspired by LightRag (https://github.com/hkuds/lightrag) : we have very good text chunking capabilities, LLM to summerize documents or sections (they could also extract entities..), hybrid search, etc
 
-We have implemented 2 benchmarks projects,  financebench and officeqa.  The second was a clone of the first. They worked well.
-We wan now to mutualize code in genai-graph, to ease maintenance and, more important, facilitate development to test  our graph based framework against benchmarks.
-Typically, the commmands 'cli bench '  should be the same for all bechnmarks, with shared code to load datasets, run, evaluate, judge, etc.  Top level woroflow, if it is benchmark specific, could be written using our Prefect YAML DSL, with reusable or modifiabke Prefect tasls / workflow behind.  ABC , YAML config with factory pattern could be used. Code could be placed in genai-graph/bench/ dir.  
+https://github.com/NanoNets/nanoindex/ also extract entities fro a table of content strucrire similar to ours, but they use GLiner.  That's look unneccessary if we aleady pass  docs to LLM.
 
-Try also to make configuration more generic to ease test reproduction.  For example the config field 'onedrive_markdown_dir' could be renamed to  more  general "saved_markdown_dir" or "saved_markdown_dir" or else (I let you choose).
-
-Constraint: keep compatility with existing bench files results and outcome.
-
-Example of new benchmark we could tun is : https://github.com/mayubo2333/MMLongBench-Doc
-
-Do quick run to test financebench and officeqa commands after refactoring. Don't break generated files (especially the built graph ! ) 
+Mu idea is that we could have a new graph factory to create these entities / relationsih using a light-rag inspired approach without too much complexity.
+ 
+Investigate this idea, and write a report in genai-graph/design.  You can be critical
 
 Think about that, ask questions, suggest/evaluare alternatives, propose a plan.
 
+
+# Faster processing
+
+Building the doc graph is very slow.  See how we could increase the injection speed.
+Ideas : 
+- add more paralelism in summerization and embeddings calculation
+- process more documents at a time
+- Check there's no semaphore or lock somewhere
+- Use non-thinking, fast model, fast provider (easy: we can now select llm that wau deepseekv4flash(none)@openai:speed )
+- ...
+- Analyse Prefect logs ? 
 
 
 

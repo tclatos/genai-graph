@@ -4,13 +4,16 @@ This module provides an abstract interface for graph databases and concrete
 implementations for different backends (Kuzu, Neo4j, etc.).
 """
 
+from __future__ import annotations
+
 import re
 import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 # Process-wide lock serializing native extension INSTALL/LOAD calls.
 #
@@ -182,6 +185,7 @@ class KgBackend(QueryExecutor, ABC):
             AttributeError: If result object doesn't support get_as_df()
         """
         result = self.execute(query, parameters)
+        import pandas as pd
 
         # Handle single result
         if not isinstance(result, list):

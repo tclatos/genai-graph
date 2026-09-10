@@ -20,21 +20,20 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from genai_tk.utils.ladybug import get_shared_database
-from langchain_core.tools import BaseTool, tool
 from loguru import logger
 
 from genai_graph.kg.backend import KgBackend, KuzuBackend, LadybugBackend
-from genai_graph.kg.embeddings_handler import EmbeddingsHandler
-from genai_graph.kg.nodes.document import DocumentNode, FolderNode
-from genai_graph.kg.nodes.document_section import SectionChunkNode, SectionNode
 
-_DOCUMENT_LABEL = DocumentNode.node_class.__name__
-_SECTION_LABEL = SectionNode.node_class.__name__
-_FOLDER_LABEL = FolderNode.node_class.__name__
+if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
+
+_DOCUMENT_LABEL = "Document"
+_SECTION_LABEL = "MarkdownSection"
+_FOLDER_LABEL = "Folder"
 
 # Native index queries (CALL QUERY_FTS_INDEX / QUERY_VECTOR_INDEX) corrupt the
 # native heap in ladybug 0.16.1's pybind backend — every process that runs one
@@ -678,7 +677,7 @@ def reconstruct_section(
     return (text, query) if return_query else text
 
 
-_CHUNK_LABEL = SectionChunkNode.node_class.__name__
+_CHUNK_LABEL = "SectionChunk"
 # Index names must match genai_graph.kg.document_graph.retrieval defaults.
 _CHUNK_VECTOR_INDEX = "chunk_embedding_index"
 _SECTION_FTS_INDEX = "section_fts"
@@ -961,6 +960,8 @@ def search_sections(
         and isinstance(backend, KuzuBackend)
     ):
         try:
+            from genai_graph.kg.embeddings_handler import EmbeddingsHandler
+
             handler = EmbeddingsHandler(embeddings_id=effective_embeddings_id)
             query_vec = handler.compute_embeddings(query)
             sem = _semantic_section_hits(backend, query_vec, limit, allowed)
@@ -1071,6 +1072,7 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
     Returns:
         ``[list_documents, get_document_toc, get_folder_toc, get_section_content, search_sections]`` tools.
     """
+    from langchain_core.tools import tool
 
     @tool("list_documents")
     def _list_documents() -> str:

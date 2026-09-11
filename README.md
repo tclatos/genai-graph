@@ -91,23 +91,42 @@ Progressive disclosure of domain knowledge for AI coding agents and runtime mode
 
 ## Quick Start
 
-### Installation
+### Recommended: Scaffold from Scratch
+
+The preferred way to use `genai-graph` is to start from a clean project directory using `uv` and `genai-tk` scaffolding (see [genai-tk](https://github.com/tclatos/genai-tk)):
 
 ```bash
-# Clone and install with development dependencies
+# 1. Create project directory and initialize with uv
+mkdir my-graph-app && cd my-graph-app
+uv init
+
+# 2. Add genai-tk and genai-graph dependencies
+uv add "genai-tk @ git+https://github.com/tclatos/genai-tk@main"
+uv add "genai_graph @ git+https://github.com/tclatos/genai-graph@main"
+
+# 3. Bootstrap configuration, merged skills, benchmark tools, and starter files
+uv run cli init --name "My Knowledge Graph App" --with-graph
+
+# Optional: for active development with a local editable checkout of genai-graph:
+# uv run cli init --name "My Benchmark Suite" --with-graph --graph-path /path/to/genai-graph
+
+# 4. Sync dependencies and run
+uv sync
+just run                           # launch interactive agent chat
+uv run cli bench list              # list benchmark profiles
+uv run cli docgraph --help         # inspect Document Graph commands
+```
+
+### Library Development (Clone & Contribute)
+
+If you are contributing directly to `genai-graph`:
+
+```bash
 git clone https://github.com/tclatos/genai-graph.git && cd genai-graph
 uv sync
 
 # Verify CLI commands
 uv run cli --help
-```
-
-### Scaffolding a New Benchmark / Graph Project
-
-Use `genai-tk`'s scaffolding engine to generate a standalone project wired to `genai-graph`:
-
-```bash
-uv run cli init --name "My Finance Benchmark" --with-graph --graph-path ../genai-graph
 ```
 
 ---

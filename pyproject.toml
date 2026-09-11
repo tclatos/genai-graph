@@ -110,7 +110,7 @@ constraint-dependencies = [
 # Keep in sync with any downstream project (e.g. rfq_pricing) that pulls in
 # genai-graph as a path dependency — uv requires a single resolved git ref
 # for genai-tk across the whole dependency graph.
-genai-tk = { git = "https://github.com/tclatos/genai-tk", branch = "main" }
+genai-tk = { git = "https://github.com/tclatos/genai-tk", rev = "main" }
 
 [build-system]
 requires = ["hatchling"]

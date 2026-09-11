@@ -1,10 +1,15 @@
-"""Build the Document Graph for benchmark documents.
+"""Bench plumbing for the Document Graph build.
 
-Pipeline:
+The build pipeline itself lives in `genai_graph.kg.document_graph.build` (the
+single baseline shared with `cli docgraph build` and the workflow engine); the
+functions here only map benchmark doc names to staged Markdown files and fill
+in bench-default paths:
+
 1. OCR or convert target document PDF/Office files to Markdown text, writing to
    saved_markdown_dir (persistent backup/mirror) using configured markdownize profiles.
 2. Stage that Markdown into project-relative markdown_dir (e.g. data/markdown_multi/).
-3. Ingest into Ladybug (Kuzu) Document Graph database (Folder -> Document -> Section).
+3. Ingest into Ladybug (Kuzu) Document Graph database (Folder -> Document -> Section)
+   via the shared core builder.
 """
 
 from __future__ import annotations
@@ -16,27 +21,10 @@ from typing import Any
 
 from loguru import logger
 
-from genai_graph.kg.document_graph.outline_extract import OutlineConfig
+from genai_graph.kg.document_graph.build import build_document_graph as _build_document_graph_core
+from genai_graph.kg.document_graph.build import warm_outline_cache as _warm_outline_cache_core
 
 MD_FILENAME_SUFFIX = "_pdf.md"
-
-
-def _resolve_build_llm(llm: str | None) -> str | None:
-    """Resolve build LLM to a model ID or None."""
-    if llm is None:
-        return None
-    if "@" in llm:
-        return llm
-    try:
-        from genai_tk.config_mgmt.config_mngr import global_config
-
-        cfg = global_config()
-        resolved = cfg.get_str(f"kg_build.llms.{llm}", default=None)
-        if resolved:
-            return resolved
-        return cfg.get_str("kg_build.llms.default", default=None)
-    except Exception:
-        return llm
 
 
 def _convert_pdf(pdf_path: Path, markdownize_profile: str = "medium") -> str:
@@ -132,31 +120,6 @@ def copy_markdown_to_project(
     return dest_file
 
 
-def _build_outline_config(
-    *,
-    llm: str | None,
-    structure_strategy: str,
-    generate_summaries: bool,
-    workers: int,
-    summary_min_tokens: int,
-    context_safety_ratio: float,
-    kg_db: Path,
-) -> OutlineConfig | None:
-    """Build the outline policy for *kg_db*, or None for the algorithmic-only path."""
-    resolved_llm = _resolve_build_llm(llm)
-    if resolved_llm is None and structure_strategy == "algo":
-        return None
-    return OutlineConfig(
-        llm=resolved_llm,
-        structure_strategy=structure_strategy,
-        generate_summaries=generate_summaries,
-        workers=workers,
-        summary_min_tokens=summary_min_tokens,
-        context_safety_ratio=context_safety_ratio,
-        cache_root=str(kg_db.with_suffix("")) + "_outlines",
-    )
-
-
 def _resolve_sources(md_dir: Path, doc_names: list[str] | None) -> list[str]:
     """Map selected benchmark doc names to staged markdown files (whole dir when None)."""
     if not doc_names:
@@ -188,12 +151,12 @@ def warm_outline_cache(
 ) -> dict[str, Any]:
     """Extract outlines for the selected documents without touching the database.
 
-    Idempotent: results land in the content-addressed outline cache, so a later
-    ``build_document_graph(outline_pre_pass=False)`` reads them from disk with no
-    LLM calls. No DB access and no shared state, so this is safe to run per
-    document from parallel Prefect tasks (per-document fault isolation). A
-    document whose LLM extraction ultimately fails here is simply missing from
-    the cache and degrades to algorithmic parsing at merge time.
+    Thin bench wrapper over `genai_graph.kg.document_graph.build.warm_outline_cache`
+    (see it for the full docstring): maps benchmark doc names to staged Markdown
+    files and fills in bench-default paths. No DB access and no shared state, so
+    this is safe to run per document from parallel Prefect tasks (per-document
+    fault isolation). A document whose LLM extraction ultimately fails here is
+    simply missing from the cache and degrades to algorithmic parsing at merge time.
 
     Args:
         doc_names: Benchmark doc names to warm (matched as ``<name>_pdf.md`` in
@@ -213,22 +176,16 @@ def warm_outline_cache(
     """
     md_dir = markdown_dir or (Path.cwd() / "data" / "markdown_multi")
     db_p = kg_db or (Path.cwd() / "data" / "kg" / "bench.db")
-    outline_config = _build_outline_config(
+    return _warm_outline_cache_core(
+        _resolve_sources(md_dir, doc_names),
+        db_path=db_p,
         llm=llm,
         structure_strategy=structure_strategy,
         generate_summaries=generate_summaries,
         workers=workers,
         summary_min_tokens=summary_min_tokens,
         context_safety_ratio=context_safety_ratio,
-        kg_db=db_p,
     )
-    if outline_config is None:
-        return {"status": "skipped", "reason": "algorithmic-only build (no outline cache)"}
-
-    from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
-
-    factory = DocumentGraphFactory(sources=_resolve_sources(md_dir, doc_names), recursive=True, outline_config=outline_config)
-    return factory.extract_outlines(workers=workers).model_dump()
 
 
 def build_document_graph(
@@ -278,72 +235,21 @@ def build_document_graph(
     Returns:
         Ingest statistics with per-stage ``timings`` (seconds) and warnings.
     """
-    from genai_graph.kg.backend import KuzuBackend
-    from genai_graph.kg.document_graph.ingest import ingest_document_graph
-    from genai_graph.kg.document_graph.retrieval import RetrievalConfig
-    from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
-
     md_dir = markdown_dir or (Path.cwd() / "data" / "markdown_multi")
     db_p = kg_db or (Path.cwd() / "data" / "kg" / "bench.db")
-    db_p.parent.mkdir(parents=True, exist_ok=True)
-
-    outline_config = _build_outline_config(
+    return _build_document_graph_core(
+        _resolve_sources(md_dir, doc_names),
+        db_p,
+        force=force,
         llm=llm,
         structure_strategy=structure_strategy,
         generate_summaries=generate_summaries,
         workers=workers,
         summary_min_tokens=summary_min_tokens,
         context_safety_ratio=context_safety_ratio,
-        kg_db=db_p,
+        embed_workers=embed_workers,
+        outline_pre_pass=outline_pre_pass,
+        embeddings_id=embeddings_id,
+        fts=fts,
+        chunk_size_tokens=chunk_size_tokens,
     )
-    resolved_llm = outline_config.llm if outline_config else None
-
-    factory = DocumentGraphFactory(sources=_resolve_sources(md_dir, doc_names), recursive=True, outline_config=outline_config)
-
-    timings: dict[str, float] = {}
-    backend = KuzuBackend()
-    backend.connect(str(db_p))
-    try:
-        outline_warnings: list[str] = []
-        if outline_config is not None and outline_pre_pass:
-            t0 = time.monotonic()
-            stats = factory.extract_outlines(workers=workers)
-            outline_warnings = list(stats.warnings)
-            timings["outline_pre_pass_s"] = round(time.monotonic() - t0, 3)
-            logger.info(
-                "Outline pre-pass: {} file(s), {} degraded, {} LLM call(s) in {:.1f}s",
-                stats.total_files,
-                stats.degraded_count,
-                stats.llm_calls,
-                timings["outline_pre_pass_s"],
-            )
-
-        logger.info(
-            "Ingesting Document Graph from {} into {} (llm={}, embeddings={}, fts={})",
-            md_dir,
-            db_p,
-            resolved_llm,
-            embeddings_id,
-            fts,
-        )
-        t1 = time.monotonic()
-        result = ingest_document_graph(
-            backend,
-            factory,
-            force=force,
-            retrieval_config=RetrievalConfig(
-                embeddings_id=embeddings_id,
-                chunk_size_tokens=chunk_size_tokens,
-                fts=fts,
-            ),
-            embed_workers=max(1, embed_workers if embed_workers is not None else workers),
-        )
-        timings["ingest_s"] = round(time.monotonic() - t1, 3)
-    finally:
-        backend.close()
-
-    stats = result.model_dump()
-    stats["timings"] = timings
-    stats["warnings"] = [*outline_warnings, *result.warnings]
-    logger.success("Document Graph build complete: {}", stats)
-    return stats

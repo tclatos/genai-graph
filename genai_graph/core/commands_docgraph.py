@@ -247,6 +247,21 @@ class DocGraphCommands(CliTopCommand):
                 typer.Option("--outline-cache-dir", help="Directory for the content-addressed outline JSON cache."),
             ] = None,
             workers: Annotated[int, typer.Option("--workers", help="Parallelism for the LLM outline pre-pass.")] = 4,
+            embed_workers: Annotated[
+                int | None,
+                typer.Option(
+                    "--embed-workers",
+                    help="Parallel workers for per-document chunk-embedding during ingest; defaults to --workers.",
+                ),
+            ] = None,
+            embeddings: Annotated[
+                str | None,
+                typer.Option(
+                    "--embeddings",
+                    help="Embeddings model id (name@provider) for SectionChunk vectors, enabling hybrid "
+                    "(vector + BM25) section search. Omit to skip chunk embeddings (BM25 still available).",
+                ),
+            ] = None,
             context_safety_ratio: Annotated[
                 float,
                 typer.Option(
@@ -313,6 +328,8 @@ class DocGraphCommands(CliTopCommand):
                 outline_cache_dir=outline_cache_dir,
                 workers=workers,
                 context_safety_ratio=context_safety_ratio,
+                embeddings_id=embeddings,
+                embed_workers=embed_workers,
             )
 
             table = Table(title="Document Graph — Build Result")

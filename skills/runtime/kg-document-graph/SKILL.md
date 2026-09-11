@@ -9,6 +9,7 @@ description: Build and navigate the genai-graph Document Graph — the Folder/Do
 
 - `docs/document-graph.md` — full schema, factories, CLI, querying
 - `genai_graph/kg/document_graph/ingest.py` — `ingest_document_graph`, `drop_document_graph`
+- `genai_graph/kg/document_graph/build.py` — the single build pipeline (`build_document_graph`, `warm_outline_cache`) wrapped by the CLI, workflow engine, and bench
 - `genai_graph/kg/document_graph/tree_parser.py` — heading-hierarchy parser
 - `genai_graph/kg/document_graph/repository.py` — section CRUD
 - `genai_graph/kg/factories/document_graph_factory.py` — `DocumentGraphFactory`, `DocumentGraphBundle`

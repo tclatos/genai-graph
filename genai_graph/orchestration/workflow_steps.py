@@ -227,23 +227,27 @@ def docgraph_build_step(
     if build_document_graph:
         if not md_dir:
             raise ValueError("docgraph_build_step: md_output_dir is required to build the document graph")
-        from genai_graph.kg.backend import KuzuBackend
-        from genai_graph.kg.document_graph.ingest import drop_document_graph, ingest_document_graph
-        from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
+        from genai_graph.kg.document_graph.build import build_document_graph as build_doc_graph
         from genai_graph.kg.manager import get_kg_manager
 
-        db_path = str(get_kg_manager().get_db_path_for(kg_name))
-        backend = KuzuBackend()
-        backend.connect(db_path)
-        if delete_first:
-            drop_document_graph(backend)
-        factory = DocumentGraphFactory(sources=[md_dir], include=include or ["*.md"], exclude=exclude or [])
-        result = ingest_document_graph(backend, factory, force=stage_active(force_stage, ForceStage.graph))
+        doc_stats = build_doc_graph(
+            sources=[md_dir],
+            db_path=str(get_kg_manager().get_db_path_for(kg_name)),
+            include=include or ["*.md"],
+            exclude=exclude or [],
+            delete_first=delete_first,  # already applied above when entity factories ran
+            force=stage_active(force_stage, ForceStage.graph),
+            # Keep this step's algo-only, retrieval-free document-graph behavior.
+            structure_strategy="algo",
+            outline_pre_pass=False,
+            embeddings_id=None,
+            fts=False,
+        )
         doc_result = {
-            "db_path": db_path,
-            "documents_processed": result.documents_processed,
-            "sections_created": result.sections_created,
-            "relationships_created": result.relationships_created,
+            "db_path": doc_stats["db_path"],
+            "documents_processed": doc_stats["documents_processed"],
+            "sections_created": doc_stats["sections_created"],
+            "relationships_created": doc_stats["relationships_created"],
         }
 
     summary: dict[str, Any] = {"kg_name": kg_name}

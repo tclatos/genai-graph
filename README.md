@@ -1,99 +1,198 @@
 # GenAI Graph
 
-Hybrid **Knowledge Graph** /  **GraphRAG** framework built on top of [genai-tk](https://github.com/tclatos/genai-tk).
+Hybrid **Knowledge Graph**, **Document Graph**, and **GraphRAG** framework built on top of [genai-tk](https://github.com/tclatos/genai-tk).
 
-Ingests heterogeneous sources — Neo4j exports, Excel/CSV tables, LLM-extracted documents
-(via BAML) — into a unified [Ladybug](https://github.com/LadybugDB/ladybug) graph database,
-then exposes the graph through a Streamlit webapp, a CLI, and Cypher-aware agents.
+GenAI Graph transforms unstructured document collections (PDF, PPTX, DOCX, Markdown), structured tables (Excel, CSV), and Neo4j exports into unified, queryable [Ladybug](https://github.com/LadybugDB/ladybug) graph databases. It provides autonomous document-walking agents, multi-dataset benchmark evaluation pipelines (`cli bench`), and interactive Streamlit/TUI visualization interfaces.
 
 ---
 
-## Architecture
+## Architecture Overview
 
+```mermaid
+flowchart TD
+    subgraph Sources["1. Heterogeneous Data Sources"]
+        DOCS["Documents (PDF, PPTX, DOCX, Markdown)"]
+        TABLES["Tabular Data (Excel, CSV)"]
+        NEO["Neo4j Exports (JSONL)"]
+        BENCH_DS["Benchmark Datasets (HuggingFace / Local)"]
+    end
+
+    subgraph Ingestion["2. Processing & Factory Layer"]
+        MKT["Markdown Knowledge Tree Parser<br/>(Folder → Document → MarkdownSection)"]
+        OCR["OCR Ladder (Mistral OCR → Docling → MarkItDown)"]
+        BAML["BAML Structured LLM Extraction<br/>(MarkdownBamlFactory)"]
+        TAB_F["TableBackedFactory & JsonFileBackedFactory"]
+        NEO_F["Neo4jImportFactory & Schema Dedup"]
+    end
+
+    subgraph CoreEngine["3. Graph Engine & Schema Compiler"]
+        SCHEMA["GraphSchema & ResolvedSchema<br/>(Auto-deduced field paths & relation endpoints)"]
+        MERGE["Idempotent Batch Mergers & Fingerprint Cache"]
+        LADYBUG["Ladybug Embedded Graph Database<br/>(Node/Rel Tables + CALL QUERY_VECTOR_INDEX)"]
+    end
+
+    subgraph Applications["4. Agents, Benchmarks & Interfaces"]
+        DAGENT["DocGraph Deep Agent & Vectorless Tools<br/>(cli docgraph agent)"]
+        CYPHER["Cypher Query Agents & Text-to-Cypher"]
+        BENCH["Unified Benchmark Framework (cli bench)<br/>(6-Stage Pipeline, Mafin 2.5 Grader, Textual TUI)"]
+        UI["Streamlit KG Explorer & D3 Interactive Graph (just webapp)"]
+    end
+
+    DOCS --> OCR --> MKT --> SCHEMA
+    DOCS --> BAML --> SCHEMA
+    TABLES --> TAB_F --> SCHEMA
+    NEO --> NEO_F --> SCHEMA
+    BENCH_DS --> BENCH
+
+    SCHEMA --> MERGE --> LADYBUG
+    LADYBUG --> DAGENT
+    LADYBUG --> CYPHER
+    LADYBUG --> BENCH
+    LADYBUG --> UI
 ```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                              Data Sources                                  │
-│  Neo4j export (JSONL)   Excel / CSV tables   Documents (PDF, PPTX, MD)      │
-└─────────────┬──────────────────┬────────────────────────┬─────────────────┘
-              │                  │                        │
-              ▼                  ▼                        ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Factory Layer                                     │
-│  Neo4jImportFactory   TableBackedFactory   DocumentGraphFactory              │
-│                                            (Folder→Document→MarkdownSection) │
-│                                            MarkdownBamlFactory (inline BAML) │
-│                                            JsonFileBackedFactory (JSON→graph)│
-└─────────────────────────────────────┬────────────────────────────────────────┘
-                                      │  DataFrames of typed Pydantic nodes
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        GraphSchema / KG Manager                              │
-│  • Auto-deduces field paths from the root Pydantic model                     │
-│  • Computes excluded fields (relation endpoints, p_ edge properties)         │
-│  • Merges schemas from multiple factories (dedup by node label)              │
-│  • Fingerprint-based caching (skip unchanged sources)                        │
-└─────────────────────────────────────┬───────────────────────────────────────┘
-                                      │  MERGE statements (no duplicates)
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│              Ladybug Graph Database  (Kuzu-compatible Cypher)                │
-│  Node tables  ·  Relationship tables  ·  Vector embeddings (optional)        │
-└──────────────────────┬──────────────────────────────────────────────────────┘
-                       │
-          ┌────────────┼─────────────────┐
-          ▼            ▼                 ▼
-    CLI (kg/docgraph/neo4j)  Streamlit webapp  Cypher agents
-```
-
-### Key design decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| **Ladybug** as graph backend | Maintained Kuzu fork — full Cypher compatibility, active development |
-| **Pydantic v2** node types | Typed schema, automatic validation, easy serialization |
-| **Factory pattern** | Each data source is an independent unit; compose multiple sources per KG |
-| **`table_name` identity** | Override the Ladybug label independently of the Python class name |
-| **Parquet cache** | Intermediate DataFrames cached per-source; only changed sources re-run |
-| **Workflow DSL** (genai-tk) | YAML-driven pipelines with dry-run, `--set` overrides, sub-workflow composition |
-| **BAML** for LLM extraction | Structured extraction with typed schemas, retry logic, streaming |
 
 ---
 
-## Where GenAI Graph Fits
+## Core Pillars & Capabilities
 
-GenAI Graph extends genai-tk's **three domains**:
+### 📄 1. Document Graph & Markdown Knowledge Tree
+Hierarchical document representation designed for deterministic, provenance-backed agent navigation:
+- **Folder → Document → MarkdownSection** schema tracking exact line numbers, token budgets, and parent-child hierarchy.
+- **Multi-strategy OCR ladder**: Mistral OCR (high-fidelity tables & equations) → Docling → MarkItDown fallback.
+- **Vectorless Agentic RAG**: Tools that walk headings, search section titles, and fetch contiguous markdown ranges without vector chunk fragmentation.
+- **Autonomous DocGraph Agent**: Pre-configured deep planning agent with specialized runtime skills (`cli docgraph agent`).
+- See: `cli docgraph`, [docs/document-graph.md](docs/document-graph.md)
 
-| Domain | GenAI Graph adds |
-|--------|-----------------|
-| **🧠 Core GenAI** | BAML schemas for structured extraction; Document Graph factories (`DocumentGraphFactory`, `MarkdownBamlFactory`, `DocumentDirectoryFactory`) |
-| **🤖 Agents** | Cypher tool integration; `KGQueryAgent`; Document Graph navigation tools; graph-aware system prompts |
-| **⚙️ Workflows** | `kg_build_step`, `docgraph_build_step`, multi-source KG pipeline profiles |
+### 📊 2. Unified Benchmark Framework (`cli bench`)
+Multi-dataset evaluation suite powering empirical AI evaluations (such as **FinanceBench**, **OfficeQA**, and **MMLongBench-Doc**):
+- **6-Stage Pipeline**: Dataset Fetch → OCR / Markdownize → Hierarchical Graph Ingestion → Autonomous Agent Execution → LLM-as-Judge Evaluation → Summary Metric Aggregation.
+- **Dynamic Adapter Pattern**: Subclass `BaseBenchmarkAdapter` to encapsulate domain dataset loaders, document fetchers, and judge rubrics.
+- **Mafin 2.5 Evaluation Rules**: Numeric equivalence normalization (currency, scale, percentages, rounding), correctness tiers (`CORRECT`, `PARTIAL`, `INCORRECT`), and failure taxonomy (`missing_ocr`, `calculation`, `retrieval`, `halted`).
+- **Interactive Textual TUI**: Live trajectory replay, token breakdowns, and verdict inspection with `cli bench questions -t --trajectory`.
+- See: `cli bench`, [docs/benchmark_framework.md](docs/benchmark_framework.md), [docs/benchmarks_financebench_officeqa.md](docs/benchmarks_financebench_officeqa.md)
 
-For the toolkit foundation see [genai-tk](https://github.com/tclatos/genai-tk).
+### 🕸️ 3. Knowledge Graph Engine & Schemas
+Declarative graph modeling with Pydantic v2 and Ladybug:
+- **Declarative Modeling**: Define plain Pydantic models; `GraphSchema` automatically deduces field paths, relationship endpoints, and primary keys.
+- **Ladybug Backend**: Fast, embedded Kùzu fork with full Cypher compatibility, vector indexes (`CALL QUERY_VECTOR_INDEX`), and zero external database overhead.
+- **Composite Factories**: Merge structured tabular data, JSON files, Neo4j dumps, and LLM extractions into a single graph with deduplicated node labels.
+- **Parquet Caching**: Fingerprint-based caching skips unchanged sources during multi-step ETL workflows.
+- See: `cli kg`, [docs/graph-definition-guide.md](docs/graph-definition-guide.md), [docs/schema-compilation.md](docs/schema-compilation.md)
+
+### 🧩 4. 4-Tier Skills System
+Progressive disclosure of domain knowledge for AI coding agents and runtime models:
+- **`skills/runtime/`**: User capabilities (e.g. `kg-query`, `kg-docgraph-agent`, `kg-document-graph`, `kg-explorer`).
+- **`skills/development/`**: Construction & evaluation recipes (e.g. `benchmark-framework`, `kg-cli`, `kg-schema`, `kg-factories`, `kg-ingest`, `kg-workflows`, `kg-neo4j-import`, `kg-export`).
+- **`skills/governance/`**: Schema health, maintenance, and repository mapping (`kg-repo-map`, `kg-schema-maintenance`).
+- **`skills/vendor/`**: Imported packages (`atos-slidev`).
+- See: `cli skills`, [skills/README.md](skills/README.md), [docs/SKILLS.md](docs/SKILLS.md)
 
 ---
 
 ## Quick Start
 
+### Installation
+
 ```bash
-# Install
+# Clone and install with development dependencies
+git clone https://github.com/tclatos/genai-graph.git && cd genai-graph
 uv sync
 
-# Build a knowledge graph (define your own factory — see below)
-cli kg create my_graph
-
-# Launch Streamlit webapp
-just webapp
-
-# CLI help
+# Verify CLI commands
 uv run cli --help
+```
+
+### Scaffolding a New Benchmark / Graph Project
+
+Use `genai-tk`'s scaffolding engine to generate a standalone project wired to `genai-graph`:
+
+```bash
+uv run cli init --name "My Finance Benchmark" --with-graph --graph-path ../genai-graph
 ```
 
 ---
 
-## Defining a Knowledge Graph
+## CLI Reference
 
-### 1. Define your domain models (plain Pydantic)
+### 1. Document Graph (`cli docgraph`)
+
+```bash
+# Build a Document Graph from raw documents (PDF, DOCX, PPTX, Markdown)
+uv run cli docgraph build ./docs --db ./data/kg/tree.db
+
+# Inspect documents and Table of Contents (TOC)
+uv run cli docgraph list --db ./data/kg/tree.db
+uv run cli docgraph toc <doc-name-or-hash> --db ./data/kg/tree.db
+
+# Full-text search across section headings and content
+uv run cli docgraph search "operating expenses" --db ./data/kg/tree.db
+
+# Run the autonomous Document Graph agent interactively
+uv run cli docgraph agent --chat --db ./data/kg/tree.db
+uv run cli docgraph agent "What were the total revenues in Q3?" --db ./data/kg/tree.db
+```
+
+### 2. Benchmark Framework (`cli bench`)
+
+```bash
+# List configured benchmark profiles
+uv run cli bench list
+
+# Execute full evaluation pipeline
+uv run cli bench run -p mistral_glm
+uv run cli bench run -p mistral_glm -q question_001,question_002  # run specific questions
+uv run cli bench run -p mistral_glm --dry-run                    # preview pipeline steps
+uv run cli bench run -p mistral_glm --no-grade                   # run agent without grading
+
+# Re-grade existing runs with LLM-as-judge
+uv run cli bench grade -p mistral_glm --force
+
+# Metric summary report
+uv run cli bench report -p mistral_glm
+
+# Inspect questions and trajectories in interactive Textual TUI
+uv run cli bench questions -p mistral_glm -t --trajectory
+```
+
+### 3. Knowledge Graph Construction (`cli kg`)
+
+```bash
+# Create / rebuild a knowledge graph from a workflow profile
+uv run cli kg create my_graph
+uv run cli kg create my_graph --dry-run
+uv run cli kg create my_graph --force
+
+# Inspect graph schema and statistics
+uv run cli kg schema
+uv run cli kg info
+uv run cli kg cypher "MATCH (n) RETURN labels(n), count(*)"
+uv run cli kg query "Which companies have the most projects?"
+
+# Launch Streamlit KG Explorer UI (Cypher console, D3 graph visualization)
+just webapp
+```
+
+### 4. Neo4j Import (`cli neo4j`)
+
+```bash
+# Analyze schema and export structure from Neo4j JSONL export
+uv run cli neo4j analyze export.jsonl -o schema.cypher
+
+# Create a small subset for rapid testing
+uv run cli neo4j subset export.jsonl subset.jsonl --max-nodes 50 --max-rels 50
+
+# Import into Ladybug database
+uv run cli neo4j import export.jsonl --db ./data/kg/imported.db --force
+
+# Query imported database
+uv run cli neo4j query "MATCH (n:Person)-[:WORKS_AT]->(c:Company) RETURN n.name, c.name" --db ./data/kg/imported.db
+```
+
+---
+
+## Defining a Knowledge Graph in Python
+
+### 1. Declare Pydantic Domain Models
 
 ```python
 from pydantic import BaseModel, Field
@@ -111,19 +210,22 @@ class Person(BaseModel):
 
 class Project(BaseModel):
     title: str
-    client: Company  # → FOR_CLIENT relation auto-detected
-    team: list[Person] = Field(default_factory=list)  # → HAS_MEMBER
+    client: Company  # Relationship endpoint
+    team: list[Person] = Field(default_factory=list)  # Relationship collection
 ```
 
-### 2. Declare the schema
+### 2. Compile Schema and Ingest
 
 ```python
+from genai_graph.kg.ingest import create_graph, restart_database
 from genai_graph.kg.schema import GraphNode, GraphRelation, GraphSchema
 
+# Define nodes with identity keys
 company_node = GraphNode(node_class=Company, name_from="name", key_from="name")
 person_node = GraphNode(node_class=Person, name_from="name", key_from="name")
 project_node = GraphNode(node_class=Project, name_from="title", key_from="title")
 
+# Define schema and relationships
 schema = GraphSchema(
     root_model_class=Project,
     nodes=[project_node, company_node, person_node],
@@ -132,190 +234,139 @@ schema = GraphSchema(
         GraphRelation(from_node=project_node, to_node=person_node, name="HAS_MEMBER"),
     ],
 )
-```
 
-`GraphSchema` auto-deduces field paths and excluded fields at construction time.
-Any label collisions or orphaned nodes produce `UserWarning` for early feedback.
-
-### 3. Ingest and query
-
-```python
-from genai_graph.kg.ingest import create_graph, restart_database
-
-backend = restart_database()  # in-memory; or create_backend_from_config(...)
-
-project = Project(
-    title="Cloud Migration",
-    client=Company(name="Acme Corp", sector="Retail"),
-    team=[Person(name="Alice", role="Lead")],
+# Ingest data into Ladybug
+backend = restart_database()
+project_data = Project(
+    title="Cloud Transformation",
+    client=Company(name="Global Logistics Corp", sector="Supply Chain"),
+    team=[Person(name="Alice", role="Tech Lead"), Person(name="Bob", role="Architect")],
 )
-create_graph(backend, project, schema)
+create_graph(backend, project_data, schema)
 
+# Query via Cypher
 df = backend.execute_get_as_df("MATCH (p:Project)-[:FOR_CLIENT]->(c:Company) RETURN p.title, c.name")
 print(df)
 ```
 
-### 4. Visualise the schema
+---
+
+## Authoring a Benchmark Adapter
+
+Implement `BaseBenchmarkAdapter` from `genai_graph.bench.adapters.base`:
 
 ```python
-from genai_graph.kg.schema import ResolvedSchema
+from pathlib import Path
+from genai_graph.bench.adapters.base import (
+    BaseBenchmarkAdapter,
+    download_hf_file,
+    load_hf_dataset_to_pandas,
+)
+from genai_graph.bench.models import BenchQuestion
 
-resolved = ResolvedSchema.from_graph_schema(schema)
-print(resolved.to_markdown())  # table summary
-resolved.to_html("schema.html")  # interactive D3 diagram
+
+class MyBenchmarkAdapter(BaseBenchmarkAdapter):
+    """Custom benchmark adapter for evaluating contract understanding."""
+
+    DATASET_REPO = "my_org/contract_qa"
+
+    def load_dataset(self, split: str | None = "test", cache_dir: Path | None = None) -> list[BenchQuestion]:
+        df = load_hf_dataset_to_pandas(self.DATASET_REPO, split=split or "test", cache_dir=cache_dir)
+        return [
+            BenchQuestion(
+                id=str(row["id"]),
+                doc_name=str(row["contract_name"]),
+                doc_names=[str(row["contract_name"])],
+                question=str(row["question"]),
+                gold_answer=str(row["gold_answer"]),
+                evidence=[str(row.get("clause_text", ""))],
+                metadata={"category": row.get("category", "")},
+            )
+            for _, row in df.iterrows()
+        ]
+
+    def fetch_document(self, doc_name: str, output_dir: Path) -> Path:
+        dest_path = output_dir / f"{doc_name}.pdf"
+        if dest_path.exists():
+            return dest_path
+        return download_hf_file(
+            repo_id=self.DATASET_REPO,
+            filename=f"pdfs/{doc_name}.pdf",
+            repo_type="dataset",
+            dest_path=dest_path,
+        )
+
+    def get_judge_rubric(self) -> str:
+        return (
+            "You are an expert legal evaluator assessing answers against ground truth.\n"
+            "Score correctness, semantic accuracy, and groundedness in contract clauses."
+        )
 ```
 
-### 5. Create a factory for persistent ingestion
-
-```python
-from genai_graph.kg.factories import JsonFileBackedFactory
-from pydantic import BaseModel
-
-
-class ProjectGraph(JsonFileBackedFactory, BaseModel):
-    data_root: str = "data/projects"  # directory of {ModelName}/*.json files
-
-    def build_schema(self) -> GraphSchema:
-        return GraphSchema(root_model_class=Project, nodes=[...], relations=[...])
-```
-
-### 6. Wire up a workflow profile
-
+Configure `config/bench.yaml`:
 ```yaml
-# config/workflows/my_graph.yaml
-workflows:
-  my_project_kg:
-    run: genai_graph.orchestration.workflow_steps.kg_build_step
-    defaults:
-      kg_name: my_project_kg
-    params:
-      graph: {required: true}
-```
+default_profile: standard
+adapter: my_package.adapter.MyBenchmarkAdapter
 
-```bash
-cli workflow run my_project_kg --set graph='{factory: myapp.schema.ProjectGraph, data_root: data/projects}' --dry-run   # preview
-cli workflow run my_project_kg --set graph='{factory: myapp.schema.ProjectGraph, data_root: data/projects}'             # build
-```
-
----
-
-## Document Pipeline
-
-End-to-end: raw documents → queryable Document Graph (+ extracted entities)
-
-```bash
-# One call: markdownize sources (PPT/PDF/... or pre-existing Markdown), then build
-# the Folder → Document → MarkdownSection graph
-cli docgraph build ./docs --db ./data/kg/tree.db
-
-# Browse it
-cli docgraph list --db ./data/kg/tree.db
-cli docgraph toc <filename-or-hash> --db ./data/kg/tree.db
-cli docgraph search "keyword" --db ./data/kg/tree.db
-```
-
-To also extract structured entities (Opportunity, Risk, Person, …) from the same
-documents — via a project-defined workflow chaining a `MarkdownBamlFactory` subclass
-and the document graph into one database:
-
-```bash
-cli docgraph run --workflow rainbow_extract -s ./some_file.pptx
-# or, for a predefined set of documents:
-cli kg create one_rainbow
-
-# View in browser
-cli kg view
-```
-
-See [Document Graph](docs/document-graph.md) for the full schema, factories, and CLI reference.
-
----
-
-## Knowledge Graph CLI
-
-```bash
-# Create / rebuild
-cli kg create                          # default workflow profile
-cli kg create my_graph                 # specific profile
-cli kg create my_graph --force         # ignore fingerprint cache
-cli kg create my_graph --dry-run       # preview steps
-
-# Inspect
-cli kg schema                          # node/relationship schema
-cli kg info                            # DB stats
-cli kg cypher "MATCH (n) RETURN labels(n), count(*)"
-cli kg query "Which companies have the most projects?"
-cli kg view                            # open HTML visualization
+bench_profiles:
+  standard:
+    llms:
+      agent: default
+      judge: default
+    build:
+      skip_ocr: false
+      structure_strategy: auto
+      summaries: true
+      workers: 4
+    files:
+      pathspecs: ["*"]
+    agent:
+      profile: default
+      concurrency: 10
+    judge:
+      concurrency: 10
 ```
 
 ---
 
-## Neo4j Import
+## Documentation Index
 
-```bash
-# Analyze a Neo4j JSONL export
-cli neo4j analyze export.jsonl -o schema.cypher
-
-# Create a small test subset
-cli neo4j subset export.jsonl subset.jsonl --max-nodes 20 --max-rels 20
-
-# Import into Ladybug
-cli neo4j import export.jsonl --db path/to/ladybug_db -f
-
-# Query
-cli neo4j query "MATCH (n) RETURN labels(n), count(*)" --db path/to/ladybug_db
-```
-
----
-
-## Documentation
-
-| Doc | Topic |
-|-----|-------|
-| [docs/graph-definition-guide.md](docs/graph-definition-guide.md) | **Start here** — 5-minute guide: models → schema → ingest → query |
-| [docs/document-graph.md](docs/document-graph.md) | The Document Graph: `Folder`/`Document`/`MarkdownSection` schema, factories, inline BAML extraction, `cli docgraph` |
-| [docs/graph-authoring-patterns.md](docs/graph-authoring-patterns.md) | Pattern catalog: JSON, tables, Neo4j, documents, inline BAML extraction, similarity, canonical reuse |
-| [docs/schema-compilation.md](docs/schema-compilation.md) | Field-path deduction, `table_name`, exclusion mechanics, compiler functions |
-| [docs/graph_construction.md](docs/graph_construction.md) | Factories, canonical types, schema merging, CLI reference |
-| [docs/workflows.md](docs/workflows.md) | Workflow DSL for KG pipelines; `kg_build`/`docgraph_build`; `cli kg create`/`cli docgraph run` |
-| [docs/baml_extraction_guide.md](docs/baml_extraction_guide.md) | BAML schema → JSON/inline → graph factory patterns |
-| [docs/primary_key_implementation.md](docs/primary_key_implementation.md) | `key_from` options: field, AUTO_ID, lambda, None-skip |
-| [docs/prefect_dag_pipeline.md](docs/prefect_dag_pipeline.md) | Prefect DAG internals, concurrency model |
-| [docs/kg_explorer.md](docs/kg_explorer.md) | Streamlit KG Explorer (Cypher UI, Text-to-Cypher) |
-| [docs/cache_management.md](docs/cache_management.md) | Parquet cache invalidation |
-| [Agents.md](Agents.md) | Agent coding guidelines and architecture invariants |
-| [Agents_Skills.md](Agents_Skills.md) | Step-by-step procedures for common codebase tasks |
-| [skills/genai-graph/README.md](skills/genai-graph/README.md) | Agent `kg-*` skill bundle for working on genai-graph — skill map and runtime `skill_directories` wiring |
-
-For BAML fundamentals see [genai-tk BAML docs](https://github.com/tclatos/genai-tk/blob/main/docs/baml.md).
+| Documentation | Description |
+|---|---|
+| [docs/graph-definition-guide.md](docs/graph-definition-guide.md) | **5-Minute Quick Start**: Models → `GraphNode` → Schema → Ingestion → Query |
+| [docs/document-graph.md](docs/document-graph.md) | Comprehensive Document Graph guide: Markdown Knowledge Tree, OCR, and DocGraph agent |
+| [docs/benchmark_framework.md](docs/benchmark_framework.md) | Complete multi-dataset benchmark framework specification (`genai_graph.bench`) |
+| [docs/benchmarks_financebench_officeqa.md](docs/benchmarks_financebench_officeqa.md) | Empirical evaluation and adapter implementations for FinanceBench and OfficeQA |
+| [docs/graph-authoring-patterns.md](docs/graph-authoring-patterns.md) | Pattern catalog: JSON, tables, Neo4j, documents, BAML inline extraction, similarity |
+| [docs/schema-compilation.md](docs/schema-compilation.md) | Schema compilation internals: field-path deduction, primary key rules, exclusions |
+| [docs/graph_construction.md](docs/graph_construction.md) | Factory architecture, canonical types, schema merging, and CLI reference |
+| [docs/workflows.md](docs/workflows.md) | Workflow DSL for KG pipelines; Prefect task orchestration |
+| [docs/baml_extraction_guide.md](docs/baml_extraction_guide.md) | Type-safe structured LLM extraction with BAML integration |
+| [docs/kg_explorer.md](docs/kg_explorer.md) | Streamlit KG Explorer, Cypher console, and D3 interactive visualization |
+| [Agents.md](Agents.md) | Development guidelines and architectural invariants for coding agents |
+| [Agents_Skills.md](Agents_Skills.md) | Step-by-step procedure runbooks for codebase maintenance |
+| [skills/README.md](skills/README.md) | 4-Tier skills catalog and agent loading instructions |
 
 ---
 
-## Notebooks
+## Interactive Notebooks
 
-Interactive examples in `notebooks/`:
-
-| Notebook | What it shows |
-|----------|---------------|
-| [01_define_graph_from_scratch.ipynb](notebooks/01_define_graph_from_scratch.ipynb) | Full pipeline: models → schema → ingest → Cypher → HTML viz |
-| [cypher_examples.ipynb](notebooks/cypher_examples.ipynb) | Cypher patterns: basic, traversal, aggregation, filtering |
-| [document_graph_demo.ipynb](notebooks/document_graph_demo.ipynb) | Document Graph ingestion (`Folder`/`Document`/`MarkdownSection`) from a markdown directory |
-| [cypher_query_development.ipynb](notebooks/cypher_query_development.ipynb) | Interactive Cypher development helper |
-
-```bash
-just test-notebooks   # run all notebooks as tests
-```
+| Notebook | Description |
+|---|---|
+| [notebooks/01_define_graph_from_scratch.ipynb](notebooks/01_define_graph_from_scratch.ipynb) | End-to-end tutorial: defining Pydantic models, schema compilation, ingestion, Cypher querying, and D3 visualization. |
+| [notebooks/cypher_examples.ipynb](notebooks/cypher_examples.ipynb) | Cypher patterns: basic, traversal, aggregation, filtering |
+| [notebooks/document_graph_demo.ipynb](notebooks/document_graph_demo.ipynb) | Document Graph ingestion (`Folder`/`Document`/`MarkdownSection`) from a markdown directory |
+| [notebooks/cypher_query_development.ipynb](notebooks/cypher_query_development.ipynb) | Interactive Cypher development helper |
 
 ---
 
-## Development
+## Development & Testing
 
 ```bash
-just install-dev   # install with dev dependencies
+just install-dev   # install with development dependencies
 just fmt           # format with ruff
 just lint          # lint with ruff
-just test          # run all tests
-just test-notebooks  # run notebooks as tests
-just webapp        # launch Streamlit app
+just test          # run all tests (unit + integration)
 just check         # fmt + lint + test
+```
 ```

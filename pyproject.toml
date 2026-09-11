@@ -125,7 +125,6 @@ exclude = ["genai_graph/skills"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "skills" = "genai_graph/skills"
-package-dir = { "genai_bp" = "genai_graph" }
 
 [tool.ruff]
 builtins = ["ic", "debug"]

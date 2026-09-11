@@ -1,3 +1,7 @@
+# better search
+
+In GraphDoc tool search_ ... 
+
 # LightRAG
 We have a well working docgraph construction process, efficient (SOA on benchmarks).
 On the other side, we have graph fabrics to extract entitoes and relationship from docs through a BAML schema. That's  fine.

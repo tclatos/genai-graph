@@ -7,9 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
     # GenAI Toolkit - core AI components
     # For local development with unpushed genai-tk changes, use local path:
-    # "genai_tk @ file:///home/tcl/prj/genai-tk",
+    # "genai-tk @ file:///home/tcl/prj/genai-tk",
     # For production or when using GitHub version:
-    "genai_tk",
+    "genai-tk",
     # Application framework dependencies
     "pydantic>=2.7.0,<3",         # Data validation framework
     "devtools>=0.12.2",           # Development utilities
@@ -110,14 +110,14 @@ constraint-dependencies = [
 # Keep in sync with any downstream project (e.g. rfq_pricing) that pulls in
 # genai-graph as a path dependency — uv requires a single resolved git ref
 # for genai-tk across the whole dependency graph.
-genai_tk = { git = "https://github.com/tclatos/genai-tk", branch = "main" }
+genai-tk = { git = "https://github.com/tclatos/genai-tk", branch = "main" }
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["genai_bp"]
+packages = ["genai_graph"]
 package-dir = { "genai_bp" = "genai_graph" }
 
 [tool.ruff]

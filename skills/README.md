@@ -1,8 +1,11 @@
 # GenAI Graph Skill Map
 
-This folder contains **dev skills for agents working on the genai-graph library** (this
-repo) or on downstream projects that depend on it. Each skill is a `SKILL.md` that gives an
-agent procedural knowledge on demand — it is read when a task matches, not on every call.
+This folder organizes skills for agents working on the **genai-graph** library or on downstream projects that depend on it into a **4-tier architecture**:
+
+- `skills/runtime/` — **Runtime skills**: solve user problems (Cypher queries, Document Graph agentic navigation, KG Explorer).
+- `skills/development/` — **Development skills**: construct and extend knowledge graphs & benchmarks (schema definition, factories, ingestion, workflows, neo4j import, benchmark framework).
+- `skills/governance/` — **Governance skills**: maintain consistency, schema health, and codebase orientation (`kg-repo-map`, `kg-schema-maintenance`).
+- `skills/vendor/` — **Vendor skills**: imported external skills (`atos-slidev`).
 
 ## How to use these skills
 
@@ -19,35 +22,43 @@ agent procedural knowledge on demand — it is read when a task matches, not on 
    bundles are designed to be loaded together (see `genai-tk/skills/README.md` for the
    genai-tk skill map).
 
-## Skill map
+## 1. Runtime Skills (`skills/runtime/`)
+
+| Skill | Closest docs | Primary code/config | Complements (genai-tk) |
+|---|---|---|---|
+| `kg-docgraph-agent` | `docs/document-graph.md` | `genai_graph/agent/docgraph_agent.py` | `agent-profiles`, `browser-and-sandbox` |
+| `kg-document-graph` | `docs/document-graph.md` | `genai_graph/kg/document_graph/` | `workflow-engine` |
+| `kg-explorer` | `docs/kg_explorer.md` | `genai_graph/webapp/`, `genai_graph/main/streamlit.py` | `webapp`, `streamlit-workflow-runner` |
+| `kg-query` | `docs/kg_explorer.md`, `docs/document-graph.md` | `genai_graph/kg/query/` | `agent-profiles`, `add-tool` |
+
+## 2. Development Skills (`skills/development/`)
+
+| Skill | Closest docs | Primary code/config | Complements (genai-tk) |
+|---|---|---|---|
+| `benchmark-framework` | `docs/benchmark_framework.md` | `genai_graph/bench/`, `genai_graph/core/commands_bench.py` | `evaluation-testing` |
+| `kg-schema` | `docs/graph-definition-guide.md`, `docs/schema-compilation.md` | `genai_graph/kg/schema/` | `core-models` |
+| `kg-factories` | `docs/graph-authoring-patterns.md`, `docs/graph_construction.md` | `genai_graph/kg/factories/` | `baml-structured-extraction` |
+| `kg-ingest` | `docs/graph_construction.md`, `docs/cache_management.md`, `docs/workflows.md` | `genai_graph/kg/ingest/`, `genai_graph/kg/backend.py` | `core-models` |
+| `kg-neo4j-import` | `docs/graph-authoring-patterns.md` (Pattern 3) | `genai_graph/neo4j_import/` | — |
+| `kg-workflows` | `docs/workflows.md`, `docs/prefect_dag_pipeline.md` | `genai_graph/orchestration/` | `workflow-engine` |
+| `kg-export` | `docs/graph-definition-guide.md`, `docs/kg_create_enhancements.md` | `genai_graph/kg/export/` | — |
+| `kg-cli` | `docs/workflows.md` (CLI Reference), `docs/document-graph.md` | `genai_graph/core/commands_*.py` | `cli-and-scaffolding` |
+
+## 3. Governance Skills (`skills/governance/`)
 
 | Skill | Closest docs | Primary code/config | Complements (genai-tk) |
 |---|---|---|---|
 | `kg-repo-map` | `docs/graph-definition-guide.md` | `genai_graph/kg/`, `genai_graph/orchestration/` | `repo-map` |
-| `kg-schema` | `docs/graph-definition-guide.md`, `docs/schema-compilation.md` | `genai_graph/kg/schema/` | `core-models` |
-| `kg-factories` | `docs/graph-authoring-patterns.md`, `docs/graph_construction.md` | `genai_graph/kg/factories/` | `baml-structured-extraction` |
-| `kg-ingest` | `docs/graph_construction.md`, `docs/cache_management.md`, `docs/workflows.md` | `genai_graph/kg/ingest/`, `genai_graph/kg/backend.py`, `genai_graph/kg/embeddings_handler.py` | `core-models` |
-| `kg-document-graph` | `docs/document-graph.md` | `genai_graph/kg/document_graph/`, `genai_graph/kg/factories/document_graph_factory.py` | `workflow-engine` |
-| `kg-query` | `docs/kg_explorer.md`, `docs/document-graph.md` | `genai_graph/kg/query/` | `agent-profiles`, `add-tool` |
-| `kg-neo4j-import` | `docs/graph-authoring-patterns.md` (Pattern 3) | `genai_graph/neo4j_import/` | — |
-| `kg-workflows` | `docs/workflows.md`, `docs/prefect_dag_pipeline.md` | `genai_graph/orchestration/` | `workflow-engine` |
-| `kg-export` | `docs/graph-definition-guide.md`, `docs/kg_create_enhancements.md` | `genai_graph/kg/export/` | — |
-| `kg-cli` | `docs/workflows.md` (CLI Reference), `docs/document-graph.md` | `genai_graph/core/commands_*.py`, `genai_graph/neo4j_import/commands.py` | `cli-and-scaffolding` |
-| `kg-explorer` | `docs/kg_explorer.md` | `genai_graph/webapp/`, `genai_graph/main/streamlit.py` | `webapp`, `streamlit-workflow-runner` |
 | `kg-schema-maintenance` | `Agents_Skills.md`, `docs/schema-compilation.md` | `genai_graph/kg/schema/`, `genai_graph/kg/factories/` | — |
 
-All skill `name:` fields are `kg-`-prefixed so they never collide with `genai-tk/*` skills
+## 4. Vendor Skills (`skills/vendor/`)
+
+| Skill | Description | Primary Origin |
+|---|---|---|
+| `atos-slidev` | Executive Slidev presentation decks | External Atos branding package |
+
+All skill `name:` fields are `kg-`-prefixed (except shared utilities) so they never collide with `genai-tk/*` skills
 when both directories are loaded together.
-
-## Loading both bundles at runtime
-
-These skills guide an agent (or a human/Copilot) **while building** genai-graph or a
-downstream project. To make them available to a **running** agent at runtime, list the
-directory in a profile's `skill_directories` — and note the harness constraint from
-`genai-tk/agent-profiles` and `genai-tk/add-skill`: only `harness: langchain, type: deep`
-profiles and any `harness: deerflow` profile actually inject skill content into the model's
-context. A `type: react` profile parses `skill_directories` without error but never loads
-the skill.
 
 ```yaml
 # config/agents/langchain/kg_dev.yaml — unified `agents:` dict

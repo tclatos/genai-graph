@@ -93,14 +93,14 @@ Progressive disclosure of domain knowledge for AI coding agents and runtime mode
 
 ### Recommended: Scaffold from Scratch
 
-The preferred way to use `genai-graph` is to start from a clean project directory using `uv` and `genai-tk` scaffolding (see [genai-tk](https://github.com/tclatos/genai-tk)):
+The preferred way to use `genai-graph` is to start from a clean project directory using `uv` and `genai-tk` scaffolding:
 
 ```bash
 # 1. Create project directory and initialize with uv
 mkdir my-graph-app && cd my-graph-app
 uv init
 
-# 2. Add genai-tk and genai-graph dependencies
+# 2. Add dependencies with git sources
 uv add "genai-tk @ git+https://github.com/tclatos/genai-tk@main"
 uv add "genai_graph @ git+https://github.com/tclatos/genai-graph@main"
 
@@ -116,6 +116,8 @@ just run                           # launch interactive agent chat
 uv run cli bench list              # list benchmark profiles
 uv run cli docgraph --help         # inspect Document Graph commands
 ```
+
+*(Note: `pyproject.toml` can also specify `[tool.uv.sources]` pointing to the git branches or local editable checkouts).*
 
 ### Library Development (Clone & Contribute)
 

@@ -138,18 +138,13 @@ def ensure_section_fts_index(backend: KgBackend, index_name: str = _DEFAULT_FTS_
     return index_name
 
 
-def build_sections_chunks(
-    sections: list[Any], *, handler: EmbeddingsHandler, chunk_size_tokens: int
-) -> list[tuple[str, dict[str, Any]]]:
-    """Chunk multiple sections in batch, computing contextualized embeddings in a single batch call.
-
-    Args:
-        sections: List of MarkdownSection instances to chunk.
-        handler: EmbeddingsHandler instance for computing embeddings.
-        chunk_size_tokens: Target chunk size in tokens.
+def prepare_chunk_inputs(
+    sections: list[Any], *, chunk_size_tokens: int
+) -> list[tuple[str, str, str, int, str, int, str]]:
+    """Chunk *sections* and build the embedding inputs for each chunk (pure CPU, no I/O).
 
     Returns:
-        List of ``(section_id, chunk_dict)`` pairs.
+        List of ``(section_id, markdown_hash, chunk_id, chunk_index, chunk_text, token_count, embed_input)`` tuples.
     """
     items: list[tuple[str, str, str, int, str, int, str]] = []
     for section in sections:
@@ -162,16 +157,13 @@ def build_sections_chunks(
             items.append(
                 (section.section_id, section.markdown_hash, chunk_id, idx, chunk_text, token_count, embed_input)
             )
+    return items
 
-    if not items:
-        return []
 
-    embed_inputs = [item[6] for item in items]
-    try:
-        embeddings = handler.compute_embeddings_batch(embed_inputs)
-    except Exception as exc:  # noqa: BLE001
-        raise RetrievalError(f"Batch embedding failed for {len(embed_inputs)} chunks: {exc}") from exc
-
+def attach_chunk_embeddings(
+    items: list[tuple[str, str, str, int, str, int, str]], embeddings: list[list[float]]
+) -> list[tuple[str, dict[str, Any]]]:
+    """Pair prepared chunk inputs with their computed embeddings as chunk dicts."""
     results: list[tuple[str, dict[str, Any]]] = []
     for (section_id, md_hash, chunk_id, idx, chunk_text, token_count, _), embedding in zip(
         items, embeddings, strict=True
@@ -192,6 +184,32 @@ def build_sections_chunks(
             )
         )
     return results
+
+
+def build_sections_chunks(
+    sections: list[Any], *, handler: EmbeddingsHandler, chunk_size_tokens: int
+) -> list[tuple[str, dict[str, Any]]]:
+    """Chunk multiple sections in batch, computing contextualized embeddings in a single batch call.
+
+    Args:
+        sections: List of MarkdownSection instances to chunk.
+        handler: EmbeddingsHandler instance for computing embeddings.
+        chunk_size_tokens: Target chunk size in tokens.
+
+    Returns:
+        List of ``(section_id, chunk_dict)`` pairs.
+    """
+    items = prepare_chunk_inputs(sections, chunk_size_tokens=chunk_size_tokens)
+    if not items:
+        return []
+
+    embed_inputs = [item[6] for item in items]
+    try:
+        embeddings = handler.compute_embeddings_batch(embed_inputs)
+    except Exception as exc:  # noqa: BLE001
+        raise RetrievalError(f"Batch embedding failed for {len(embed_inputs)} chunks: {exc}") from exc
+
+    return attach_chunk_embeddings(items, embeddings)
 
 
 def build_section_chunks(section: Any, *, handler: EmbeddingsHandler, chunk_size_tokens: int) -> list[dict[str, Any]]:

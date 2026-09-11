@@ -82,8 +82,42 @@ def markdownize_doc_task(
     return str(dest)
 
 
-@task(task_run_name="build-document-graph")
-def build_graph_task(
+@task(retries=2, retry_delay_seconds=5, task_run_name="outline-{doc_name}")
+def extract_outline_task(
+    doc_name: str,
+    *,
+    markdown_dir: str,
+    kg_db: str,
+    build_llm: str | None,
+    structure_strategy: str = "auto",
+    generate_summaries: bool = True,
+    workers: int = 4,
+    summary_min_tokens: int = 800,
+    context_safety_ratio: float = 0.9,
+) -> dict[str, Any]:
+    """Extract one document's outline (LLM) without touching the database.
+
+    Per-document Prefect task: failures are isolated to this document, retries
+    are cheap (content-addressed cache), and the merge task degrades the doc to
+    algorithmic parsing if extraction ultimately fails.
+    """
+    from genai_graph.bench.build_graph import warm_outline_cache
+
+    return warm_outline_cache(
+        [doc_name],
+        markdown_dir=Path(markdown_dir),
+        kg_db=Path(kg_db),
+        llm=build_llm,
+        structure_strategy=structure_strategy,
+        generate_summaries=generate_summaries,
+        workers=workers,
+        summary_min_tokens=summary_min_tokens,
+        context_safety_ratio=context_safety_ratio,
+    )
+
+
+@task(task_run_name="merge-document-graph")
+def merge_graph_task(
     docs: list[str],
     *,
     markdown_dir: str,
@@ -99,11 +133,16 @@ def build_graph_task(
     fts: bool = True,
     chunk_size_tokens: int = 1500,
 ) -> dict[str, Any]:
-    """Ingest Markdown files into Ladybug Document Graph database."""
+    """Ingest Markdown files into the Ladybug Document Graph (single-writer).
+
+    Reads outlines from the cache warmed by `extract_outline_task` (no LLM
+    calls), embeds chunks concurrently in-process, and merges. One task because
+    Ladybug allows a single read-write Database per file per process.
+    """
     from genai_graph.bench.build_graph import build_document_graph
 
     return build_document_graph(
-        doc_name=docs[0] if docs else None,
+        doc_names=docs,
         force=force,
         llm=build_llm,
         structure_strategy=structure_strategy,
@@ -116,6 +155,7 @@ def build_graph_task(
         embeddings_id=embeddings_id,
         fts=fts,
         chunk_size_tokens=chunk_size_tokens,
+        outline_pre_pass=False,
     )
 
 
@@ -221,10 +261,37 @@ def markdownize_flow(cfg: BenchConfig) -> list[str]:
 
 @flow(name="bench-build-graph")
 def build_graph_flow(cfg: BenchConfig) -> dict[str, Any]:
-    """Build the Ladybug Document Graph from staged Markdown files."""
+    """Build the Ladybug Document Graph from staged Markdown files.
+
+    Fan-out: one per-document outline-extraction task (LLM, DB-free, retried and
+    isolated per document). Fan-in: one single-writer merge task that reads the
+    warmed outline cache and embeds/merges. A document whose outline task failed
+    after retries still merges, degraded to algorithmic parsing.
+    """
     llm_arg = cfg.build_llm if cfg.build_llm_enabled else None
     logger.info("Building Document Graph (db={}, llm={})...", cfg.kg_db, llm_arg or "algorithmic")
-    future = build_graph_task.submit(
+
+    outline_futures = [
+        extract_outline_task.submit(
+            doc,
+            markdown_dir=cfg.markdown_dir,
+            kg_db=cfg.kg_db,
+            build_llm=llm_arg,
+            structure_strategy=cfg.structure_strategy,
+            generate_summaries=cfg.generate_summaries,
+            workers=cfg.workers,
+            summary_min_tokens=cfg.summary_min_tokens,
+            context_safety_ratio=cfg.context_safety_ratio,
+        )
+        for doc in cfg.docs
+    ]
+    for doc, fut in zip(cfg.docs, outline_futures, strict=True):
+        try:
+            fut.result()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Outline extraction failed for {}: {}; merge will degrade it to algorithmic parsing", doc, exc)
+
+    future = merge_graph_task.submit(
         cfg.docs,
         markdown_dir=cfg.markdown_dir,
         kg_db=cfg.kg_db,

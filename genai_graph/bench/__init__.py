@@ -29,7 +29,7 @@ from genai_graph.bench.config import (
 )
 from genai_graph.bench.flows import (
     build_graph_flow,
-    build_graph_task,
+    extract_outline_task,
     fetch_doc_task,
     fetch_flow,
     full_bench_flow,
@@ -37,6 +37,7 @@ from genai_graph.bench.flows import (
     grade_run_task,
     markdownize_doc_task,
     markdownize_flow,
+    merge_graph_task,
     run_question_task,
     run_questions_flow,
 )
@@ -81,8 +82,8 @@ __all__ = [
     "append_run_record",
     "build_document_graph",
     "build_graph_flow",
-    "build_graph_task",
     "compute_bench_summary",
+    "extract_outline_task",
     "configure_bench_monitoring",
     "copy_markdown_to_project",
     "display_bench_summary",
@@ -108,6 +109,7 @@ __all__ = [
     "markdownize_doc_task",
     "markdownize_flow",
     "markdownize_target",
+    "merge_graph_task",
     "match_docs_by_pathspecs",
     "resolve_benchmark_adapter",
     "run_bench_tui",

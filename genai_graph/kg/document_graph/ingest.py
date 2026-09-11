@@ -16,19 +16,25 @@ creation is skipped entirely, avoiding costly recomputation.
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from genai_graph.kg.backend import KgBackend, KuzuBackend
 from genai_graph.kg.document_graph.retrieval import (
     RetrievalConfig,
+    RetrievalError,
+    attach_chunk_embeddings,
     build_sections_chunks,
     ensure_chunk_embedding_column,
     ensure_section_fts_index,
+    prepare_chunk_inputs,
     resolve_embedding_dimension,
 )
 from genai_graph.kg.embeddings_handler import EmbeddingsHandler
-from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
+from genai_graph.kg.factories.document_graph_factory import DocumentGraphBundle, DocumentGraphFactory
 from genai_graph.kg.ingest.extract import RelationshipRecord, create_schema
 from genai_graph.kg.ingest.merge import (
     NodeDataCollection,
@@ -39,6 +45,7 @@ from genai_graph.kg.ingest.merge import (
 from genai_graph.kg.nodes.document import (
     CONTAINS_DOC,
     HAS_SUBFOLDER,
+    Document,
     DocumentNode,
     FolderNode,
 )
@@ -115,6 +122,7 @@ def ingest_document_graph(
     *,
     force: bool = False,
     retrieval_config: RetrievalConfig | None = None,
+    embed_workers: int = 1,
 ) -> DocumentGraphIngestResult:
     """Ingest a Markdown corpus (via *factory*) into *backend* as a hash-keyed tree.
 
@@ -133,6 +141,10 @@ def ingest_document_graph(
         factory: `DocumentGraphFactory` describing the corpus to ingest.
         force: Rebuild sections for documents already in the graph.
         retrieval_config: Optional embeddings + FTS settings for hybrid retrieval.
+        embed_workers: Parallel workers used to chunk + embed documents before
+            the (single-writer) merge. Values > 1 overlap per-document embedding
+            batches in a thread pool; the DB is only touched afterwards. 1 keeps
+            embedding serial.
 
     Returns:
         `DocumentGraphIngestResult` with counts and any warnings.
@@ -171,7 +183,9 @@ def ingest_document_graph(
     keys = factory.get_keys()
     total_keys = len(keys)
 
-    for doc_idx, key in enumerate(keys, 1):
+    # --- Phase 1: parse bundles (cheap once the outline cache is warm) -----
+    parsed: list[DocumentGraphBundle] = []
+    for key in keys:
         try:
             bundle = factory.get_struct_data_by_key(key)
         except Exception as exc:  # noqa: BLE001
@@ -184,11 +198,15 @@ def ingest_document_graph(
         if bundle is None:
             result.documents_failed += 1
             continue
+        parsed.append(bundle)
 
+    # --- Phase 2: structural nodes + skip/rebuild decisions (DB reads) -----
+    pending: list[tuple[DocumentGraphBundle, Document, bool]] = []
+    for bundle in parsed:
         document = bundle.document
         md_hash = document.markdown_hash or ""
 
-        # --- structural nodes (always MERGE; cheap and idempotent) ---------
+        # Structural nodes (always MERGE; cheap and idempotent)
         for folder in bundle.folders:
             if folder.folder_id not in seen_folders:
                 seen_folders.add(folder.folder_id)
@@ -215,8 +233,8 @@ def ingest_document_graph(
             )
         )
 
-        # --- section reuse: skip if already ingested -----------------------
-        # In-batch dedup first: the same markdown already queued for merge this run.
+        # Section reuse: skip if already ingested. In-batch dedup first: the
+        # same markdown already queued for merge this run.
         if md_hash in seen_markdown:
             result.documents_skipped += 1
             result.documents_processed += 1
@@ -238,6 +256,52 @@ def ingest_document_graph(
             result.documents_processed += 1
             continue
         seen_markdown.add(md_hash)
+        pending.append((bundle, document, rebuild))
+
+    # --- Phase 3: chunk + embed documents in parallel (no DB access) -------
+    # NOTE: parallelism runs on a single asyncio loop, not threads. The cached
+    # embeddings byte-store binds asyncio primitives to the loop that first uses
+    # it, so calling the sync cache path from several threads fails with
+    # "<Lock object> is bound to a different event loop". CacheBackedEmbeddings'
+    # async path (aembed_documents) plus a concurrency semaphore gives the same
+    # overlap safely.
+    chunk_lists: list[list[tuple[str, dict[str, Any]]]] = []
+    if chunks_enabled and retrieval_config is not None and pending:
+        assert embeddings_handler is not None  # guaranteed by chunks_enabled
+
+        if embed_workers <= 1:
+            chunk_lists = [
+                build_sections_chunks(
+                    b.sections,
+                    handler=embeddings_handler,  # type: ignore[arg-type]
+                    chunk_size_tokens=retrieval_config.chunk_size_tokens,
+                )
+                for b, _, _ in pending
+            ]
+        else:
+            embedder = embeddings_handler.factory
+
+            async def _embed_all() -> list[list[tuple[str, dict[str, Any]]]]:
+                semaphore = asyncio.Semaphore(embed_workers)
+
+                async def _one(bundle: DocumentGraphBundle) -> list[tuple[str, dict[str, Any]]]:
+                    items = prepare_chunk_inputs(bundle.sections, chunk_size_tokens=retrieval_config.chunk_size_tokens)
+                    if not items:
+                        return []
+                    async with semaphore:
+                        embeddings = await embedder.aembed_documents([item[6] for item in items])
+                    return attach_chunk_embeddings(items, embeddings)
+
+                return list(await asyncio.gather(*(_one(b) for b, _, _ in pending)))
+
+            try:
+                chunk_lists = asyncio.run(_embed_all())
+            except Exception as exc:  # noqa: BLE001
+                raise RetrievalError(f"Parallel embedding failed for {len(pending)} documents: {exc}") from exc
+
+    # --- Phase 4: accumulate section/chunk rows serially, then merge -------
+    for doc_idx, (bundle, document, rebuild) in enumerate(pending, 1):
+        md_hash = document.markdown_hash or ""
 
         if rebuild:
             _delete_document_sections(backend, md_hash)
@@ -270,11 +334,7 @@ def ingest_document_graph(
 
         doc_chunks_count = 0
         if chunks_enabled and retrieval_config is not None:
-            section_chunks = build_sections_chunks(
-                bundle.sections,
-                handler=embeddings_handler,  # type: ignore[arg-type]
-                chunk_size_tokens=retrieval_config.chunk_size_tokens,
-            )
+            section_chunks = chunk_lists[doc_idx - 1]
             for section_id, cd in section_chunks:
                 nodes.add(_CHUNK_TYPE, cd)
                 relationships.append(

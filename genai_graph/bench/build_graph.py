@@ -16,6 +16,8 @@ from typing import Any
 
 from loguru import logger
 
+from genai_graph.kg.document_graph.outline_extract import OutlineConfig
+
 MD_FILENAME_SUFFIX = "_pdf.md"
 
 
@@ -130,8 +132,107 @@ def copy_markdown_to_project(
     return dest_file
 
 
+def _build_outline_config(
+    *,
+    llm: str | None,
+    structure_strategy: str,
+    generate_summaries: bool,
+    workers: int,
+    summary_min_tokens: int,
+    context_safety_ratio: float,
+    kg_db: Path,
+) -> OutlineConfig | None:
+    """Build the outline policy for *kg_db*, or None for the algorithmic-only path."""
+    resolved_llm = _resolve_build_llm(llm)
+    if resolved_llm is None and structure_strategy == "algo":
+        return None
+    return OutlineConfig(
+        llm=resolved_llm,
+        structure_strategy=structure_strategy,
+        generate_summaries=generate_summaries,
+        workers=workers,
+        summary_min_tokens=summary_min_tokens,
+        context_safety_ratio=context_safety_ratio,
+        cache_root=str(kg_db.with_suffix("")) + "_outlines",
+    )
+
+
+def _resolve_sources(md_dir: Path, doc_names: list[str] | None) -> list[str]:
+    """Map selected benchmark doc names to staged markdown files (whole dir when None)."""
+    if not doc_names:
+        return [str(md_dir)]
+    sources = []
+    for name in doc_names:
+        doc_md = md_dir / f"{name}{MD_FILENAME_SUFFIX}"
+        if doc_md.exists():
+            sources.append(str(doc_md))
+    missing = len(doc_names) - len(sources)
+    if missing:
+        logger.warning("{} selected doc(s) have no staged markdown in {}; skipping them", missing, md_dir)
+    if not sources:
+        raise FileNotFoundError(f"No staged markdown found for {doc_names} in {md_dir}")
+    return sources
+
+
+def warm_outline_cache(
+    doc_names: list[str] | None = None,
+    *,
+    markdown_dir: Path | None = None,
+    kg_db: Path | None = None,
+    llm: str | None = None,
+    structure_strategy: str = "auto",
+    generate_summaries: bool = True,
+    workers: int = 4,
+    summary_min_tokens: int = 800,
+    context_safety_ratio: float = 0.9,
+) -> dict[str, Any]:
+    """Extract outlines for the selected documents without touching the database.
+
+    Idempotent: results land in the content-addressed outline cache, so a later
+    ``build_document_graph(outline_pre_pass=False)`` reads them from disk with no
+    LLM calls. No DB access and no shared state, so this is safe to run per
+    document from parallel Prefect tasks (per-document fault isolation). A
+    document whose LLM extraction ultimately fails here is simply missing from
+    the cache and degrades to algorithmic parsing at merge time.
+
+    Args:
+        doc_names: Benchmark doc names to warm (matched as ``<name>_pdf.md`` in
+            *markdown_dir*); None warms every ``*.md`` in the directory.
+        markdown_dir: Directory holding staged Markdown files.
+        kg_db: Ladybug database path (only used to derive the cache root).
+        llm: Build LLM id (``name@provider`` or tag); None keeps the algorithmic path.
+        structure_strategy: Outline strategy: 'auto' | 'algo' | 'toc_preamble' | 'llm_full'.
+        generate_summaries: Generate LLM section descriptions & summaries.
+        workers: Parallel LLM workers for branch summarization within a document.
+        summary_min_tokens: Prompt heuristic for 'substantial' sections.
+        context_safety_ratio: Degrade a document to algorithmic parsing when its
+            token count exceeds this fraction of the model's context window.
+
+    Returns:
+        `OutlineStats` dict for the warmed documents.
+    """
+    md_dir = markdown_dir or (Path.cwd() / "data" / "markdown_multi")
+    db_p = kg_db or (Path.cwd() / "data" / "kg" / "bench.db")
+    outline_config = _build_outline_config(
+        llm=llm,
+        structure_strategy=structure_strategy,
+        generate_summaries=generate_summaries,
+        workers=workers,
+        summary_min_tokens=summary_min_tokens,
+        context_safety_ratio=context_safety_ratio,
+        kg_db=db_p,
+    )
+    if outline_config is None:
+        return {"status": "skipped", "reason": "algorithmic-only build (no outline cache)"}
+
+    from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
+
+    factory = DocumentGraphFactory(sources=_resolve_sources(md_dir, doc_names), recursive=True, outline_config=outline_config)
+    return factory.extract_outlines(workers=workers).model_dump()
+
+
 def build_document_graph(
-    doc_name: str | None = None,
+    doc_names: list[str] | None = None,
     *,
     force: bool = False,
     llm: str | None = None,
@@ -145,49 +246,104 @@ def build_document_graph(
     embeddings_id: str | None = None,
     fts: bool = True,
     chunk_size_tokens: int = 1500,
+    outline_pre_pass: bool = True,
+    embed_workers: int | None = None,
 ) -> dict[str, Any]:
-    """Ingest Markdown files into Ladybug Document Graph database."""
+    """Ingest Markdown files into Ladybug Document Graph database.
+
+    Args:
+        doc_names: Restrict ingestion to these benchmark documents (matched as
+            ``<name>_pdf.md`` inside *markdown_dir*); None ingests the directory.
+        force: Rebuild sections for documents already present in the graph.
+        llm: Build LLM id (``name@provider`` or tag); None keeps the algorithmic path.
+        structure_strategy: Outline strategy: 'auto' | 'algo' | 'toc_preamble' | 'llm_full'.
+        generate_summaries: Generate LLM section descriptions & summaries.
+        workers: Parallel LLM/embedding workers (cross-document pre-pass and
+            per-document branch calls).
+        summary_min_tokens: Prompt heuristic for 'substantial' sections.
+        context_safety_ratio: Degrade a document to algorithmic parsing when its
+            token count exceeds this fraction of the model's context window.
+        markdown_dir: Directory holding staged Markdown files.
+        kg_db: Ladybug database path.
+        embeddings_id: Embeddings model for SectionChunk vectors (None disables).
+        fts: Create the native BM25/FTS index over sections.
+        chunk_size_tokens: Target chunk size for long sections.
+        outline_pre_pass: Warm the content-addressed outline cache in parallel
+            across documents before ingesting (recommended; set False when the
+            cache was already warmed by `warm_outline_cache`, e.g. per-document
+            Prefect tasks).
+        embed_workers: Parallel workers for per-document chunk-embedding batches
+            during ingest; defaults to *workers*. 1 keeps embedding serial.
+
+    Returns:
+        Ingest statistics with per-stage ``timings`` (seconds) and warnings.
+    """
     from genai_graph.kg.backend import KuzuBackend
+    from genai_graph.kg.document_graph.ingest import ingest_document_graph
+    from genai_graph.kg.document_graph.retrieval import RetrievalConfig
     from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
 
     md_dir = markdown_dir or (Path.cwd() / "data" / "markdown_multi")
     db_p = kg_db or (Path.cwd() / "data" / "kg" / "bench.db")
     db_p.parent.mkdir(parents=True, exist_ok=True)
 
-    resolved_llm = _resolve_build_llm(llm)
-    backend = KuzuBackend(db_path=str(db_p))
-
-    factory = DocumentGraphFactory(
-        data_root=md_dir,
-        recursive=True,
-        llm=resolved_llm,
+    outline_config = _build_outline_config(
+        llm=llm,
         structure_strategy=structure_strategy,
         generate_summaries=generate_summaries,
         workers=workers,
         summary_min_tokens=summary_min_tokens,
         context_safety_ratio=context_safety_ratio,
-        embeddings=embeddings_id,
-        fts=fts,
-        chunk_size_tokens=chunk_size_tokens,
+        kg_db=db_p,
     )
+    resolved_llm = outline_config.llm if outline_config else None
 
-    if force:
-        logger.info("Force rebuild requested: dropping existing graph in {}", db_p)
-        try:
-            backend.execute("MATCH (n) DETACH DELETE n;")
-        except Exception as exc:
-            logger.debug("Could not detach delete existing graph (may be empty): {}", exc)
+    factory = DocumentGraphFactory(sources=_resolve_sources(md_dir, doc_names), recursive=True, outline_config=outline_config)
 
-    logger.info(
-        "Ingesting Document Graph from {} into {} (llm={}, embeddings={}, fts={})",
-        md_dir,
-        db_p,
-        resolved_llm,
-        embeddings_id,
-        fts,
-    )
-    schema = factory.create_schema()
-    backend.apply_schema(schema)
-    stats = factory.ingest(backend)
+    timings: dict[str, float] = {}
+    backend = KuzuBackend()
+    backend.connect(str(db_p))
+    try:
+        outline_warnings: list[str] = []
+        if outline_config is not None and outline_pre_pass:
+            t0 = time.monotonic()
+            stats = factory.extract_outlines(workers=workers)
+            outline_warnings = list(stats.warnings)
+            timings["outline_pre_pass_s"] = round(time.monotonic() - t0, 3)
+            logger.info(
+                "Outline pre-pass: {} file(s), {} degraded, {} LLM call(s) in {:.1f}s",
+                stats.total_files,
+                stats.degraded_count,
+                stats.llm_calls,
+                timings["outline_pre_pass_s"],
+            )
+
+        logger.info(
+            "Ingesting Document Graph from {} into {} (llm={}, embeddings={}, fts={})",
+            md_dir,
+            db_p,
+            resolved_llm,
+            embeddings_id,
+            fts,
+        )
+        t1 = time.monotonic()
+        result = ingest_document_graph(
+            backend,
+            factory,
+            force=force,
+            retrieval_config=RetrievalConfig(
+                embeddings_id=embeddings_id,
+                chunk_size_tokens=chunk_size_tokens,
+                fts=fts,
+            ),
+            embed_workers=max(1, embed_workers if embed_workers is not None else workers),
+        )
+        timings["ingest_s"] = round(time.monotonic() - t1, 3)
+    finally:
+        backend.close()
+
+    stats = result.model_dump()
+    stats["timings"] = timings
+    stats["warnings"] = [*outline_warnings, *result.warnings]
     logger.success("Document Graph build complete: {}", stats)
-    return stats if isinstance(stats, dict) else {"status": "ok"}
+    return stats

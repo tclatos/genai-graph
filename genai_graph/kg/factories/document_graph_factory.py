@@ -51,22 +51,26 @@ from genai_graph.kg.nodes.document_section import (
     HAS_IMAGE,
     HAS_SECTION,
     HAS_SUBSECTION,
+    HAS_TABLE,
     Image,
     ImageNode,
     MarkdownSection,
     SectionChunkNode,
     SectionNode,
+    Table,
+    TableNode,
 )
 from genai_graph.kg.schema.core import GraphSchema
 
 
 class DocumentGraphBundle(BaseModel):
-    """A fully parsed Markdown document: its folder ancestor chain, document, sections, and images."""
+    """A fully parsed Markdown document: its folder ancestor chain, document, sections, images, and tables."""
 
     folders: list[Folder] = Field(..., description="Ancestor Folder chain, root-first, immediate-parent-last")
     document: Document
     sections: list[MarkdownSection] = Field(default_factory=list)
     images: list[Image] = Field(default_factory=list)
+    tables: list[Table] = Field(default_factory=list)
 
 
 class DocumentGraphFactory(KgFactory):
@@ -106,8 +110,8 @@ class DocumentGraphFactory(KgFactory):
     def build_schema(self) -> GraphSchema:
         return GraphSchema(
             root_model_class=None,
-            nodes=[FolderNode, DocumentNode, SectionNode, SectionChunkNode, ImageNode],
-            relations=[CONTAINS_DOC, HAS_SUBFOLDER, HAS_SECTION, HAS_SUBSECTION, HAS_CHUNK, HAS_IMAGE],
+            nodes=[FolderNode, DocumentNode, SectionNode, SectionChunkNode, ImageNode, TableNode],
+            relations=[CONTAINS_DOC, HAS_SUBFOLDER, HAS_SECTION, HAS_SUBSECTION, HAS_CHUNK, HAS_IMAGE, HAS_TABLE],
         )
 
     def get_keys(self) -> list[str]:
@@ -291,10 +295,13 @@ class DocumentGraphFactory(KgFactory):
         ]
 
         from genai_graph.kg.document_graph.images import extract_section_images
+        from genai_graph.kg.document_graph.tables import extract_section_tables
 
         images: list[Image] = []
+        tables: list[Table] = []
         for sec in sections:
             images.extend(extract_section_images(sec, markdown_file_path=path))
+            tables.extend(extract_section_tables(sec, markdown_file_path=path))
 
         chain = tree.chain_for(path)
 
@@ -319,4 +326,5 @@ class DocumentGraphFactory(KgFactory):
             document=document,
             sections=sections,
             images=images,
+            tables=tables,
         )

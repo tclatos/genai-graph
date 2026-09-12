@@ -17,12 +17,16 @@ from genai_graph.kg.nodes.document_section import (
     HAS_IMAGE,
     HAS_SECTION,
     HAS_SUBSECTION,
+    HAS_TABLE,
     Image,
     ImageNode,
     MarkdownSection,
+    MarkdownTable,
     SectionChunk,
     SectionChunkNode,
     SectionNode,
+    Table,
+    TableNode,
 )
 
 __all__ = [
@@ -37,8 +41,12 @@ __all__ = [
     "SectionChunkNode",
     "Image",
     "ImageNode",
+    "MarkdownTable",
+    "Table",
+    "TableNode",
     "HAS_SECTION",
     "HAS_SUBSECTION",
     "HAS_CHUNK",
     "HAS_IMAGE",
+    "HAS_TABLE",
 ]

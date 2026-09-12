@@ -60,11 +60,19 @@ Performs ranked search across section titles, chunk embeddings, and markdown tex
 
 ### `search_images(query: str = "", document_id: str | None = None, section_id: str | None = None, limit: int = 10) -> str`
 Search for extracted images, charts, plots, and figures in the document graph:
-- `query`: search query matching image caption/description, filename, or section heading (e.g. `'unemployment rate'`, `'Figure 1'`, `'bar chart'`, `'*'` for all).
+- `query`: search query matching image caption/description, filename, or section heading (e.g. `'unemployment rate'`, `'Figure 1'`, `'bar chart'`, `'*'` for all). Supports semantic vector search when embeddings are indexed.
 - `document_id`: optional document ID (filename, content hash) to filter results.
 - `section_id`: optional section ID to restrict to a specific section.
 - `limit`: maximum number of image results to return (default: 10).
 - Returns a YAML list of images with `image_id`, `name`, `filename`, `path`, `description` (caption), `section_title`, and `document_name`.
+
+### `search_tables(query: str = "", document_id: str | None = None, section_id: str | None = None, limit: int = 10) -> str`
+Search for structured tables (HTML or Markdown) in the document graph:
+- `query`: search query matching table caption, title, column headers, or content (e.g. `'quarterly revenue'`, `'Table 1'`, `'operating expenses'`, `'*'` for all).
+- `document_id`: optional document ID (filename, content hash) to filter results.
+- `section_id`: optional section ID to restrict to a specific section.
+- `limit`: maximum number of table results to return (default: 10).
+- Returns a YAML list of tables with `table_id`, `name`, `table_format`, `caption`, `token_count`, `content`, `section_title`, and `document_name`.
 
 ### `query_image(image: str, question: str, model: str | None = None) -> str`
 Analyze an image using a Vision-Language Model (VLM) to answer visual questions:

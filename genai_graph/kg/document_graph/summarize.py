@@ -195,48 +195,96 @@ def _clean_text(text: str, max_chars: int) -> str:
     return (truncated[:cut] if cut > 0 else truncated).strip() + "…"
 
 
+# HTML table elements
+_HTML_TABLE_START_RE = re.compile(r"<\s*table(?:\s+[^>]*)?>", re.IGNORECASE)
+_HTML_TABLE_END_RE = re.compile(r"<\s*/\s*table\s*>", re.IGNORECASE)
+_HTML_TR_START_RE = re.compile(r"<\s*tr(?:\s+[^>]*)?>", re.IGNORECASE)
+
+
 def _truncate_section_text(text: str, max_chars: int, table_sample_rows: int) -> str:
     """Shorten *text* for an LLM prompt: keep the heading and intro prose in full, but
-    for a Markdown table keep only its header row plus the first `table_sample_rows`
+    for Markdown or HTML tables keep only the header plus the first `table_sample_rows`
     data rows (with a note of how many were omitted) — enough for the LLM to describe
     what the table covers without paying for every row.
     """
     lines = text.splitlines()
     out: list[str] = []
     total_chars = 0
-    in_table = False
-    header_done = False
-    data_rows_kept = 0
-    omitted = 0
+    in_md_table = False
+    md_header_done = False
+    md_rows_kept = 0
+    md_omitted = 0
 
-    def flush_omitted() -> None:
-        nonlocal omitted
-        if omitted:
-            out.append(f"_(... {omitted} more row(s) omitted ...)_")
-            omitted = 0
+    in_html_table = False
+    html_rows_kept = 0
+    html_omitted = 0
+    skipping_html_tr = False
+
+    def flush_md_omitted() -> None:
+        nonlocal md_omitted
+        if md_omitted:
+            out.append(f"_(... {md_omitted} more row(s) omitted ...)_")
+            md_omitted = 0
 
     for line in lines:
         stripped = line.strip()
+
+        # HTML table handling
+        if not in_html_table and _HTML_TABLE_START_RE.search(stripped):
+            in_html_table = True
+            html_rows_kept = 0
+            html_omitted = 0
+            skipping_html_tr = False
+            out.append(line)
+            total_chars += len(line)
+            if _HTML_TABLE_END_RE.search(stripped):
+                in_html_table = False
+            continue
+
+        if in_html_table:
+            if _HTML_TABLE_END_RE.search(stripped):
+                if html_omitted > 0:
+                    out.append(f"<!-- ... {html_omitted} more table rows omitted ... -->")
+                out.append(line)
+                total_chars += len(line)
+                in_html_table = False
+                skipping_html_tr = False
+                continue
+
+            if _HTML_TR_START_RE.search(stripped):
+                if html_rows_kept < table_sample_rows + 1:  # header + sample rows
+                    html_rows_kept += 1
+                    skipping_html_tr = False
+                else:
+                    html_omitted += 1
+                    skipping_html_tr = True
+
+            if not skipping_html_tr:
+                out.append(line)
+                total_chars += len(line)
+            continue
+
+        # Markdown table handling
         if _TABLE_ROW_RE.match(stripped):
-            if not in_table:
-                in_table, header_done, data_rows_kept = True, False, 0
-            if not header_done:
+            if not in_md_table:
+                in_md_table, md_header_done, md_rows_kept = True, False, 0
+            if not md_header_done:
                 out.append(line)
                 total_chars += len(line)
                 if _TABLE_SEPARATOR_RE.match(stripped) and set(stripped.replace("|", "")) <= set(" :-"):
-                    header_done = True
+                    md_header_done = True
                 continue
-            if data_rows_kept < table_sample_rows:
+            if md_rows_kept < table_sample_rows:
                 out.append(line)
                 total_chars += len(line)
-                data_rows_kept += 1
+                md_rows_kept += 1
             else:
-                omitted += 1
+                md_omitted += 1
             continue
 
-        if in_table:
-            flush_omitted()
-            in_table = False
+        if in_md_table:
+            flush_md_omitted()
+            in_md_table = False
 
         out.append(line)
         total_chars += len(line)
@@ -244,7 +292,7 @@ def _truncate_section_text(text: str, max_chars: int, table_sample_rows: int) ->
             out.append("_(... truncated ...)_")
             break
 
-    flush_omitted()
+    flush_md_omitted()
     return "\n".join(out)
 
 

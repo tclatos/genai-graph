@@ -680,6 +680,7 @@ def reconstruct_section(
 _CHUNK_LABEL = "SectionChunk"
 # Index names must match genai_graph.kg.document_graph.retrieval defaults.
 _CHUNK_VECTOR_INDEX = "chunk_embedding_index"
+_IMAGE_VECTOR_INDEX = "image_embedding_index"
 _SECTION_FTS_INDEX = "section_fts"
 _RRF_K = 60
 _HNSW_OVERFETCH = 5
@@ -689,9 +690,10 @@ _MAX_CHUNK_SNIPPET = 180
 def get_available_indexes(backend: KgBackend) -> dict[str, bool]:
     """Check which indexes (vector, FTS) are available in the database."""
     if _native_index_queries_disabled:
-        return {"vector": False, "fts": False}
+        return {"vector": False, "fts": False, "image_vector": False}
     fts_available = False
     vector_available = False
+    image_vector_available = False
     try:
         df = backend.execute_get_as_df("CALL SHOW_INDEXES() RETURN *", None, union=False)
         if df is not None and not df.empty:
@@ -703,9 +705,11 @@ def get_available_indexes(backend: KgBackend) -> dict[str, bool]:
                     fts_available = True
                 if (tbl == _CHUNK_LABEL and idx == _CHUNK_VECTOR_INDEX) or itype == "VECTOR":
                     vector_available = True
+                if (tbl == "Image" and idx == _IMAGE_VECTOR_INDEX) or (tbl == "Image" and itype == "VECTOR"):
+                    image_vector_available = True
     except Exception as exc:  # noqa: BLE001
         logger.debug("CALL SHOW_INDEXES() failed: {}", exc)
-    return {"vector": vector_available, "fts": fts_available}
+    return {"vector": vector_available, "fts": fts_available, "image_vector": image_vector_available}
 
 
 def _resolve_default_embeddings_id() -> str | None:
@@ -1029,35 +1033,80 @@ def search_images(
     document_id: str | None = None,
     section_id: str | None = None,
     limit: int = 10,
+    embeddings_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Search images in the Document Graph by caption/description, filename, section, or document."""
+    """Search images in the Document Graph by caption/description, filename, section, or vector similarity."""
     cols = _table_columns(backend, "Image")
     if not cols:
         return []
 
+    target_md_hash: str | None = None
+    if document_id:
+        target_md_hash = resolve_document_id(backend, document_id)
+        if target_md_hash is None:
+            return []
+
+    indexes = get_available_indexes(backend)
+    q_str = query.strip() if query else ""
+    vector_hits: list[dict[str, Any]] = []
+    if q_str and q_str not in ("*", "all") and indexes.get("image_vector") and isinstance(backend, KuzuBackend):
+        try:
+            effective_embeddings_id = embeddings_id or _resolve_default_embeddings_id()
+            if effective_embeddings_id:
+                from genai_graph.kg.embeddings_handler import EmbeddingsHandler
+
+                handler = EmbeddingsHandler(embeddings_id=effective_embeddings_id)
+                query_vec = handler.compute_embeddings(q_str)
+                k = max(limit * _HNSW_OVERFETCH, 20)
+                cypher_vec = f"CALL QUERY_VECTOR_INDEX('image_embedding_index', $vec, {k}) RETURN node, distance"
+                df = backend.execute_get_as_df(cypher_vec, {"vec": query_vec}, union=False)
+                if df is not None and not df.empty:
+                    for _, row in df.iterrows():
+                        node = row["node"]
+                        if not isinstance(node, dict):
+                            continue
+                        m_hash = node.get("markdown_hash")
+                        if target_md_hash and m_hash != target_md_hash:
+                            continue
+                        if section_id and node.get("section_id") != section_id:
+                            continue
+                        dist = float(row["distance"])
+                        vector_hits.append(
+                            {
+                                "image_id": node.get("image_id"),
+                                "name": node.get("name"),
+                                "filename": node.get("filename"),
+                                "path": node.get("path"),
+                                "description": node.get("description"),
+                                "size": node.get("size"),
+                                "section_id": node.get("section_id"),
+                                "markdown_hash": m_hash,
+                                "distance": dist,
+                                "score": round(max(0.0, 1.0 - (dist / 2.0)), 6),
+                            }
+                        )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Image vector search error: {}", exc)
+
     params: dict[str, Any] = {"limit": limit}
     conditions: list[str] = []
 
-    if document_id:
-        md_hash = resolve_document_id(backend, document_id)
-        if md_hash is None:
-            return []
+    if target_md_hash:
         conditions.append("i.markdown_hash = $md_hash")
-        params["md_hash"] = md_hash
+        params["md_hash"] = target_md_hash
 
     if section_id:
         conditions.append("i.section_id = $section_id")
         params["section_id"] = section_id
 
-    q_lower = query.strip().lower() if query else ""
-    if q_lower and q_lower not in ("*", "all", ""):
+    if q_str and q_str not in ("*", "all"):
         conditions.append(
             "(lower(coalesce(i.description, '')) CONTAINS $q OR "
             "lower(coalesce(i.filename, '')) CONTAINS $q OR "
             "lower(coalesce(i.name, '')) CONTAINS $q OR "
             "lower(coalesce(s.title, '')) CONTAINS $q)"
         )
-        params["q"] = q_lower
+        params["q"] = q_str.lower()
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -1075,6 +1124,79 @@ def search_images(
            s.title AS section_title,
            d.filename AS document_name,
            i.markdown_hash AS markdown_hash
+    LIMIT $limit
+    """
+    rows, _ = _query_rows(backend, cypher, params)
+
+    if vector_hits:
+        seen_ids = set()
+        merged: list[dict[str, Any]] = []
+        for vh in vector_hits:
+            if vh["image_id"] not in seen_ids:
+                seen_ids.add(vh["image_id"])
+                merged.append(vh)
+        for r in rows:
+            if r["image_id"] not in seen_ids:
+                seen_ids.add(r["image_id"])
+                merged.append(r)
+        return merged[:limit]
+
+    return rows
+
+
+def search_tables(
+    backend: KgBackend,
+    query: str | None = None,
+    *,
+    document_id: str | None = None,
+    section_id: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Search tables in the Document Graph by caption, title, name, format, or content."""
+    cols = _table_columns(backend, "MarkdownTable")
+    if not cols:
+        return []
+
+    params: dict[str, Any] = {"limit": limit}
+    conditions: list[str] = []
+
+    if document_id:
+        md_hash = resolve_document_id(backend, document_id)
+        if md_hash is None:
+            return []
+        conditions.append("t.markdown_hash = $md_hash")
+        params["md_hash"] = md_hash
+
+    if section_id:
+        conditions.append("t.section_id = $section_id")
+        params["section_id"] = section_id
+
+    q_lower = query.strip().lower() if query else ""
+    if q_lower and q_lower not in ("*", "all", ""):
+        conditions.append(
+            "(lower(coalesce(t.caption, '')) CONTAINS $q OR "
+            "lower(coalesce(t.name, '')) CONTAINS $q OR "
+            "lower(coalesce(s.title, '')) CONTAINS $q OR "
+            "lower(coalesce(t.content, '')) CONTAINS $q)"
+        )
+        params["q"] = q_lower
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    cypher = f"""
+    MATCH (s:{_SECTION_LABEL})-[:HAS_TABLE]->(t:MarkdownTable)
+    {where_clause}
+    OPTIONAL MATCH (d:Document) WHERE d.markdown_hash = t.markdown_hash
+    RETURN t.table_id AS table_id,
+           t.name AS name,
+           t.table_format AS table_format,
+           t.caption AS caption,
+           t.token_count AS token_count,
+           t.content AS content,
+           t.section_id AS section_id,
+           s.title AS section_title,
+           d.filename AS document_name,
+           t.markdown_hash AS markdown_hash
     LIMIT $limit
     """
     rows, _ = _query_rows(backend, cypher, params)
@@ -1413,11 +1535,44 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
                 document_id=document_id,
                 section_id=section_id,
                 limit=limit,
+                embeddings_id=embeddings_id,
             )
         except Exception as exc:  # noqa: BLE001
             return _tool_error(exc)
         if not rows:
             return "No matching images found."
+        return yaml.safe_dump(rows, sort_keys=False, allow_unicode=True)
+
+    @tool("search_tables")
+    def _search_tables(
+        query: str = "",
+        document_id: str | None = None,
+        section_id: str | None = None,
+        limit: int = 10,
+    ) -> str:
+        """Search for structured tables (HTML or Markdown) in the document graph.
+
+        Args:
+            query: Search term matching table caption, title, headers, or content (e.g. 'quarterly revenue', 'Table 1', 'operating expenses', '*' for all).
+            document_id: Optional document ID (filename, content hash) to filter results.
+            section_id: Optional section ID to restrict to a specific section.
+            limit: Maximum number of table results to return (default: 10).
+
+        Returns:
+            YAML list of tables with table_id, name, table_format, caption, token_count, content, section_title, and document_name.
+        """
+        try:
+            rows = search_tables(
+                _connect(db_path),
+                query=query,
+                document_id=document_id,
+                section_id=section_id,
+                limit=limit,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _tool_error(exc)
+        if not rows:
+            return "No matching tables found."
         return yaml.safe_dump(rows, sort_keys=False, allow_unicode=True)
 
     @tool("query_image")
@@ -1450,6 +1605,7 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
         _get_section_content,
         _search_sections,
         _search_images,
+        _search_tables,
         _query_image,
         _list_documents,
     ]

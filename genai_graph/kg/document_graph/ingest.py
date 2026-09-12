@@ -27,10 +27,12 @@ from genai_graph.kg.document_graph.retrieval import (
     RetrievalConfig,
     RetrievalError,
     attach_chunk_embeddings,
-    build_sections_chunks,
+    attach_image_embeddings,
     ensure_chunk_embedding_column,
+    ensure_image_embedding_column,
     ensure_section_fts_index,
     prepare_chunk_inputs,
+    prepare_image_inputs,
     resolve_embedding_dimension,
 )
 from genai_graph.kg.embeddings_handler import EmbeddingsHandler
@@ -54,9 +56,11 @@ from genai_graph.kg.nodes.document_section import (
     HAS_IMAGE,
     HAS_SECTION,
     HAS_SUBSECTION,
+    HAS_TABLE,
     ImageNode,
     SectionChunkNode,
     SectionNode,
+    TableNode,
 )
 
 _FOLDER_TYPE = FolderNode.node_class.__name__
@@ -64,6 +68,7 @@ _DOCUMENT_TYPE = DocumentNode.node_class.__name__
 _SECTION_TYPE = SectionNode.node_class.__name__
 _CHUNK_TYPE = SectionChunkNode.node_class.__name__
 _IMAGE_TYPE = ImageNode.node_class.__name__
+_TABLE_TYPE = TableNode.node_class.__name__
 
 
 class DocumentGraphIngestResult(BaseModel):
@@ -76,6 +81,7 @@ class DocumentGraphIngestResult(BaseModel):
     sections_summarized: int = 0
     chunks_created: int = 0
     images_created: int = 0
+    tables_created: int = 0
     relationships_created: int = 0
     embeddings_model: str | None = None
     embeddings_dim: int | None = None
@@ -169,6 +175,7 @@ def ingest_document_graph(
         try:
             embeddings_dim = resolve_embedding_dimension(retrieval_config.embeddings_id)
             ensure_chunk_embedding_column(backend, embeddings_dim)
+            ensure_image_embedding_column(backend, embeddings_dim)
             embeddings_handler = EmbeddingsHandler(embeddings_id=retrieval_config.embeddings_id)
         except Exception as exc:  # noqa: BLE001
             msg = f"Embeddings disabled for this build: {exc}"
@@ -270,38 +277,42 @@ def ingest_document_graph(
     # async path (aembed_documents) plus a concurrency semaphore gives the same
     # overlap safely.
     chunk_lists: list[list[tuple[str, dict[str, Any]]]] = []
+    image_dict_lists: list[list[dict[str, Any]]] = []
     if chunks_enabled and retrieval_config is not None and pending:
         assert embeddings_handler is not None  # guaranteed by chunks_enabled
+        embedder = embeddings_handler.factory
 
-        if embed_workers <= 1:
-            chunk_lists = [
-                build_sections_chunks(
-                    b.sections,
-                    handler=embeddings_handler,  # type: ignore[arg-type]
-                    chunk_size_tokens=retrieval_config.chunk_size_tokens,
-                )
-                for b, _, _ in pending
-            ]
-        else:
-            embedder = embeddings_handler.factory
+        async def _embed_all() -> tuple[list[list[tuple[str, dict[str, Any]]]], list[list[dict[str, Any]]]]:
+            semaphore = asyncio.Semaphore(embed_workers)
 
-            async def _embed_all() -> list[list[tuple[str, dict[str, Any]]]]:
-                semaphore = asyncio.Semaphore(embed_workers)
+            async def _one_chunks(bundle: DocumentGraphBundle) -> list[tuple[str, dict[str, Any]]]:
+                items = prepare_chunk_inputs(bundle.sections, chunk_size_tokens=retrieval_config.chunk_size_tokens)
+                if not items:
+                    return []
+                async with semaphore:
+                    embeddings = await embedder.aembed_documents([item[6] for item in items])
+                return attach_chunk_embeddings(items, embeddings)
 
-                async def _one(bundle: DocumentGraphBundle) -> list[tuple[str, dict[str, Any]]]:
-                    items = prepare_chunk_inputs(bundle.sections, chunk_size_tokens=retrieval_config.chunk_size_tokens)
-                    if not items:
-                        return []
-                    async with semaphore:
-                        embeddings = await embedder.aembed_documents([item[6] for item in items])
-                    return attach_chunk_embeddings(items, embeddings)
+            async def _one_images(bundle: DocumentGraphBundle) -> list[dict[str, Any]]:
+                if not bundle.images:
+                    return []
+                img_items = prepare_image_inputs(bundle.images)
+                if not img_items:
+                    return []
+                async with semaphore:
+                    embeddings = await embedder.aembed_documents([item[2] for item in img_items])
+                return attach_image_embeddings(bundle.images, embeddings)
 
-                return list(await asyncio.gather(*(_one(b) for b, _, _ in pending)))
+            c_tasks = [_one_chunks(b) for b, _, _ in pending]
+            i_tasks = [_one_images(b) for b, _, _ in pending]
+            c_res = await asyncio.gather(*c_tasks)
+            i_res = await asyncio.gather(*i_tasks)
+            return list(c_res), list(i_res)
 
-            try:
-                chunk_lists = asyncio.run(_embed_all())
-            except Exception as exc:  # noqa: BLE001
-                raise RetrievalError(f"Parallel embedding failed for {len(pending)} documents: {exc}") from exc
+        try:
+            chunk_lists, image_dict_lists = asyncio.run(_embed_all())
+        except Exception as exc:  # noqa: BLE001
+            raise RetrievalError(f"Parallel embedding failed for {len(pending)} documents: {exc}") from exc
 
     # --- Phase 4: accumulate section/chunk rows serially, then merge -------
     for doc_idx, (bundle, document, rebuild) in enumerate(pending, 1):
@@ -337,21 +348,38 @@ def ingest_document_graph(
         result.sections_summarized += sum(1 for s in bundle.sections if s.summary)
 
         # Ingest extracted images and link to their owning MarkdownSection
-        for image in bundle.images:
-            image_dict = image.model_dump()
-            image_dict["name"] = image.name
+        doc_images = image_dict_lists[doc_idx - 1] if image_dict_lists else [img.model_dump() for img in bundle.images]
+        for image_dict in doc_images:
+            image_dict["name"] = image_dict.get("name") or image_dict.get("filename") or ""
             nodes.add(_IMAGE_TYPE, image_dict)
             relationships.append(
                 RelationshipRecord(
                     _SECTION_TYPE,
-                    image.section_id,
+                    image_dict["section_id"],
                     _IMAGE_TYPE,
-                    image.image_id,
+                    image_dict["image_id"],
                     HAS_IMAGE.name,
                     {},
                 )
             )
         result.images_created += len(bundle.images)
+
+        # Ingest extracted tables and link to their owning MarkdownSection
+        for table in bundle.tables:
+            table_dict = table.model_dump()
+            table_dict["name"] = table.name
+            nodes.add(_TABLE_TYPE, table_dict)
+            relationships.append(
+                RelationshipRecord(
+                    _SECTION_TYPE,
+                    table.section_id,
+                    _TABLE_TYPE,
+                    table.table_id,
+                    HAS_TABLE.name,
+                    {},
+                )
+            )
+        result.tables_created += len(bundle.tables)
 
         doc_chunks_count = 0
         if chunks_enabled and retrieval_config is not None:
@@ -373,12 +401,13 @@ def ingest_document_graph(
 
         result.documents_processed += 1
         logger.info(
-            "Ingested [{}/{}]: {} (sections={}, images={}, chunks={})",
+            "Ingested [{}/{}]: {} (sections={}, images={}, tables={}, chunks={})",
             doc_idx,
             total_keys,
             document.filename,
             len(bundle.sections),
             len(bundle.images),
+            len(bundle.tables),
             doc_chunks_count,
         )
 
@@ -395,6 +424,13 @@ def ingest_document_graph(
             msg = f"Could not create HNSW index on {_CHUNK_TYPE}.chunk_embedding: {exc}"
             logger.warning(msg)
             result.warnings.append(msg)
+        try:
+            backend.create_vector_index(_IMAGE_TYPE, "image_embedding", "image_embedding_index", metric="cosine")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Image vector index on {}.image_embedding skipped or failed: {}", _IMAGE_TYPE, exc)
+            msg = f"Could not create HNSW index on {_CHUNK_TYPE}.chunk_embedding: {exc}"
+            logger.warning(msg)
+            result.warnings.append(msg)
     if retrieval_config is not None and retrieval_config.fts:
         try:
             result.fts_index = ensure_section_fts_index(backend)
@@ -406,12 +442,13 @@ def ingest_document_graph(
     result.embeddings_dim = embeddings_dim
 
     logger.info(
-        "Document Graph ingest: {} processed ({} skipped), {} failed, {} section(s), {} image(s), {} chunk(s), {} rel(s)",
+        "Document Graph ingest: {} processed ({} skipped), {} failed, {} section(s), {} image(s), {} table(s), {} chunk(s), {} rel(s)",
         result.documents_processed,
         result.documents_skipped,
         result.documents_failed,
         result.sections_created,
         result.images_created,
+        result.tables_created,
         result.chunks_created,
         result.relationships_created,
     )
@@ -419,7 +456,11 @@ def ingest_document_graph(
 
 
 def _delete_document_sections(backend: KgBackend, markdown_hash: str) -> None:
-    """Delete existing sections (and their chunks/images) for a document (used on force)."""
+    """Delete existing sections (and their chunks/images/tables) for a document (used on force)."""
+    try:
+        backend.execute(f"MATCH (t:{_TABLE_TYPE} {{markdown_hash: $h}}) DETACH DELETE t", {"h": markdown_hash})
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not clear stale {} for {}: {}", _TABLE_TYPE, markdown_hash, exc)
     try:
         backend.execute(f"MATCH (i:{_IMAGE_TYPE} {{markdown_hash: $h}}) DETACH DELETE i", {"h": markdown_hash})
     except Exception as exc:  # noqa: BLE001
@@ -447,8 +488,9 @@ def drop_document_graph(backend: KgBackend, *, drop_documents: bool = False) -> 
         drop_documents: Also drop Folder/Document tables. Leave `False` when those
             are shared with other factories; set `True` for a complete reset.
     """
-    for rel in (HAS_IMAGE.name, HAS_CHUNK.name, HAS_SUBSECTION.name, HAS_SECTION.name):
+    for rel in (HAS_TABLE.name, HAS_IMAGE.name, HAS_CHUNK.name, HAS_SUBSECTION.name, HAS_SECTION.name):
         backend.drop_table(rel)
+    backend.drop_table(_TABLE_TYPE)
     backend.drop_table(_IMAGE_TYPE)
     backend.drop_table(_SECTION_TYPE)
     backend.drop_table(_CHUNK_TYPE)

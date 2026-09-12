@@ -339,6 +339,8 @@ class DocGraphCommands(CliTopCommand):
             table.add_row("Skipped (unchanged)", str(result_dict["documents_skipped"]))
             table.add_row("Failed", str(result_dict["documents_failed"]))
             table.add_row("Sections created", str(result_dict["sections_created"]))
+            table.add_row("Images created", str(result_dict.get("images_created", 0)))
+            table.add_row("Tables created", str(result_dict.get("tables_created", 0)))
             table.add_row("Sections summarized", str(result_dict.get("sections_summarized", 0)))
             table.add_row(
                 "Files degraded to algo (over context window)",
@@ -786,6 +788,104 @@ class DocGraphCommands(CliTopCommand):
             for r in sorted(root_rows, key=lambda r: r["name"]):
                 add_node(tree, r)
             console.print(tree)
+
+        @cli_app.command("images")
+        def images(
+            query: Annotated[
+                str | None,
+                typer.Argument(help="Search query or keyword for image caption/filename (optional)."),
+            ] = None,
+            db_path: Annotated[
+                str | None,
+                typer.Option(
+                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                ),
+            ] = None,
+            doc: Annotated[
+                str | None,
+                typer.Option("--doc", "-d", help="Filter to a specific document (filename, content hash)."),
+            ] = None,
+            limit: Annotated[int, typer.Option("--limit", "-l", help="Max number of images to return.")] = 20,
+        ) -> None:
+            """List and search images extracted into the Document Graph."""
+            db_path = _resolve_db_path(db_path)
+            from genai_graph.kg.backend import KuzuBackend
+            from genai_graph.kg.query.document_graph_tools import search_images
+
+            backend = KuzuBackend()
+            backend.connect(db_path)
+
+            rows = search_images(backend, query=query, document_id=doc, limit=limit)
+            if not rows:
+                console.print(f"[yellow]No images found matching: {query or '*'}[/yellow]")
+                return
+
+            table = Table(title="Document Graph — Images")
+            table.add_column("Image ID", style="cyan")
+            table.add_column("Name", style="white")
+            table.add_column("Filename", style="magenta")
+            table.add_column("Caption / Description", style="green")
+            table.add_column("Section", style="yellow")
+            table.add_column("Document", style="dim")
+            for r in rows:
+                table.add_row(
+                    str(r.get("image_id") or ""),
+                    str(r.get("name") or ""),
+                    str(r.get("filename") or ""),
+                    str(r.get("description") or ""),
+                    str(r.get("section_title") or r.get("section_id") or ""),
+                    str(r.get("document_name") or ""),
+                )
+            console.print(table)
+
+        @cli_app.command("tables")
+        def tables(
+            query: Annotated[
+                str | None,
+                typer.Argument(help="Search query or keyword for table caption/content (optional)."),
+            ] = None,
+            db_path: Annotated[
+                str | None,
+                typer.Option(
+                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                ),
+            ] = None,
+            doc: Annotated[
+                str | None,
+                typer.Option("--doc", "-d", help="Filter to a specific document (filename, content hash)."),
+            ] = None,
+            limit: Annotated[int, typer.Option("--limit", "-l", help="Max number of tables to return.")] = 20,
+        ) -> None:
+            """List and search tables extracted into the Document Graph."""
+            db_path = _resolve_db_path(db_path)
+            from genai_graph.kg.backend import KuzuBackend
+            from genai_graph.kg.query.document_graph_tools import search_tables
+
+            backend = KuzuBackend()
+            backend.connect(db_path)
+
+            rows = search_tables(backend, query=query, document_id=doc, limit=limit)
+            if not rows:
+                console.print(f"[yellow]No tables found matching: {query or '*'}[/yellow]")
+                return
+
+            table = Table(title="Document Graph — Tables")
+            table.add_column("Table ID", style="cyan")
+            table.add_column("Name / Caption", style="white")
+            table.add_column("Format", style="magenta")
+            table.add_column("Tokens", style="dim")
+            table.add_column("Section", style="yellow")
+            table.add_column("Document", style="dim")
+            for r in rows:
+                table.add_row(
+                    str(r.get("table_id") or ""),
+                    str(r.get("name") or r.get("caption") or ""),
+                    str(r.get("table_format") or ""),
+                    str(r.get("token_count") or 0),
+                    str(r.get("section_title") or r.get("section_id") or ""),
+                    str(r.get("document_name") or ""),
+                )
+            console.print(table)
 
         @cli_app.command("tui")
         def tui(

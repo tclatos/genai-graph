@@ -13,9 +13,15 @@ from genai_graph.kg.nodes.document import (
     FolderNode,
 )
 from genai_graph.kg.nodes.document_section import (
+    HAS_CHUNK,
+    HAS_IMAGE,
     HAS_SECTION,
     HAS_SUBSECTION,
+    Image,
+    ImageNode,
     MarkdownSection,
+    SectionChunk,
+    SectionChunkNode,
     SectionNode,
 )
 
@@ -27,6 +33,12 @@ __all__ = [
     "CONTAINS_DOC",
     "MarkdownSection",
     "SectionNode",
+    "SectionChunk",
+    "SectionChunkNode",
+    "Image",
+    "ImageNode",
     "HAS_SECTION",
     "HAS_SUBSECTION",
+    "HAS_CHUNK",
+    "HAS_IMAGE",
 ]

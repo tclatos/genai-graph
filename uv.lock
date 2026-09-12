@@ -2416,8 +2416,8 @@ requires-dist = [
     { name = "devtools", specifier = ">=0.12.2" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.6" },
     { name = "genai-graph", extras = ["harnessing"], marker = "extra == 'all'" },
-    { name = "genai-tk", git = "https://github.com/tclatos/genai-tk?branch=main" },
-    { name = "genai-tk", extras = ["harnessing"], marker = "extra == 'harnessing'", git = "https://github.com/tclatos/genai-tk?branch=main" },
+    { name = "genai-tk", git = "https://github.com/tclatos/genai-tk?rev=main" },
+    { name = "genai-tk", extras = ["harnessing"], marker = "extra == 'harnessing'", git = "https://github.com/tclatos/genai-tk?rev=main" },
     { name = "ladybug", specifier = ">=0.16.1" },
     { name = "langchain-classic", specifier = ">=1.0.0" },
     { name = "langchain-litellm", specifier = ">=0.3.2" },
@@ -2475,7 +2475,7 @@ ui = [
 [[package]]
 name = "genai-tk"
 version = "0.1.0"
-source = { git = "https://github.com/tclatos/genai-tk?branch=main#62574b73602ba1473d05ae9f720bb7e1a72a5b32" }
+source = { git = "https://github.com/tclatos/genai-tk?rev=main#7d4f8919454b6b115ce53105f4382fe20bb81734" }
 dependencies = [
     { name = "abbreviations" },
     { name = "bcrypt" },
@@ -2525,6 +2525,7 @@ dependencies = [
     { name = "rapidfuzz" },
     { name = "readabilipy" },
     { name = "rich", extra = ["jupyter"] },
+    { name = "scipy" },
     { name = "tavily-python" },
     { name = "textual" },
     { name = "tokenizers" },

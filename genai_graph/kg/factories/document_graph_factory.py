@@ -48,8 +48,11 @@ from genai_graph.kg.nodes.document import (
 )
 from genai_graph.kg.nodes.document_section import (
     HAS_CHUNK,
+    HAS_IMAGE,
     HAS_SECTION,
     HAS_SUBSECTION,
+    Image,
+    ImageNode,
     MarkdownSection,
     SectionChunkNode,
     SectionNode,
@@ -58,11 +61,12 @@ from genai_graph.kg.schema.core import GraphSchema
 
 
 class DocumentGraphBundle(BaseModel):
-    """A fully parsed Markdown document: its folder ancestor chain, document and sections."""
+    """A fully parsed Markdown document: its folder ancestor chain, document, sections, and images."""
 
     folders: list[Folder] = Field(..., description="Ancestor Folder chain, root-first, immediate-parent-last")
     document: Document
     sections: list[MarkdownSection] = Field(default_factory=list)
+    images: list[Image] = Field(default_factory=list)
 
 
 class DocumentGraphFactory(KgFactory):
@@ -102,8 +106,8 @@ class DocumentGraphFactory(KgFactory):
     def build_schema(self) -> GraphSchema:
         return GraphSchema(
             root_model_class=None,
-            nodes=[FolderNode, DocumentNode, SectionNode, SectionChunkNode],
-            relations=[CONTAINS_DOC, HAS_SUBFOLDER, HAS_SECTION, HAS_SUBSECTION, HAS_CHUNK],
+            nodes=[FolderNode, DocumentNode, SectionNode, SectionChunkNode, ImageNode],
+            relations=[CONTAINS_DOC, HAS_SUBFOLDER, HAS_SECTION, HAS_SUBSECTION, HAS_CHUNK, HAS_IMAGE],
         )
 
     def get_keys(self) -> list[str]:
@@ -286,6 +290,12 @@ class DocumentGraphFactory(KgFactory):
             for idx, fs in enumerate(flat_sections)
         ]
 
+        from genai_graph.kg.document_graph.images import extract_section_images
+
+        images: list[Image] = []
+        for sec in sections:
+            images.extend(extract_section_images(sec, markdown_file_path=path))
+
         chain = tree.chain_for(path)
 
         document = Document(
@@ -308,4 +318,5 @@ class DocumentGraphFactory(KgFactory):
             folders=[tree.folders[fid] for fid in chain],
             document=document,
             sections=sections,
+            images=images,
         )

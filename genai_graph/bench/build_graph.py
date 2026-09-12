@@ -99,7 +99,16 @@ def markdownize_target(
     pdf_root = pdfs_dir or (Path.cwd() / "data" / "pdfs")
     pdf_path = pdf_root / f"{doc_name}.pdf"
     if not pdf_path.exists():
-        raise FileNotFoundError(f"PDF not found for doc {doc_name!r} at {pdf_path}. Run fetch step first.")
+        sub_candidate = pdf_root / "documents" / f"{doc_name}.pdf"
+        if sub_candidate.exists():
+            pdf_path = sub_candidate
+        else:
+            # Check recursive match under pdf_root
+            matches = list(pdf_root.rglob(f"{doc_name}.pdf"))
+            if matches:
+                pdf_path = matches[0]
+            else:
+                raise FileNotFoundError(f"PDF not found for doc {doc_name!r} at {pdf_path}. Run fetch step first.")
 
     content = _convert_pdf(pdf_path, markdownize_profile=markdownize_profile)
     out_md.write_text(content, encoding="utf-8")

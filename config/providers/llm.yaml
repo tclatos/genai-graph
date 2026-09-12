@@ -36,6 +36,17 @@
 llm:
   exceptions:
 
+    - model_id: glm_5.3_flash
+      providers:
+        - openrouter: z-ai/glm-5.3-flash
+        - edenai: zhipu/glm-5.3-flash
+      capabilities: ['structured_outputs', 'vision']
+
+    - model_id: glm_5.2
+      providers:
+        - openrouter: z-ai/glm-5.2
+      capabilities: ['structured_outputs', 'vision']
+
     - model_id: parrot_local  # fake model for tests
       providers:
         - fake: parrot

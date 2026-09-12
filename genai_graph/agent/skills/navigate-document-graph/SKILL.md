@@ -33,7 +33,12 @@ Every section carries a one-line `description` (and optional `summary`) that ser
    - This performs hybrid search (vector similarity over SectionChunks fused with BM25 keyword search via RRF) and returns ranked sections with relevance scores and matching text snippets.
    - Always supply `document_id` when the document is already known to eliminate cross-document false positives.
 
-5. **Iterate & Synthesize**:
+5. **Visual Charts, Plots & Image Inspection**:
+   - When a question requires reading a visual chart, graph, diagram, line plot, or figure that cannot be resolved from text OCR alone:
+     1. Search for relevant figures with `search_images(query="<figure topic or number>", document_id="<doc_id>")`.
+     2. Call `query_image(image="<image_id or path>", question="<specific visual question>")` to have the Vision-Language Model inspect the chart and return exact data points, percentages, labels, and trends.
+
+6. **Iterate & Synthesize**:
    - For multi-period, multi-table, or multi-document questions, repeat across the relevant sections until grounded evidence is obtained for every part of the question.
 
 ---

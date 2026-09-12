@@ -10,7 +10,8 @@ description: Reference for the Document Graph navigation tools (get_folder_toc, 
 ```
 Folder ──CONTAINS──▶ Document ──HAS_SECTION──▶ MarkdownSection ──HAS_SUBSECTION──▶ MarkdownSection ──…
                                                       │
-                                                      └──HAS_CHUNK──▶ SectionChunk (vector index)
+                                                      ├──HAS_CHUNK──▶ SectionChunk (vector index)
+                                                      └──HAS_IMAGE──▶ Image (charts, plots, figures)
 ```
 
 - **Folder** — a source location (directory, zip, or dataset bucket). Key `folder_id`.
@@ -21,6 +22,8 @@ Folder ──CONTAINS──▶ Document ──HAS_SECTION──▶ MarkdownSecti
   `sequence`, `description`, `summary`, and `parent_section_id`.
 - **SectionChunk** — text chunk for long sections, keyed by `chunk_id = "{section_id}::{chunk_index}"`.
   Indexed by HNSW vector embeddings for semantic search.
+- **Image** — extracted image/chart node, keyed by `image_id = "{section_id}::{image_hash}"`.
+  Carries `name` (hash), `filename`, `path`, `description` (extracted caption/alt text), and `size`.
 
 ---
 
@@ -54,6 +57,21 @@ Performs ranked search across section titles, chunk embeddings, and markdown tex
 - `limit`: maximum number of matching sections to return (default 20).
 - `mode`: `"hybrid"` (fuses vector similarity + BM25 keyword search via RRF), `"vector"`, `"bm25"`, or `"cypher"`.
 - Returns matching sections ranked best-first with `section_id`, `title`, `score`, `level`, and matching snippet.
+
+### `search_images(query: str = "", document_id: str | None = None, section_id: str | None = None, limit: int = 10) -> str`
+Search for extracted images, charts, plots, and figures in the document graph:
+- `query`: search query matching image caption/description, filename, or section heading (e.g. `'unemployment rate'`, `'Figure 1'`, `'bar chart'`, `'*'` for all).
+- `document_id`: optional document ID (filename, content hash) to filter results.
+- `section_id`: optional section ID to restrict to a specific section.
+- `limit`: maximum number of image results to return (default: 10).
+- Returns a YAML list of images with `image_id`, `name`, `filename`, `path`, `description` (caption), `section_title`, and `document_name`.
+
+### `query_image(image: str, question: str, model: str | None = None) -> str`
+Analyze an image using a Vision-Language Model (VLM) to answer visual questions:
+- `image`: Image ID (e.g. `'doc1::0::7a8b9c0d'`), image hash/name, filename, or local file path.
+- `question`: specific question about the image (e.g. `'What is the percentage shown for 2015 in Figure 1?'`).
+- `model`: optional VLM model ID (defaults to `'glm_5.3_flash@openrouter'`).
+- Returns the VLM's visual analysis and answer based on the actual image pixels.
 
 ### `list_documents() -> str`
 Lists all documents in the corpus with their content hash, filename, section count, and routing description. Equivalent to calling `get_folder_toc()` with no folder.

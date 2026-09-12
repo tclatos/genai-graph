@@ -1022,6 +1022,177 @@ def search_sections(
     return results[:limit]
 
 
+def search_images(
+    backend: KgBackend,
+    query: str | None = None,
+    *,
+    document_id: str | None = None,
+    section_id: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Search images in the Document Graph by caption/description, filename, section, or document."""
+    cols = _table_columns(backend, "Image")
+    if not cols:
+        return []
+
+    params: dict[str, Any] = {"limit": limit}
+    conditions: list[str] = []
+
+    if document_id:
+        md_hash = resolve_document_id(backend, document_id)
+        if md_hash is None:
+            return []
+        conditions.append("i.markdown_hash = $md_hash")
+        params["md_hash"] = md_hash
+
+    if section_id:
+        conditions.append("i.section_id = $section_id")
+        params["section_id"] = section_id
+
+    q_lower = query.strip().lower() if query else ""
+    if q_lower and q_lower not in ("*", "all", ""):
+        conditions.append(
+            "(lower(coalesce(i.description, '')) CONTAINS $q OR "
+            "lower(coalesce(i.filename, '')) CONTAINS $q OR "
+            "lower(coalesce(i.name, '')) CONTAINS $q OR "
+            "lower(coalesce(s.title, '')) CONTAINS $q)"
+        )
+        params["q"] = q_lower
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    cypher = f"""
+    MATCH (s:{_SECTION_LABEL})-[:HAS_IMAGE]->(i:Image)
+    {where_clause}
+    OPTIONAL MATCH (d:Document) WHERE d.markdown_hash = i.markdown_hash
+    RETURN i.image_id AS image_id,
+           i.name AS name,
+           i.filename AS filename,
+           i.path AS path,
+           i.description AS description,
+           i.size AS size,
+           i.section_id AS section_id,
+           s.title AS section_title,
+           d.filename AS document_name,
+           i.markdown_hash AS markdown_hash
+    LIMIT $limit
+    """
+    rows, _ = _query_rows(backend, cypher, params)
+    return rows
+
+
+def execute_image_query(
+    backend: KgBackend,
+    image_ref: str,
+    question: str,
+    model: str | None = None,
+) -> str:
+    """Analyze an image with a vision-language model (VLM) and answer a question."""
+    from pathlib import Path
+
+    # 1. Try DB lookup if Image table exists
+    cols = _table_columns(backend, "Image")
+    candidate_path: str = image_ref
+    caption_context: str | None = None
+    if cols:
+        query = (
+            "MATCH (i:Image) "
+            "WHERE i.image_id = $ref OR i.name = $ref OR i.filename = $ref OR i.path = $ref "
+            "RETURN i.path AS path, i.filename AS filename, i.description AS description "
+            "LIMIT 1"
+        )
+        try:
+            rows, _ = _query_rows(backend, query, {"ref": image_ref})
+            if rows:
+                candidate_path = rows[0].get("path") or image_ref
+                caption_context = rows[0].get("description")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Error looking up image {}: {}", image_ref, exc)
+
+    # 2. Resolve to a real file path on disk
+    resolved_path: Path | None = None
+    ref_p = Path(candidate_path)
+    if ref_p.is_absolute() and ref_p.exists():
+        resolved_path = ref_p
+    else:
+        candidates = [
+            Path.cwd() / ref_p,
+            Path.cwd() / "data" / ref_p,
+            Path.cwd() / "data" / "markdown_multi" / ref_p,
+            Path.cwd() / "data" / "markdown_multi" / "images" / ref_p,
+            Path.cwd() / "data" / "markdown_multi" / "images" / ref_p.name,
+            Path.cwd() / "data" / "saved_markdown" / "images" / ref_p.name,
+            Path.cwd() / "data" / "pdfs" / ref_p,
+        ]
+        for cand in candidates:
+            if cand.exists() and cand.is_file():
+                resolved_path = cand
+                break
+
+    if resolved_path is None or not resolved_path.exists():
+        return f"Error: Image file not found on disk for reference '{image_ref}' (tried '{candidate_path}')."
+
+    # 3. Read and encode image to base64
+    import base64
+    import mimetypes
+
+    raw_bytes = resolved_path.read_bytes()
+    b64_str = base64.b64encode(raw_bytes).decode("utf-8")
+    mime_type, _ = mimetypes.guess_type(str(resolved_path))
+    if not mime_type or not mime_type.startswith("image/"):
+        ext = resolved_path.suffix.lower()
+        if ext in (".jpg", ".jpeg"):
+            mime_type = "image/jpeg"
+        elif ext == ".webp":
+            mime_type = "image/webp"
+        elif ext == ".gif":
+            mime_type = "image/gif"
+        else:
+            mime_type = "image/png"
+
+    data_url = f"data:{mime_type};base64,{b64_str}"
+
+    from genai_tk.core.factories.llm_factory import get_llm
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    system_prompt = (
+        "You are an expert visual document and image analyst. Inspect the provided image "
+        "(chart, line plot, bar graph, diagram, infographic, table, or photograph) and answer the user's "
+        "question accurately and completely, citing exact numbers, axes, labels, legends, or text where visible."
+    )
+    if caption_context:
+        system_prompt += f"\nImage context / caption: {caption_context}"
+
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(
+            content=[
+                {"type": "text", "text": question},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ]
+        ),
+    ]
+
+    vlm_model_id = model or "glm_5.3_flash@openrouter"
+    try:
+        llm = get_llm(vlm_model_id)
+        resp = llm.invoke(messages)
+        return str(resp.content)
+    except Exception as exc:
+        logger.warning("Failed invoking VLM with '{}': {}", vlm_model_id, exc)
+        for fallback in ("glm_5.2@openrouter", "default"):
+            if vlm_model_id == fallback:
+                continue
+            try:
+                logger.info("Retrying vision query with fallback '{}'...", fallback)
+                llm = get_llm(fallback)
+                resp = llm.invoke(messages)
+                return str(resp.content)
+            except Exception:
+                continue
+        return f"Error analyzing image with model '{vlm_model_id}': {exc}"
+
+
 # One Ladybug connection per (thread, db): tool calls reuse their thread's
 # connection instead of churning a new native one per call.
 _TOOL_CONN_LOCAL = threading.local()
@@ -1070,7 +1241,7 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
             BM25) ``search_sections`` mode. None keeps keyword search only.
 
     Returns:
-        ``[list_documents, get_document_toc, get_folder_toc, get_section_content, search_sections]`` tools.
+        ``[list_documents, get_document_toc, get_folder_toc, get_section_content, search_sections, search_images, query_image]`` tools.
     """
     from langchain_core.tools import tool
 
@@ -1217,4 +1388,68 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
             lines.append(line)
         return "\n".join(lines)
 
-    return [_get_folder_toc, _get_document_toc, _get_section_content, _search_sections, _list_documents]
+    @tool("search_images")
+    def _search_images(
+        query: str = "",
+        document_id: str | None = None,
+        section_id: str | None = None,
+        limit: int = 10,
+    ) -> str:
+        """Search for images, charts, plots, and figures in the document graph.
+
+        Args:
+            query: Search term matching image caption/description, filename, or section heading (e.g. 'unemployment rate', 'Figure 1', 'bar chart', '*' for all).
+            document_id: Optional document ID (filename, content hash) to filter results.
+            section_id: Optional section ID to restrict to a specific section.
+            limit: Maximum number of image results to return (default: 10).
+
+        Returns:
+            YAML list of images with image_id, name, filename, path, description/caption, section_title, and document_name.
+        """
+        try:
+            rows = search_images(
+                _connect(db_path),
+                query=query,
+                document_id=document_id,
+                section_id=section_id,
+                limit=limit,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _tool_error(exc)
+        if not rows:
+            return "No matching images found."
+        return yaml.safe_dump(rows, sort_keys=False, allow_unicode=True)
+
+    @tool("query_image")
+    def _query_image(
+        image: str,
+        question: str,
+        model: str | None = None,
+    ) -> str:
+        """Query or analyze an image using a Vision-Language Model (VLM).
+
+        Use this tool to read charts, line plots, diagrams, flowcharts, infographics, or visual figures
+        that cannot be fully parsed from plain text OCR.
+
+        Args:
+            image: Image ID (e.g. 'doc1::0::7a8b9c0d'), image hash/name, filename, or local file path.
+            question: Specific question about the image (e.g. 'What is the percentage shown for 2015 in Figure 1?').
+            model: Optional VLM model ID (defaults to 'glm_5.3_flash@openrouter').
+
+        Returns:
+            The VLM's detailed analysis answering the question based on visual contents.
+        """
+        try:
+            return execute_image_query(_connect(db_path), image_ref=image, question=question, model=model)
+        except Exception as exc:  # noqa: BLE001
+            return _tool_error(exc)
+
+    return [
+        _get_folder_toc,
+        _get_document_toc,
+        _get_section_content,
+        _search_sections,
+        _search_images,
+        _query_image,
+        _list_documents,
+    ]

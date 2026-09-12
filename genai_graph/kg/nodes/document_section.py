@@ -129,3 +129,39 @@ HAS_CHUNK: GraphRelation = GraphRelation(
     description="Section contains a chunk (embedding-bearing sub-unit)",
     field_paths=[("", "")],
 )
+
+
+# ---------------------------------------------------------------------------
+# Image nodes — extracted images associated with a MarkdownSection
+# ---------------------------------------------------------------------------
+
+
+class Image(BaseModel):
+    """An image extracted from a document's Markdown rendering."""
+
+    image_id: str = Field(..., description="Primary key: f'{section_id}::{image_hash}'")
+    section_id: str = Field(..., description="section_id of the owning MarkdownSection (foreign key)")
+    markdown_hash: str = Field(..., description="markdown_hash of the owning Document")
+    image_hash: str = Field(..., description="xxhash32 hex hash of image content")
+    name: str = Field(..., description="Image name / hash code")
+    filename: str = Field(..., description="Image filename on disk (e.g. {hash}.png)")
+    path: str = Field(..., description="Path to image file (relative to project or absolute)")
+    description: str | None = Field(default=None, description="Extracted caption or description of image")
+    size: int | None = Field(default=None, description="Image file size in bytes")
+
+
+ImageNode: GraphNode = GraphNode(
+    node_class=Image,
+    name_from="name",
+    key_from="image_id",
+    description="An image extracted from a document section",
+    explicitly_defined=True,
+)
+
+HAS_IMAGE: GraphRelation = GraphRelation(
+    name="HAS_IMAGE",
+    from_node=SectionNode,
+    to_node=ImageNode,
+    description="Section contains an extracted image",
+    field_paths=[("", "")],
+)

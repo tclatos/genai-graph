@@ -14,6 +14,7 @@ in bench-default paths:
 
 from __future__ import annotations
 
+import random
 import shutil
 import time
 from pathlib import Path
@@ -29,8 +30,30 @@ MD_FILENAME_SUFFIX = "_pdf.md"
 
 def _convert_pdf(pdf_path: Path, markdownize_profile: str = "medium") -> str:
     """Return the Markdown text for *pdf_path* via the configured markdownize profile."""
+    import asyncio
+    import inspect
+
     from genai_tk.extra.markdownize.factory import ConverterFactory
     from genai_tk.workflow.markdownize.config import get_markdownize_profile
+
+    def _sync_convert(conv_obj: Any, path: Path) -> str:
+        ret = conv_obj.convert(path)
+        if inspect.isawaitable(ret):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None and loop.is_running():
+                # Running inside existing loop (e.g. nested task)
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    ret = pool.submit(asyncio.run, ret).result()
+            else:
+                ret = asyncio.run(ret)
+        if hasattr(ret, "content"):
+            return str(ret.content)
+        return str(ret)
 
     try:
         prof = get_markdownize_profile(markdownize_profile)
@@ -54,25 +77,29 @@ def _convert_pdf(pdf_path: Path, markdownize_profile: str = "medium") -> str:
                 max_retries,
             )
             conv = ConverterFactory.create(converter_name)
-            res = conv.convert(pdf_path)
-            if res and res.content:
-                return res.content
+            content = _sync_convert(conv, pdf_path)
+            if content and content.strip():
+                return content
         except Exception as exc:
             logger.warning("Conversion attempt {} failed for {}: {}", attempt, pdf_path.name, exc)
             if attempt < max_retries:
-                time.sleep(2**attempt)
+                err = str(exc).lower()
+                if "429" in err or "rate limit" in err:
+                    time.sleep(min(60.0, 5 * 2**attempt) + random.uniform(0, 5))
+                else:
+                    time.sleep(2**attempt)
             else:
                 logger.warning("Primary converter '{}' exhausted. Trying fallback 'anydoc'...", converter_name)
                 try:
-                    res = ConverterFactory.create("anydoc").convert(pdf_path)
-                    if res and res.content:
-                        return res.content
+                    content = _sync_convert(ConverterFactory.create("anydoc"), pdf_path)
+                    if content and content.strip():
+                        return content
                 except Exception as fb_exc:
                     logger.warning("Fallback 'anydoc' failed: {}. Trying 'markitdown'...", fb_exc)
                     try:
-                        res = ConverterFactory.create("markitdown").convert(pdf_path)
-                        if res and res.content:
-                            return res.content
+                        content = _sync_convert(ConverterFactory.create("markitdown"), pdf_path)
+                        if content and content.strip():
+                            return content
                     except Exception as m_exc:
                         raise RuntimeError(f"All conversion strategies failed for {pdf_path}: {m_exc}") from m_exc
     raise RuntimeError(f"No Markdown generated for {pdf_path}")
@@ -96,19 +123,23 @@ def markdownize_target(
         logger.debug("Markdown already exists in saved dir: {}", out_md)
         return out_md
 
+    clean_doc = doc_name[:-4] if doc_name.lower().endswith(".pdf") else doc_name
     pdf_root = pdfs_dir or (Path.cwd() / "data" / "pdfs")
-    pdf_path = pdf_root / f"{doc_name}.pdf"
-    if not pdf_path.exists():
-        sub_candidate = pdf_root / "documents" / f"{doc_name}.pdf"
-        if sub_candidate.exists():
-            pdf_path = sub_candidate
+    candidates = [
+        pdf_root / f"{clean_doc}.pdf",
+        pdf_root / doc_name,
+        pdf_root / "documents" / f"{clean_doc}.pdf",
+        pdf_root / "documents" / doc_name,
+    ]
+    pdf_path = next((p for p in candidates if p.exists() and p.is_file()), None)
+    if pdf_path is None:
+        matches = list(pdf_root.rglob(f"{clean_doc}.pdf")) or list(pdf_root.rglob(doc_name))
+        if matches:
+            pdf_path = matches[0]
         else:
-            # Check recursive match under pdf_root
-            matches = list(pdf_root.rglob(f"{doc_name}.pdf"))
-            if matches:
-                pdf_path = matches[0]
-            else:
-                raise FileNotFoundError(f"PDF not found for doc {doc_name!r} at {pdf_path}. Run fetch step first.")
+            raise FileNotFoundError(
+                f"PDF not found for doc {doc_name!r} at {pdf_root / f'{clean_doc}.pdf'}. Run fetch step first."
+            )
 
     content = _convert_pdf(pdf_path, markdownize_profile=markdownize_profile)
     out_md.write_text(content, encoding="utf-8")

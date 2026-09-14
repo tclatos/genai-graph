@@ -311,6 +311,7 @@ class FlatSection(BaseModel):
     )
     description: str | None = Field(default=None, description="One-sentence routing description of the section")
     summary: str | None = Field(default=None, description="Short paragraph summary (substantial sections only)")
+    keywords: list[str] = Field(default_factory=list, description="Extracted keywords for search")
     summary_source: str | None = Field(
         default=None, description="How description/summary were produced (e.g. 'llm'), or None when not yet set"
     )

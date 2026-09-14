@@ -503,6 +503,8 @@ def build_toc_tree(
                 node["description"] = row["description"]
             if include_summaries and row.get("summary"):
                 node["summary"] = row["summary"]
+            if row.get("keywords"):
+                node["keywords"] = row["keywords"]
             children = build(row["section_id"])
             if children:
                 node["sections"] = children
@@ -1058,7 +1060,9 @@ def search_images(
                 handler = EmbeddingsHandler(embeddings_id=effective_embeddings_id)
                 query_vec = handler.compute_embeddings(q_str)
                 k = max(limit * _HNSW_OVERFETCH, 20)
-                cypher_vec = f"CALL QUERY_VECTOR_INDEX('image_embedding_index', $vec, {k}) RETURN node, distance"
+                cypher_vec = (
+                    f"CALL QUERY_VECTOR_INDEX('Image', 'image_embedding_index', $vec, {k}) RETURN node, distance"
+                )
                 df = backend.execute_get_as_df(cypher_vec, {"vec": query_vec}, union=False)
                 if df is not None and not df.empty:
                     for _, row in df.iterrows():
@@ -1212,10 +1216,11 @@ def execute_image_query(
     """Analyze an image with a vision-language model (VLM) and answer a question."""
     from pathlib import Path
 
-    # 1. Try DB lookup if Image table exists
-    cols = _table_columns(backend, "Image")
     candidate_path: str = image_ref
     caption_context: str | None = None
+
+    # 1. Try DB lookup if Image table exists
+    cols = _table_columns(backend, "Image")
     if cols:
         query = (
             "MATCH (i:Image) "
@@ -1237,13 +1242,15 @@ def execute_image_query(
     if ref_p.is_absolute() and ref_p.exists():
         resolved_path = ref_p
     else:
+        clean_name = ref_p.name
         candidates = [
             Path.cwd() / ref_p,
+            Path.cwd() / "images" / clean_name,
             Path.cwd() / "data" / ref_p,
+            Path.cwd() / "data" / "images" / clean_name,
             Path.cwd() / "data" / "markdown_multi" / ref_p,
-            Path.cwd() / "data" / "markdown_multi" / "images" / ref_p,
-            Path.cwd() / "data" / "markdown_multi" / "images" / ref_p.name,
-            Path.cwd() / "data" / "saved_markdown" / "images" / ref_p.name,
+            Path.cwd() / "data" / "markdown_multi" / "images" / clean_name,
+            Path.cwd() / "data" / "saved_markdown" / "images" / clean_name,
             Path.cwd() / "data" / "pdfs" / ref_p,
         ]
         for cand in candidates:
@@ -1251,14 +1258,37 @@ def execute_image_query(
                 resolved_path = cand
                 break
 
-    if resolved_path is None or not resolved_path.exists():
-        return f"Error: Image file not found on disk for reference '{image_ref}' (tried '{candidate_path}')."
+        # If still not found, try recursive search in data/ and images/
+        if resolved_path is None:
+            for search_root in (Path.cwd() / "data", Path.cwd() / "images"):
+                if search_root.exists():
+                    for match in search_root.rglob(clean_name):
+                        if match.is_file():
+                            resolved_path = match
+                            break
+                    if resolved_path is not None:
+                        break
 
-    # 3. Read and encode image to base64
+    if resolved_path is None or not resolved_path.exists():
+        return (
+            f"Error: Image file not found on disk for reference '{image_ref}'. "
+            "Check the image filename or comment in the section markdown (e.g. `<!-- Image: {hash}.png -->`)."
+        )
+
+    # 3. Guard: only real image files can be sent to the VLM.
+    image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+    if resolved_path.suffix.lower() not in image_extensions:
+        return (
+            f"Error: '{resolved_path.name}' is not an image file (type '{resolved_path.suffix or 'unknown'}'). "
+            "query_image only accepts image files."
+        )
+
     import base64
     import mimetypes
 
     raw_bytes = resolved_path.read_bytes()
+    if len(raw_bytes) > 20 * 1024 * 1024:
+        return f"Error: Image file too large ({len(raw_bytes)} bytes). Ask about a smaller image or crop."
     b64_str = base64.b64encode(raw_bytes).decode("utf-8")
     mime_type, _ = mimetypes.guess_type(str(resolved_path))
     if not mime_type or not mime_type.startswith("image/"):
@@ -1354,18 +1384,26 @@ def _tool_error(exc: Exception) -> str:
     return f"Error: {type(exc).__name__}: {exc}"
 
 
-def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = None) -> list[BaseTool]:
+def create_document_graph_tools(
+    db_path: str,
+    *,
+    embeddings_id: str | None = None,
+    max_image_queries: int = 3,
+) -> list[BaseTool]:
     """Build the LangChain tools an agent uses to navigate a Document Graph.
 
     Args:
         db_path: Path to the Ladybug database holding the ingested graph.
         embeddings_id: Optional embeddings model id enabling the hybrid (vector +
             BM25) ``search_sections`` mode. None keeps keyword search only.
+        max_image_queries: Maximum number of visual VLM queries allowed per turn.
 
     Returns:
-        ``[list_documents, get_document_toc, get_folder_toc, get_section_content, search_sections, search_images, query_image]`` tools.
+        ``[get_folder_toc, get_document_toc, get_section_content, search_sections, query_image, list_documents]`` tools.
     """
     from langchain_core.tools import tool
+
+    query_image_count = 0
 
     @tool("list_documents")
     def _list_documents() -> str:
@@ -1510,71 +1548,6 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
             lines.append(line)
         return "\n".join(lines)
 
-    @tool("search_images")
-    def _search_images(
-        query: str = "",
-        document_id: str | None = None,
-        section_id: str | None = None,
-        limit: int = 10,
-    ) -> str:
-        """Search for images, charts, plots, and figures in the document graph.
-
-        Args:
-            query: Search term matching image caption/description, filename, or section heading (e.g. 'unemployment rate', 'Figure 1', 'bar chart', '*' for all).
-            document_id: Optional document ID (filename, content hash) to filter results.
-            section_id: Optional section ID to restrict to a specific section.
-            limit: Maximum number of image results to return (default: 10).
-
-        Returns:
-            YAML list of images with image_id, name, filename, path, description/caption, section_title, and document_name.
-        """
-        try:
-            rows = search_images(
-                _connect(db_path),
-                query=query,
-                document_id=document_id,
-                section_id=section_id,
-                limit=limit,
-                embeddings_id=embeddings_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return _tool_error(exc)
-        if not rows:
-            return "No matching images found."
-        return yaml.safe_dump(rows, sort_keys=False, allow_unicode=True)
-
-    @tool("search_tables")
-    def _search_tables(
-        query: str = "",
-        document_id: str | None = None,
-        section_id: str | None = None,
-        limit: int = 10,
-    ) -> str:
-        """Search for structured tables (HTML or Markdown) in the document graph.
-
-        Args:
-            query: Search term matching table caption, title, headers, or content (e.g. 'quarterly revenue', 'Table 1', 'operating expenses', '*' for all).
-            document_id: Optional document ID (filename, content hash) to filter results.
-            section_id: Optional section ID to restrict to a specific section.
-            limit: Maximum number of table results to return (default: 10).
-
-        Returns:
-            YAML list of tables with table_id, name, table_format, caption, token_count, content, section_title, and document_name.
-        """
-        try:
-            rows = search_tables(
-                _connect(db_path),
-                query=query,
-                document_id=document_id,
-                section_id=section_id,
-                limit=limit,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return _tool_error(exc)
-        if not rows:
-            return "No matching tables found."
-        return yaml.safe_dump(rows, sort_keys=False, allow_unicode=True)
-
     @tool("query_image")
     def _query_image(
         image: str,
@@ -1583,17 +1556,27 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
     ) -> str:
         """Query or analyze an image using a Vision-Language Model (VLM).
 
-        Use this tool to read charts, line plots, diagrams, flowcharts, infographics, or visual figures
-        that cannot be fully parsed from plain text OCR.
+        Use ONLY when answering a visual question (e.g. reading complex chart data points,
+        axis values, legend mappings, line plot coordinates, or schematic diagrams) that cannot
+        be determined from the text or table outline. This is an expensive call and should only
+        be invoked when you have clear evidence that inspecting the image is necessary.
+        Max 3 image query calls are permitted per question.
 
         Args:
-            image: Image ID (e.g. 'doc1::0::7a8b9c0d'), image hash/name, filename, or local file path.
-            question: Specific question about the image (e.g. 'What is the percentage shown for 2015 in Figure 1?').
+            image: Image filename (e.g. '7a8b9c0d.png'), image hash code, or image file path.
+            question: Specific, precise visual question to answer.
             model: Optional VLM model ID (defaults to 'glm_5.3_flash@openrouter').
 
         Returns:
-            The VLM's detailed analysis answering the question based on visual contents.
+            The VLM's detailed analysis, or a clear statement if the question cannot be answered from the image.
         """
+        nonlocal query_image_count
+        if query_image_count >= max_image_queries:
+            return (
+                f"Error: Maximum image query limit ({max_image_queries}) reached for this question. "
+                "Synthesize your answer using the text and section descriptions already retrieved."
+            )
+        query_image_count += 1
         try:
             return execute_image_query(_connect(db_path), image_ref=image, question=question, model=model)
         except Exception as exc:  # noqa: BLE001
@@ -1604,8 +1587,6 @@ def create_document_graph_tools(db_path: str, *, embeddings_id: str | None = Non
         _get_document_toc,
         _get_section_content,
         _search_sections,
-        _search_images,
-        _search_tables,
         _query_image,
         _list_documents,
     ]

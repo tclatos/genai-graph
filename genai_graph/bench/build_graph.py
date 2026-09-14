@@ -131,7 +131,12 @@ def markdownize_target(
         pdf_root / "documents" / f"{clean_doc}.pdf",
         pdf_root / "documents" / doc_name,
     ]
-    pdf_path = next((p for p in candidates if p.exists() and p.is_file()), None)
+    # Files smaller than 1KB cannot be real documents (e.g. leftover error stubs
+    # written as <doc>.pdf); skipping them lets the real copy in documents/ win.
+    pdf_path = next(
+        (p for p in candidates if p.exists() and p.is_file() and p.stat().st_size > 1000),
+        None,
+    )
     if pdf_path is None:
         matches = list(pdf_root.rglob(f"{clean_doc}.pdf")) or list(pdf_root.rglob(doc_name))
         if matches:

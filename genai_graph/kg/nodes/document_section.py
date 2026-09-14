@@ -49,6 +49,7 @@ class MarkdownSection(BaseModel):
         default=None, description="One-sentence routing description: what this section contains"
     )
     summary: str | None = Field(default=None, description="Short paragraph summary; only for substantial sections")
+    keywords: list[str] = Field(default_factory=list, description="Extracted search keywords for the section")
     summary_source: str | None = Field(
         default=None, description="How the description/summary was produced: 'llm', or None if not yet summarized"
     )
@@ -127,79 +128,5 @@ HAS_CHUNK: GraphRelation = GraphRelation(
     from_node=SectionNode,
     to_node=SectionChunkNode,
     description="Section contains a chunk (embedding-bearing sub-unit)",
-    field_paths=[("", "")],
-)
-
-
-# ---------------------------------------------------------------------------
-# Image nodes — extracted images associated with a MarkdownSection
-# ---------------------------------------------------------------------------
-
-
-class Image(BaseModel):
-    """An image extracted from a document's Markdown rendering."""
-
-    image_id: str = Field(..., description="Primary key: f'{section_id}::{image_hash}'")
-    section_id: str = Field(..., description="section_id of the owning MarkdownSection (foreign key)")
-    markdown_hash: str = Field(..., description="markdown_hash of the owning Document")
-    image_hash: str = Field(..., description="xxhash32 hex hash of image content")
-    name: str = Field(..., description="Image name / hash code")
-    filename: str = Field(..., description="Image filename on disk (e.g. {hash}.png)")
-    path: str = Field(..., description="Path to image file (relative to project or absolute)")
-    description: str | None = Field(default=None, description="Extracted caption or description of image")
-    size: int | None = Field(default=None, description="Image file size in bytes")
-
-
-ImageNode: GraphNode = GraphNode(
-    node_class=Image,
-    name_from="name",
-    key_from="image_id",
-    description="An image extracted from a document section",
-    explicitly_defined=True,
-)
-
-HAS_IMAGE: GraphRelation = GraphRelation(
-    name="HAS_IMAGE",
-    from_node=SectionNode,
-    to_node=ImageNode,
-    description="Section contains an extracted image",
-    field_paths=[("", "")],
-)
-
-
-# ---------------------------------------------------------------------------
-# Table nodes — extracted tables associated with a MarkdownSection
-# ---------------------------------------------------------------------------
-
-
-class MarkdownTable(BaseModel):
-    """A structured table extracted from a document section (HTML or Markdown)."""
-
-    table_id: str = Field(..., description="Primary key: f'{section_id}::t{table_index}'")
-    section_id: str = Field(..., description="section_id of the owning MarkdownSection (foreign key)")
-    markdown_hash: str = Field(..., description="markdown_hash of the owning Document")
-    table_index: int = Field(..., description="0-based index of the table within its section")
-    name: str = Field(..., description="Table name or title (e.g. caption, or 'Table {index}')")
-    table_format: str = Field(..., description="Table format: 'html' or 'markdown'")
-    content: str = Field(..., description="Full table markup (HTML <table>...</table> or Markdown pipe table)")
-    caption: str | None = Field(default=None, description="Extracted caption or description of table")
-    token_count: int = Field(default=0, description="Approximate token count of table content")
-
-
-Table = MarkdownTable
-
-TableNode: GraphNode = GraphNode(
-    node_class=MarkdownTable,
-    name_from="name",
-    key_from="table_id",
-    description="A table extracted from a document section",
-    explicitly_defined=True,
-)
-
-HAS_TABLE: GraphRelation = GraphRelation(
-    name="HAS_TABLE",
-    from_node=SectionNode,
-    to_node=TableNode,
-    description="Section contains an extracted table",
     field_paths=[("", "")],
 )

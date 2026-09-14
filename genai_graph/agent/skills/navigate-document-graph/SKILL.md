@@ -35,8 +35,10 @@ Every section carries a one-line `description` (and optional `summary`) that ser
 
 5. **Visual Charts, Plots & Image Inspection**:
    - When a question requires reading a visual chart, graph, diagram, line plot, or figure that cannot be resolved from text OCR alone:
-     1. Search for relevant figures with `search_images(query="<figure topic or number>", document_id="<doc_id>")`.
-     2. Call `query_image(image="<image_id or path>", question="<specific visual question>")` to have the Vision-Language Model inspect the chart and return exact data points, percentages, labels, and trends.
+     1. Locate the relevant section using `get_document_toc` or `search_sections`.
+     2. Read the section text with `get_section_content` to locate the image reference (e.g. `<!-- Image: {hash}.png -->` or `![alt](images/{hash}.png)`).
+     3. Call `query_image(image="<image filename or hash>", question="<specific, precise visual question>")` to have the Vision-Language Model inspect the chart and return exact data points, percentages, labels, and trends.
+     4. Strictly limit `query_image` calls (maximum 3 per question). Only invoke when visual evidence is necessary. If the VLM states it cannot answer from the image, proceed with text/table evidence.
 
 6. **Iterate & Synthesize**:
    - For multi-period, multi-table, or multi-document questions, repeat across the relevant sections until grounded evidence is obtained for every part of the question.
@@ -81,3 +83,4 @@ Every section carries a one-line `description` (and optional `summary`) that ser
 | `get_document_toc` | Get section outline / hierarchy | `document_id: str`, `max_level: int = 2`, `include_summaries: bool = False` |
 | `get_section_content` | Read raw Markdown body text | `section_ids: str`, `start_line: int \| None`, `max_lines: int \| None` |
 | `search_sections` | Hybrid vector + BM25 search | `query: str`, `document_id: str \| None`, `folder_id: str \| None`, `limit: int = 20` |
+| `query_image` | VLM inspection of chart/plot/diagram | `image: str`, `question: str`, `model: str \| None` |

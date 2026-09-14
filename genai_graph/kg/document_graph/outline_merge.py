@@ -61,7 +61,7 @@ def _find_heading_line(lines: list[str], title: str, cursor: int) -> int | None:
 
 
 def _fold_into(section: FlatSection, entry: OutlineEntry) -> None:
-    """Append an unmatched entry's description/summary onto an existing section."""
+    """Append an unmatched entry's description/summary/keywords onto an existing section."""
     if entry.description:
         prefix = section.description or ""
         section.description = f"{prefix} {entry.description}".strip() if prefix else entry.description
@@ -69,6 +69,12 @@ def _fold_into(section: FlatSection, entry: OutlineEntry) -> None:
     if entry.summary:
         prefix_s = section.summary or ""
         section.summary = f"{prefix_s} {entry.summary}".strip() if prefix_s else entry.summary
+    if entry.keywords:
+        existing_kws = set(section.keywords)
+        for kw in entry.keywords:
+            if kw not in existing_kws:
+                section.keywords.append(kw)
+                existing_kws.add(kw)
 
 
 def merge_outline(raw: str, outline: DocumentOutline, algo_headings: list[tuple[str, int, int]]) -> list[FlatSection]:
@@ -113,6 +119,8 @@ def merge_outline(raw: str, outline: DocumentOutline, algo_headings: list[tuple[
                 section.description = entry.description
             if entry.summary:
                 section.summary = entry.summary
+            if entry.keywords:
+                section.keywords = list(entry.keywords)
             if entry.description or entry.summary:
                 section.summary_source = "llm"
         return sections
@@ -170,6 +178,8 @@ def merge_outline(raw: str, outline: DocumentOutline, algo_headings: list[tuple[
         entry_idx_to_section[entry_idx] = section
         section.description = matched[entry_idx][1].description
         section.summary = matched[entry_idx][1].summary
+        if matched[entry_idx][1].keywords:
+            section.keywords = list(matched[entry_idx][1].keywords)
         section.summary_source = "llm"
 
     # Fold unmatched entries into the most recent matched section in entry order.

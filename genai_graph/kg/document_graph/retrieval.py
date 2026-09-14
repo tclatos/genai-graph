@@ -31,7 +31,7 @@ _CHUNK_TABLE = "SectionChunk"
 _EMBEDDING_FIELD = "chunk_embedding"
 _DEFAULT_FTS_INDEX = "section_fts"
 _DEFAULT_VECTOR_INDEX = "chunk_embedding_index"
-_FTS_FIELDS = ("title", "text", "description")
+_FTS_FIELDS = ("title", "text", "description", "summary")
 
 
 class RetrievalConfig(BaseModel):
@@ -112,25 +112,6 @@ def ensure_chunk_embedding_column(backend: KgBackend, dim: int) -> None:
     )
 
 
-def ensure_image_embedding_column(backend: KgBackend, dim: int) -> None:
-    """Idempotently ensure ``Image.image_embedding`` exists as ``FLOAT[dim]``."""
-    want = f"FLOAT[{dim}]"
-    existing = _column_type(backend, "Image", "image_embedding")
-    if existing is None:
-        try:
-            backend.execute(f"ALTER TABLE Image ADD image_embedding {want}")
-            logger.info("Added Image.image_embedding {}", want)
-        except Exception as exc:  # noqa: BLE001
-            raise RetrievalError(f"Could not add image_embedding {want} to Image: {exc}") from exc
-        return
-    if existing.replace(" ", "") == want.replace(" ", ""):
-        return
-    raise RetrievalError(
-        f"Image.image_embedding is {existing} but the configured model needs {want}. "
-        "Rebuild the graph with force=True after changing the embeddings model."
-    )
-
-
 def ensure_section_fts_index(backend: KgBackend, index_name: str = _DEFAULT_FTS_INDEX) -> str | None:
     """Create the native FTS index over the available MarkdownSection text fields.
 
@@ -169,7 +150,9 @@ def prepare_chunk_inputs(
     for section in sections:
         pieces = chunk_section_text(section.text, size_tokens=chunk_size_tokens)
         desc = section.description or ""
-        header = section.title + (f" | {desc}" if desc else "")
+        kw_list = getattr(section, "keywords", []) or []
+        kw_str = ", ".join(kw_list) if kw_list else ""
+        header = section.title + (f" | {desc}" if desc else "") + (f" | Keywords: {kw_str}" if kw_str else "")
         for idx, (chunk_text, token_count) in enumerate(pieces):
             embed_input = f"{header}\n\n{chunk_text}"
             chunk_id = f"{section.section_id}::c{idx}"
@@ -202,32 +185,6 @@ def attach_chunk_embeddings(
                 },
             )
         )
-    return results
-
-
-def prepare_image_inputs(images: list[Any]) -> list[tuple[str, str, str]]:
-    """Build embedding text/caption representation for each image node (pure CPU, no I/O).
-
-    Returns:
-        List of ``(image_id, path, embed_input)`` tuples.
-    """
-    items: list[tuple[str, str, str]] = []
-    for img in images:
-        desc = getattr(img, "description", None) or ""
-        name = getattr(img, "name", None) or getattr(img, "filename", None) or ""
-        embed_input = f"Image figure chart: {name} | {desc}" if desc else f"Image figure chart: {name}"
-        items.append((img.image_id, img.path, embed_input))
-    return items
-
-
-def attach_image_embeddings(images: list[Any], embeddings: list[list[float]]) -> list[dict[str, Any]]:
-    """Pair images with their computed embeddings as image node dicts."""
-    results: list[dict[str, Any]] = []
-    for img, emb in zip(images, embeddings, strict=True):
-        img_dict = img.model_dump()
-        img_dict["name"] = img.name
-        img_dict["image_embedding"] = emb
-        results.append(img_dict)
     return results
 
 

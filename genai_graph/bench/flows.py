@@ -313,15 +313,20 @@ def build_graph_flow(cfg: BenchConfig) -> dict[str, Any]:
 def run_questions_flow(
     cfg: BenchConfig,
     questions: list[BenchQuestion] | None = None,
-) -> list[BenchRunRecord]:
-    """Run questions in parallel through the docgraph agent."""
+) -> list[str]:
+    """Run questions in parallel through the docgraph agent.
+
+    Returns the run IDs covered (cached + newly executed). Full run records stay
+    on disk in the runs JSONL — passing them between Prefect flows would blow the
+    flow-run parameter size limit once tool results accumulate.
+    """
     configure_bench_monitoring(cfg.monitoring, project_name=f"bench-{cfg.profile_name}")
 
     if questions is None:
         adapter = get_benchmark_adapter(cfg.adapter)
         all_qs = adapter.load_dataset()
-        doc_set = set(cfg.docs)
-        questions = [q for q in all_qs if any(d in doc_set for d in q.doc_names)]
+        doc_set = {d.removesuffix(".pdf") for d in cfg.docs} | set(cfg.docs)
+        questions = [q for q in all_qs if any(d.removesuffix(".pdf") in doc_set or d in doc_set for d in q.doc_names)]
         if cfg.question_ids:
             q_set = set(cfg.question_ids)
             questions = [q for q in questions if q.id in q_set]
@@ -343,7 +348,7 @@ def run_questions_flow(
         logger.info("Reusing {} existing run record(s) from {}", len(cached_runs), runs_path)
 
     if not to_run:
-        return cached_runs
+        return [r.id for r in cached_runs]
 
     logger.info("Executing {} question(s) (concurrency={})...", len(to_run), cfg.question_concurrency)
     futures = [
@@ -359,21 +364,29 @@ def run_questions_flow(
         )
         for q in to_run
     ]
-    new_runs = [f.result() for f in futures]
-    return cached_runs + new_runs
+    new_run_ids = [f.result().id for f in futures]
+    return [r.id for r in cached_runs] + new_run_ids
 
 
 @flow(name="bench-grade")
 def grade_flow(
     cfg: BenchConfig,
-    runs: list[BenchRunRecord] | None = None,
+    run_ids: list[str] | None = None,
 ) -> list[BenchScoreRecord]:
-    """Grade question runs using LLM-as-judge."""
-    if runs is None:
-        runs_path = Path(cfg.runs)
-        if not runs_path.exists():
-            raise FileNotFoundError(f"Runs file not found: {runs_path}. Execute 'run' step first.")
-        runs = list(load_existing_runs(runs_path).values())
+    """Grade question runs using LLM-as-judge.
+
+    Run records are always loaded from the runs JSONL (never passed through flow
+    parameters — they carry large tool results that exceed Prefect's parameter
+    size limit). When *run_ids* is given, only those runs are graded; otherwise
+    every record in the runs file is graded.
+    """
+    runs_path = Path(cfg.runs)
+    if not runs_path.exists():
+        raise FileNotFoundError(f"Runs file not found: {runs_path}. Execute 'run' step first.")
+    runs = list(load_existing_runs(runs_path).values())
+    if run_ids is not None:
+        id_set = set(run_ids)
+        runs = [r for r in runs if r.id in id_set]
 
     adapter = get_benchmark_adapter(cfg.adapter)
     rubric = adapter.get_judge_rubric()
@@ -450,14 +463,14 @@ def full_bench_flow(cfg: BenchConfig, step: str | None = None, skip: list[str] |
         outcome["graph"] = build_graph_flow(cfg)
 
     # 4. Run Questions
-    runs: list[BenchRunRecord] | None = None
+    run_ids: list[str] | None = None
     if _should_run("run"):
-        runs = run_questions_flow(cfg)
-        outcome["runs"] = len(runs)
+        run_ids = run_questions_flow(cfg)
+        outcome["runs"] = len(run_ids)
 
     # 5. Grade
     if _should_run("grade") and cfg.judge_enabled:
-        scores = grade_flow(cfg, runs=runs)
+        scores = grade_flow(cfg, run_ids=run_ids)
         outcome["scores"] = len(scores)
 
         # Compute and persist summary

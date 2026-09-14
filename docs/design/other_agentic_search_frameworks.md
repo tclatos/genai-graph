@@ -120,3 +120,48 @@ If you are developing your own system to handle these types of benchmarks, we ca
 [7] [https://arxiv.org](https://arxiv.org/abs/2603.08655)
 [8] [https://arxiv.org](https://arxiv.org/abs/2311.11944)
 [9] [https://arxiv.org](https://arxiv.org/abs/2606.03829)
+
+
+To achieve peak performance on the LongBench-Doc and MMLongBench-Doc benchmarks, engineering teams have shifted focus away from brute-force model context window upgrades toward sophisticated agentic execution scaffolding and evaluation harnesses. [1, 2] 
+Because these benchmarks require cross-page reasoning, chart/table analysis, and spotting unanswerable trick questions, the layout of your agent's scaffolding is what determines its ultimate score. The leading architectural frameworks and evaluation approaches break down as follows: [2, 3] 
+------------------------------
+## 1. The Best Agentic Frameworks & Architectures (SOTA Approaches)
+Instead of feeding an entire 50-page PDF directly into a vision model (which degrades visual grounding and introduces massive context noise), the winning paradigms utilize a multi-agent or tool-augmented pipeline: [4, 5] 
+
+* 
+* DocLens Framework (Evidence Localization & Zoom): Considered one of the highest-performing specific approaches for MMLongBench-Doc. It operates like a camera lens.
+* Global Navigation: A top-level agent scans the structural layouts across all pages.
+   * Zoom-In Localization: Instead of processing low-res multi-page collages, it maps the coordinates of critical elements (like a specific chart or table paragraph) and fetches high-resolution crops of just those elements.
+   * Sampling-Adjudication: It runs parallel consensus tracks over the local evidence to synthesize a final answer. [4] 
+* MDocAgent (Specialized Multi-Agent Routing): A modular architecture that divides the document labor among five distinct micro-agents:
+1. General Agent: Manages overarching intent.
+   2. Text Agent: Handles heavy OCR and semantic cross-referencing.
+   3. Image/Visual Agent: Focuses strictly on pixel layout, figures, and flowcharts.
+   4. Critical Agent: Flags hallucinations and filters out the benchmark's unanswerable questions.
+   5. Summarizing Agent: Compiles cross-page fragments into the final response. [3, 5] 
+* 
+
+------------------------------
+## 2. The De Facto Evaluation Harnesses
+If you are setting up an environment to test or fine-tune models against this benchmark, you must look closely at how the code evaluates output tokens. [6] 
+
+* 
+* MMLongBench-Doc-V2 (VectifyAI): If you use the native vanilla v1 GitHub harness, your scores will skew artificially low. The [VectifyAI MMLongBench-Doc-V2 harness](https://github.com/VectifyAI/MMLongBench-Doc-V2) optimizes evaluation in two major ways:
+* Semantic LLM Judging: Replacing strict string-matching metrics (which fail a model if it outputs a number with commas like 1,358,000 instead of 1358000) with a pinned LLM judge to verify pure factual alignment.
+   * Annotation Correction: It overrides 106 broken or ambiguous original ground-truth answers to ensure a perfectly clean feedback loop. [7] 
+* VLMEvalKit Integration: The official dataset has been natively packaged into [VLMEvalKit](https://github.com/open-compass/VLMEvalKit), making it the cleanest out-of-the-box evaluation harness if you want a standardized multi-modal testing pipeline without writing custom dataset parsers. [6] 
+* 
+
+------------------------------
+## Key Strategy for Implementation
+If you are engineering a system to tackle long-document benchmarks, do not focus on model weights. A bad scaffold causes top-tier models to lose up to 36% in accuracy due to context compaction errors and poor error recovery. Invest your efforts into implementing structured JSON schemas for tool calls, building hierarchical layout memory (storing page structure separately from page images), and adding a explicit hallucination/unanswerable gatekeeping step. [2, 3, 8] 
+Are you planning to build a custom pipeline using open-source toolkits, or are you looking to optimize an existing agent framework to better handle cross-page dependencies?
+
+[1] [https://arxiv.org](https://arxiv.org/html/2605.23950v1)
+[2] [https://www.linkedin.com](https://www.linkedin.com/posts/lobus_many-engineers-i-talk-to-can-name-three-models-activity-7468097046902648832-7-yv)
+[3] [https://github.com](https://github.com/mayubo2333/MMLongBench-Doc)
+[4] [https://huggingface.co](https://huggingface.co/papers?q=MMLongBench-Doc)
+[5] [https://huggingface.co](https://huggingface.co/papers/2503.13964)
+[6] [https://github.com](https://github.com/edinburghnlp/mmlongbench)
+[7] [https://arxiv.org](https://arxiv.org/abs/2608.03397)
+[8] [https://x.com](https://x.com/nicbstme/status/2051131906327212298)

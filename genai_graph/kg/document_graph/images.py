@@ -6,8 +6,24 @@ import re
 from pathlib import Path
 
 from loguru import logger
+from pydantic import BaseModel, Field
 
-from genai_graph.kg.nodes.document_section import Image, MarkdownSection
+from genai_graph.kg.nodes.document_section import MarkdownSection
+
+
+class Image(BaseModel):
+    """An image extracted from a document's Markdown rendering."""
+
+    image_id: str = Field(..., description="Primary key: f'{section_id}::{image_hash}'")
+    section_id: str = Field(..., description="section_id of the owning MarkdownSection (foreign key)")
+    markdown_hash: str = Field(..., description="markdown_hash of the owning Document")
+    image_hash: str = Field(..., description="xxhash32 hex hash of image content")
+    name: str = Field(..., description="Image name / hash code")
+    filename: str = Field(..., description="Image filename on disk (e.g. {hash}.png)")
+    path: str = Field(..., description="Path to image file (relative to project or absolute)")
+    description: str | None = Field(default=None, description="Extracted caption or description of image")
+    size: int | None = Field(default=None, description="Image file size in bytes")
+
 
 # Matches: <!-- Image: filename.png (hash: 1234abcd) -->
 # optionally followed by markdown image: ![alt](url "title")
@@ -52,7 +68,7 @@ def _is_generic_alt(alt: str, filename: str, img_hash: str) -> bool:
         return True
     if cleaned in ("image", "img", "figure", "photo", "picture", "chart", "illustration"):
         return True
-    if cleaned.startswith("image:") or cleaned.startswith("img_") or cleaned == filename.lower():
+    if cleaned.startswith(("image:", "img_")) or cleaned == filename.lower():
         return True
     if cleaned == img_hash.lower():
         return True
@@ -70,7 +86,7 @@ def _find_caption_after_pos(text: str, pos: int) -> str | None:
         if not stripped:
             continue
         # Stop if we hit a heading or another image or HTML block
-        if stripped.startswith("#") or stripped.startswith("![") or stripped.startswith("<!--"):
+        if stripped.startswith(("#", "![", "<!--")):
             break
 
         non_empty_count += 1
@@ -119,7 +135,6 @@ def extract_section_images(
     # <!-- Image: filename.png (hash: 1234abcd) -->
     # ![alt](path/to/filename.png)
     # *Fig. 1: Caption*
-    pos = 0
     for comm_match in _MISTRAL_IMG_COMMENT_PATTERN.finditer(text):
         fn = comm_match.group("filename")
         h = comm_match.group("hash").lower()

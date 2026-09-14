@@ -18,6 +18,7 @@ class OutlineEntry {
   level int @description("Heading level, 1 (top) to 6")
   description string? @description("One plain-text sentence naming concrete subject matter")
   summary string? @description("2-3 plain-text sentences abstracting substantial sections")
+  keywords string[] @description("3-7 specific search keywords, entities, metrics, or table/chart topics for this section")
 }
 
 class DocumentOutline {
@@ -77,8 +78,9 @@ function ExtractOutline(
     For every listed heading, return (in the same order as the list):
     - `title`: the heading text EXACTLY as listed (verbatim).
     - `level`: the level listed for that heading.
-    - `description`: ONE plain-text sentence, at most {{ max_description_words }} words, naming concrete subject matter (entities, metrics, products, scope) found under the heading. null for structural dividers with no real body. Never restate the title.
-    - `summary`: ONLY for substantial sections (detailed disclosures, major tables, substantive analyses, long narrative items): 2-3 plain-text sentences, at most {{ max_summary_words }} words. null for brief sections.
+    - `description`: ONE plain-text sentence, at most {{ max_description_words }} words, naming concrete subject matter (entities, metrics, products, scope) found under the heading. If the section contains tables or images (diagrams/charts), describe their subject/metrics. null for structural dividers with no real body. Never restate the title.
+    - `summary`: ONLY for substantial sections (detailed disclosures, major tables, substantive analyses, long narrative items): 2-3 plain-text sentences, at most {{ max_summary_words }} words. Summarize key findings, table column headers/trends, or image descriptions. null for brief sections.
+    - `keywords`: 3-7 specific search keywords/entities/topics/metrics for this section.
 
     HARD RULES:
     - Return exactly one `sections` entry per listed heading. Do not omit, merge, reorder, rename, or invent headings.
@@ -120,9 +122,11 @@ function ExtractBranchOutline(
     - `level`: the level listed for that heading.
     - `description`: ONE plain-text sentence, at most {{ max_description_words }} words, naming the CONCRETE subject matter under that heading — the specific entities, products, metrics, line items, time periods, or scope found in the body text.
       - If a heading is a Table (e.g. "Table 1", "Table 2", "Table FFO-1"), inspect the table headers and sample rows to state what metrics and categories the table covers (e.g., "Monthly receipts from individual income tax, corporation tax, and customs.").
+      - If the section contains an Image (e.g. chart, diagram), check the text/caption before and after to describe what it illustrates.
       - NEVER restate or paraphrase the title alone (e.g. "Table 1" -> "Describes Table 1" is invalid).
       - If the heading is a structural divider with no real body text, set `description` to null.
     - `summary`: ONLY for substantial sections (more than roughly {{ summary_min_tokens }} tokens): 2-3 plain-text sentences, at most {{ max_summary_words }} words. Leave null otherwise.
+    - `keywords`: 3-7 specific search keywords/entities/topics/metrics for this section.
 
     HARD RULES:
     - Return exactly one `sections` entry per listed heading in exact order.

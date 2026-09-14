@@ -5,8 +5,27 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+
 from genai_graph.kg.document_graph.tree_parser import _estimate_token_count
-from genai_graph.kg.nodes.document_section import MarkdownSection, Table
+from genai_graph.kg.nodes.document_section import MarkdownSection
+
+
+class MarkdownTable(BaseModel):
+    """A structured table extracted from a document section (HTML or Markdown)."""
+
+    table_id: str = Field(..., description="Primary key: f'{section_id}::t{table_index}'")
+    section_id: str = Field(..., description="section_id of the owning MarkdownSection (foreign key)")
+    markdown_hash: str = Field(..., description="markdown_hash of the owning Document")
+    table_index: int = Field(..., description="0-based index of the table within its section")
+    name: str = Field(..., description="Table name or title (e.g. caption, or 'Table {index}')")
+    table_format: str = Field(..., description="Table format: 'html' or 'markdown'")
+    content: str = Field(..., description="Full table markup (HTML <table>...</table> or Markdown pipe table)")
+    caption: str | None = Field(default=None, description="Extracted caption or description of table")
+    token_count: int = Field(default=0, description="Approximate token count of table content")
+
+
+Table = MarkdownTable
 
 # Matches HTML tables: <table ...>...</table>
 _HTML_TABLE_PATTERN = re.compile(r"<table(?:\s+[^>]*)?>(.*?)</table>", re.DOTALL | re.IGNORECASE)
@@ -53,7 +72,7 @@ def _find_caption_before_pos(text: str, pos: int) -> str | None:
         stripped = line.strip()
         if not stripped:
             continue
-        if stripped.startswith("#") or stripped.startswith("!["):
+        if stripped.startswith(("#", "![")):
             break
         if _TABLE_CAPTION_PREFIX_PATTERN.match(stripped):
             cleaned = _clean_caption_text(stripped)

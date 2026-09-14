@@ -8,16 +8,16 @@ at runtime so ``--db`` / ``--folder`` / ``--llm`` overrides work without editing
 the profile.
 
 Skills are loaded via DeepAgents' ``SkillsMiddleware`` through a
-``FilesystemBackend``. Because the generic skills ship inside the ``genai_graph``
-package while a downstream project's skills live in its own tree, the backend
-root is computed as the common ancestor of all skill directories — that keeps
-``virtual_mode=True`` path-traversal checks satisfied regardless of which
-project the agent is launched from.
+``FilesystemBackend`` whose root also bounds everything the agent's file tools
+(``ls``/``grep``/``glob``/``read_file``) can reach. Skill directories from
+different project trees are therefore COPIED into a minimal per-question
+workspace that becomes the backend root — rooting the backend at the skills'
+common ancestor would expose every intermediate directory (other projects,
+benchmark question banks, run records with gold answers) to the agent.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -127,19 +127,30 @@ def _resolve_folder(backend: KuzuBackend, folder_ref: str | None) -> tuple[str |
     return folder_id, name
 
 
-def _common_root(skill_dirs: list[str]) -> str:
-    """Return a single directory that contains every path in *skill_dirs*.
+def _stage_skills_workspace(resolved_skills: list[str]) -> tuple[str, list[str]]:
+    """Copy skill directories into a minimal workspace and return (root, staged dirs).
 
-    Used as the ``FilesystemBackend`` root so the SkillsMiddleware can read skills
-    from several project trees under ``virtual_mode=True`` (which forbids paths
-    outside the root). Falls back to the first dir's parent when there is only one.
+    The ``FilesystemBackend`` root bounds the agent's whole file-tool surface
+    (``ls``/``grep``/``glob``/``read_file``). Staging copies of the skills into a
+    fresh workspace keeps that surface limited to the skill docs themselves;
+    rooting at the skills' common ancestor instead exposes every intermediate
+    directory — including unrelated projects and benchmark ground-truth files.
     """
-    resolved = [str(Path(d).resolve()) for d in skill_dirs]
-    if not resolved:
-        return str(Path.cwd())
-    if len(resolved) == 1:
-        return resolved[0]
-    return os.path.commonpath(resolved)
+    import shutil
+    import tempfile
+
+    workspace = Path(tempfile.mkdtemp(prefix="docgraph-ws-"))
+    staged: list[str] = []
+    for src in resolved_skills:
+        src_path = Path(src).resolve()
+        dst = workspace / src_path.name
+        if dst.exists():
+            # Skill-name collision across sources: merge into one directory.
+            shutil.copytree(src_path, dst, dirs_exist_ok=True)
+        else:
+            shutil.copytree(src_path, dst)
+        staged.append(str(dst))
+    return str(workspace), staged
 
 
 def prepare_docgraph_profile(
@@ -207,8 +218,14 @@ def prepare_docgraph_profile(
     if resolved_skills:
         from genai_tk.agents.langchain.config import BackendConfig
 
-        profile.backend = BackendConfig(type="filesystem", root_dir=_common_root(resolved_skills))
-        logger.info("Document-graph agent skills: {} (backend root: {})", resolved_skills, profile.backend.root_dir)
+        workspace, staged_skills = _stage_skills_workspace(resolved_skills)
+        profile.skill_directories = staged_skills
+        profile.backend = BackendConfig(type="filesystem", root_dir=workspace)
+        logger.info(
+            "Document-graph agent skills staged in {} (backend root: {})",
+            staged_skills,
+            profile.backend.root_dir,
+        )
     else:
         logger.warning("No skill directories resolved for document-graph agent; running without skills.")
 

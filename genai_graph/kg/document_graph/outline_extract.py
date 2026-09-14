@@ -138,6 +138,10 @@ class OutlineEntry(BaseModel):
     summary: str | None = Field(
         default=None, description="Only for substantial sections: 2-3 plain-text sentences, at most 60 words."
     )
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="3-7 specific search keywords/entities/topics for this section",
+    )
 
 
 class BranchOutline(BaseModel):
@@ -318,12 +322,34 @@ def _condense_table_smart(table_block: str, head_rows: int = 3, tail_rows: int =
     return "\n" + "\n".join(res) + "\n"
 
 
+def _condense_html_table(html_table: str, max_lines: int = 30) -> str:
+    """Condense large HTML tables by keeping first max_lines with an omission comment."""
+    lines = html_table.strip().splitlines()
+    if len(lines) <= max_lines:
+        return html_table
+    kept_lines = lines[:max_lines]
+    omitted = len(lines) - max_lines
+    return (
+        "\n"
+        + "\n".join(kept_lines)
+        + f"\n<!-- ... {omitted} lines of HTML table omitted for outline summary ... -->\n</table>\n"
+    )
+
+
 def _clean_markdown_for_prompt(raw: str, head_rows: int = 3, tail_rows: int = 2) -> str:
     """Drop ``Page N`` artifacts and condense bulky tables/numeric runs with head + tail row sampling."""
     # 1. Drop page markers
     text = _PAGE_MARKER_RE.sub("", raw)
 
-    # 2. Condense Markdown pipe tables: keep header + head_rows + tail_rows
+    # 2. Condense HTML tables longer than 30 lines
+    html_table_re = re.compile(r"<table(?:\s+[^>]*)?>.*?</table>", re.DOTALL | re.IGNORECASE)
+
+    def _replace_html_table(m: re.Match) -> str:
+        return _condense_html_table(m.group(0), max_lines=30)
+
+    text = html_table_re.sub(_replace_html_table, text)
+
+    # 3. Condense Markdown pipe tables: keep header + head_rows + tail_rows
     table_re = re.compile(r"(?:^[ \t]*\|[^\n]+\|[ \t]*\n){4,}", re.MULTILINE)
 
     def _replace_table(m: re.Match) -> str:
@@ -331,7 +357,7 @@ def _clean_markdown_for_prompt(raw: str, head_rows: int = 3, tail_rows: int = 2)
 
     text = table_re.sub(_replace_table, text)
 
-    # 3. Condense runs of 5+ numeric/currency lines (OCR plain-text tabular listings)
+    # 4. Condense runs of 5+ numeric/currency lines (OCR plain-text tabular listings)
     def _condense_numbers(match: re.Match) -> str:
         num_lines = match.group(0).strip().splitlines()
         if len(num_lines) <= head_rows + tail_rows:
@@ -676,7 +702,13 @@ def _align_outline(outline: DocumentOutline, algo_headings: list[tuple[str, int,
         if match_idx is not None:
             entry = entries[match_idx]
             aligned.append(
-                OutlineEntry(title=ah_title, level=ah_level, description=entry.description, summary=entry.summary)
+                OutlineEntry(
+                    title=ah_title,
+                    level=ah_level,
+                    description=entry.description,
+                    summary=entry.summary,
+                    keywords=list(entry.keywords) if entry.keywords else [],
+                )
             )
         else:
             aligned.append(OutlineEntry(title=ah_title, level=ah_level, description=None, summary=None))
@@ -998,6 +1030,7 @@ def _summarize_branch_one(
                             if matched.description
                             else None,
                             summary=_clean_text(matched.summary, config.max_summary_chars) if matched.summary else None,
+                            keywords=list(matched.keywords) if matched.keywords else [],
                         )
                     )
                 else:

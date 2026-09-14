@@ -10,14 +10,19 @@ of contents and reads section text directly, no embeddings required.
 ## Schema
 
 ```
-Folder ──CONTAINS──▶ Document ──HAS_SECTION──▶ MarkdownSection ──HAS_SUBSECTION──▶ MarkdownSection ──HAS_SUBSECTION──▶ …
+Folder ──CONTAINS──▶ Document ──HAS_SECTION──▶ MarkdownSection ──HAS_SUBSECTION──▶ MarkdownSection
+                                                     │
+                                                 HAS_CHUNK
+                                                     ▼
+                                                SectionChunk
 ```
 
 | Node | Key | Notes |
 |------|-----|-------|
 | `Folder` | `folder_id` | A directory, a `.zip` archive, or a single file's parent — the base location documents are read from. |
 | `Document` | `content_hash` (xxHash of the raw file bytes) | Provenance anchor for everything derived from a file. Carries `filename`, `relative_path`, `path`, `mime_type`, plus `markdown_hash`, `token_count`, `section_count`, and (once summarized) a one-sentence `description` and a paragraph `summary`. |
-| `MarkdownSection` | `section_id` = `{markdown_hash}::{sequence}` | One heading-delimited section (heading line + body up to the next heading of any level). Every document has at least one section — a synthetic level-0 root section captures a heading-less document or its preamble. Carries `token_count` and, once summarized, `description` (always) plus `summary` (substantial sections only) and `summary_source`. |
+| `MarkdownSection` | `section_id` = `{markdown_hash}::{sequence}` | One heading-delimited section (heading line + body up to the next heading of any level). Every document has at least one section — a synthetic level-0 root section captures a heading-less document or its preamble. Carries `token_count` and, once summarized, `description` (always), `summary` (substantial sections only), `keywords` (3–7 search terms), and `summary_source`. |
+| `SectionChunk` | `chunk_id` = `{section_id}::{chunk_index}` | Optional chunk node created when `retrieval.embeddings_id` is configured. Long sections are chunked to target size (~1500 tokens) with semantic vectors and heading/keyword header context. |
 
 Sections form a flat table with an explicit `parent_section_id` — the hierarchy is
 materialized entirely as `HAS_SUBSECTION` edges, so an agent (or a Cypher query)
@@ -25,16 +30,16 @@ walks the tree with ordinary graph traversals. A section's `text` is its own con
 only (non-overlapping), so concatenating every section of a document in `sequence`
 order reconstructs the original Markdown exactly.
 
+**Structured Tables & Images:** Instead of separate graph entities, tables (losslessly
+converted to Markdown or annotated HTML) and image descriptions reside directly within
+the enclosing `MarkdownSection`. Figures and diagrams can be visually examined via the
+targeted `query_image` tool.
+
 **Identity and dedup:** `Document` and `MarkdownSection` are both keyed by content
 hash, so re-ingesting unchanged files is a no-op MERGE. When an entity-extraction
 factory (see below) also produces a `Document` node for the same file, it MERGEs
 into the *same* node — a document's provenance and its extracted entities share one
 graph node.
-
-There are no `Chunk` nodes in the Document Graph — no chunking or embeddings are
-produced. Chunking/embedding based RAG is a separate, unrelated path (see
-[`DocumentDirectoryFactory`](#documentdirectoryfactory) below); the Document Graph is
-for heading-based, vectorless navigation.
 
 For details on the multi-tier heading decomposition and LLM enrichment strategies,
 see the **[Document Decomposition Guide](document-decomposition-guide.md)**.
@@ -234,23 +239,21 @@ silent until the final summary table, even across many documents.
 
 ## Navigating as an agent
 
-The tools from `create_document_graph_tools(db_path)` are designed for **progressive
+The tools from `create_document_graph_tools(db_path, max_image_queries=3)` are designed for **progressive
 disclosure** — each step narrows the scope, so nothing ever dumps a whole corpus into
 the context window:
 
 1. `get_folder_toc()` — the orientation view. Documents only (id, name, section count,
    one-line description); **no sections**. A 16-document corpus is a few hundred tokens.
 2. `get_document_toc(document_id)` — the chosen document's section tree, each node with
-   `id`, `title` and `description`. `include_summaries=True` adds the paragraph
-   summaries; `max_level` prunes depth on a very long document. Heading level and token
-   count are deliberately not emitted — level is redundant with the tree's own nesting,
-   and token count adds nothing an agent can act on once `description` already answers
-   "is this worth opening?".
-3. `get_section_content(section_ids)` — the actual Markdown, for the few sections the
-   agent picked.
-
-`search_sections(keyword)` is the keyword fallback when the descriptions don't surface
-an obvious candidate.
+   `id`, `title`, `description`, and `keywords`. `include_summaries=True` adds the paragraph
+   summaries; `max_level` prunes depth on a very long document.
+3. `get_section_content(section_ids)` — the actual Markdown text (with line pagination support)
+   for the specific sections the agent picked.
+4. `search_sections(query, mode="hybrid")` — hybrid BM25 full-text + vector similarity search
+   over section titles, text, summaries, and extracted keywords.
+5. `query_image(image_path, query)` — targeted visual question answering against figures, diagrams,
+   and charts using a VLM. Enforces a strict budget (default 3 calls per task) to prevent runaway token costs.
 
 ```yaml
 # get_folder_toc()
@@ -268,10 +271,12 @@ sections:
   - id: 7edf6684::12
     title: 4 Infrastructure services
     description: Server, network, database and backup operations scope.
+    keywords: [servers, SLA, backup, database, operations]
     sections:
       - id: 7edf6684::60
         title: Database services
         description: Database monitoring, capacity, maintenance, backup and patch duties.
+        keywords: [PostgreSQL, Oracle, patching, replication]
 ```
 
 ## CLI

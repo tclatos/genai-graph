@@ -50,7 +50,7 @@ sections, and compiles a structured report — exactly the RFQ extraction worklo
    ┌─────────────────────────────────────────────────────────┐
    │  genai_graph/kg/query/document_graph_tools.py           │
    │  get_folder_toc │ get_document_toc │ get_section_content │
-   │  search_sections │ list_documents                       │
+   │  search_sections │ query_image (max 3 calls) │ list_docs │
    │  (schema-tolerant: introspect columns + rels)           │
    └────────────────────────┬────────────────────────────────┘
                             │ Cypher (read-only)

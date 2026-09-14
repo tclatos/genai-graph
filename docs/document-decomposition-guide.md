@@ -151,3 +151,17 @@ When `summaries: true` is enabled:
 2. **`summary` (Short Paragraph, $\le 60$ words)**:
    - Generated only for substantial sections ($\ge 800$ tokens).
    - Acts as the **triage signal** for an agent deciding whether to load the full section content with `get_section_content`.
+3. **`keywords` (3–7 Terms/Phrases)**:
+   - Extracted per section during BAML outline extraction (`document_outline.baml`).
+   - Captures key domain entities, metrics, table/figure titles, and abbreviations.
+   - Indexed in the BM25 full-text search index and embedded in SectionChunk header context.
+
+---
+
+## 5. Table Truncation & Multimodal Handling in Outline Generation
+
+To prevent prompt token blowups and maintain high extraction reliability on complex enterprise documents:
+
+1. **Large Table Truncation**: Tables longer than 30 lines are automatically truncated with head/tail sampling when constructing LLM prompts (`_clean_markdown_for_prompt` / `_truncate_html_table_for_outline`). Column headers and edge rows are preserved while middle rows are collapsed with an informative comment `<!-- ... N lines of table omitted for outline summary ... -->`.
+2. **Lossless HTML Table Normalization**: Simple HTML tables without `rowspan`/`colspan` are converted to standard Markdown tables, reducing token consumption. Complex tables are kept as HTML with structural dimensions annotated.
+3. **Embedded Image Descriptions**: Uncaptioned images ($>10\text{ KB}$) are described using VLM models and cached in the KV-store. Section markdown retains these descriptions, allowing text-based search to surface sections with visual charts and diagrams. Visual inspection is delegated to `query_image` with a strict per-task call budget.

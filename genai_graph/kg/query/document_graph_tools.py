@@ -1286,7 +1286,11 @@ def execute_image_query(
     import base64
     import mimetypes
 
-    raw_bytes = resolved_path.read_bytes()
+    from genai_tk.extra.markdownize.image_describer import upscale_small_image
+
+    # Small OCR-extracted chart images are illegible to VLMs at native size;
+    # upscaling restores data-label readability (validated on STEPBACK Figure 1).
+    raw_bytes = upscale_small_image(resolved_path)
     if len(raw_bytes) > 20 * 1024 * 1024:
         return f"Error: Image file too large ({len(raw_bytes)} bytes). Ask about a smaller image or crop."
     b64_str = base64.b64encode(raw_bytes).decode("utf-8")
@@ -1325,14 +1329,14 @@ def execute_image_query(
         ),
     ]
 
-    vlm_model_id = model or "glm_5.3_flash@openrouter"
+    vlm_model_id = model or "gemini-2.5-flash@openrouter"
     try:
         llm = get_llm(vlm_model_id)
         resp = llm.invoke(messages)
         return str(resp.content)
     except Exception as exc:
         logger.warning("Failed invoking VLM with '{}': {}", vlm_model_id, exc)
-        for fallback in ("glm_5.2@openrouter", "default"):
+        for fallback in ("glm_5.3_flash@openrouter", "default"):
             if vlm_model_id == fallback:
                 continue
             try:
@@ -1565,7 +1569,7 @@ def create_document_graph_tools(
         Args:
             image: Image filename (e.g. '7a8b9c0d.png'), image hash code, or image file path.
             question: Specific, precise visual question to answer.
-            model: Optional VLM model ID (defaults to 'glm_5.3_flash@openrouter').
+            model: Optional VLM model ID (defaults to 'gemini-2.5-flash@openrouter').
 
         Returns:
             The VLM's detailed analysis, or a clear statement if the question cannot be answered from the image.

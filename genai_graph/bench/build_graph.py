@@ -67,6 +67,7 @@ def _convert_pdf(pdf_path: Path, markdownize_profile: str = "medium") -> str:
         converter_name = "mistral_ocr"
 
     max_retries = 3 if converter_name in ("mistral_ocr", "mistral", "lighton_ocr") else 1
+    last_exc: Exception | None = None
     for attempt in range(1, max_retries + 1):
         try:
             logger.info(
@@ -80,29 +81,21 @@ def _convert_pdf(pdf_path: Path, markdownize_profile: str = "medium") -> str:
             content = _sync_convert(conv, pdf_path)
             if content and content.strip():
                 return content
+            last_exc = RuntimeError(f"Converter '{converter_name}' returned empty Markdown")
         except Exception as exc:
+            last_exc = exc
             logger.warning("Conversion attempt {} failed for {}: {}", attempt, pdf_path.name, exc)
-            if attempt < max_retries:
-                err = str(exc).lower()
-                if "429" in err or "rate limit" in err:
-                    time.sleep(min(60.0, 5 * 2**attempt) + random.uniform(0, 5))
-                else:
-                    time.sleep(2**attempt)
+        if attempt < max_retries:
+            # Retry the SAME converter (with rate-limit-aware backoff) — degraded
+            # output from a different converter silently poisons the graph.
+            err = str(last_exc).lower() if last_exc else ""
+            if "429" in err or "rate limit" in err:
+                time.sleep(min(60.0, 5 * 2**attempt) + random.uniform(0, 5))
             else:
-                logger.warning("Primary converter '{}' exhausted. Trying fallback 'anydoc'...", converter_name)
-                try:
-                    content = _sync_convert(ConverterFactory.create("anydoc"), pdf_path)
-                    if content and content.strip():
-                        return content
-                except Exception as fb_exc:
-                    logger.warning("Fallback 'anydoc' failed: {}. Trying 'markitdown'...", fb_exc)
-                    try:
-                        content = _sync_convert(ConverterFactory.create("markitdown"), pdf_path)
-                        if content and content.strip():
-                            return content
-                    except Exception as m_exc:
-                        raise RuntimeError(f"All conversion strategies failed for {pdf_path}: {m_exc}") from m_exc
-    raise RuntimeError(f"No Markdown generated for {pdf_path}")
+                time.sleep(2**attempt)
+    raise RuntimeError(
+        f"Converter '{converter_name}' failed for {pdf_path} after {max_retries} attempt(s): {last_exc}"
+    ) from last_exc
 
 
 def markdownize_target(

@@ -1578,7 +1578,8 @@ def create_document_graph_tools(
         if query_image_count >= max_image_queries:
             return (
                 f"Error: Maximum image query limit ({max_image_queries}) reached for this question. "
-                "Synthesize your answer using the text and section descriptions already retrieved."
+                "Do NOT attempt further image queries or repeated searches. Synthesize your final "
+                "answer now from the text, section content, and image descriptions already retrieved."
             )
         query_image_count += 1
         try:

@@ -18,8 +18,13 @@ contextualized string rather than a single field value.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
+from genai_tk.extra.nlp import (
+    get_dominant_language,
+    get_ladybug_stemmer,
+    get_stopwords_union,
+)
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -31,6 +36,7 @@ _CHUNK_TABLE = "SectionChunk"
 _EMBEDDING_FIELD = "chunk_embedding"
 _DEFAULT_FTS_INDEX = "section_fts"
 _DEFAULT_VECTOR_INDEX = "chunk_embedding_index"
+_STOPWORDS_TABLE = "_FtsStopWords"
 _FTS_FIELDS = ("title", "text", "description", "summary")
 
 
@@ -112,8 +118,42 @@ def ensure_chunk_embedding_column(backend: KgBackend, dim: int) -> None:
     )
 
 
-def ensure_section_fts_index(backend: KgBackend, index_name: str = _DEFAULT_FTS_INDEX) -> str | None:
+def _ensure_stopwords_table(backend: KgBackend, stopwords: set[str], table_name: str = _STOPWORDS_TABLE) -> bool:
+    """Create and populate the stop words node table in Ladybug.
+
+    Returns True if the table was created and populated with stop words, False otherwise.
+    """
+    clean_words = sorted({w.strip().lower() for w in stopwords if w and w.strip()})
+    if not clean_words:
+        return False
+    try:
+        backend.execute(f"CREATE NODE TABLE IF NOT EXISTS {table_name}(word STRING, PRIMARY KEY(word))")
+        import pyarrow as pa
+
+        tbl = pa.table({"word": pa.array(clean_words, type=pa.string())})  # noqa: F841
+        try:
+            backend.execute(f"COPY {table_name} FROM tbl")
+        except Exception as copy_exc:
+            logger.debug("COPY into {} failed ({}); falling back to LOAD FROM ... MERGE", table_name, copy_exc)
+            backend.execute(f"LOAD FROM tbl MERGE (s:{table_name} {{word: word}})")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not populate {} table: {}", table_name, exc)
+        return False
+
+
+def ensure_section_fts_index(
+    backend: KgBackend,
+    index_name: str = _DEFAULT_FTS_INDEX,
+    *,
+    languages: Sequence[str] | None = None,
+    stemmer: str | None = None,
+) -> str | None:
     """Create the native FTS index over the available MarkdownSection text fields.
+
+    Configures Ladybug's Snowball stemmer based on the dominant document language
+    and populates a dedicated stop-words node table (_FtsStopWords) with the union
+    of stop words across all corpus languages.
 
     Returns the index name, or None when the FTS extension is unavailable or the
     section table has none of the expected text columns.
@@ -127,9 +167,44 @@ def ensure_section_fts_index(backend: KgBackend, index_name: str = _DEFAULT_FTS_
         logger.warning("MarkdownSection has none of {}; skipping FTS index", ", ".join(_FTS_FIELDS))
         return None
     fields_literal = "[" + ", ".join(f"'{c}'" for c in fields) + "]"
+
+    # Resolve languages from argument or existing Document nodes
+    lang_list: list[str] = [str(lang) for lang in languages if lang] if languages else []
+    if not lang_list:
+        try:
+            rows = backend.execute("MATCH (d:Document) RETURN DISTINCT d.language AS lang")
+            lang_list = [r[0] for r in rows if r and r[0]]
+        except Exception:  # noqa: BLE001
+            lang_list = []
+    if not lang_list:
+        lang_list = ["en"]
+
+    dominant_lang = get_dominant_language(lang_list, default="en")
+    effective_stemmer = stemmer or get_ladybug_stemmer(dominant_lang, default="english")
+    stopwords_set = get_stopwords_union(lang_list)
+
+    has_stopwords = _ensure_stopwords_table(backend, stopwords_set, _STOPWORDS_TABLE)
+
+    if has_stopwords:
+        stmt = (
+            f"CALL CREATE_FTS_INDEX('MarkdownSection', '{index_name}', {fields_literal}, "
+            f"stemmer := '{effective_stemmer}', stopwords := '{_STOPWORDS_TABLE}')"
+        )
+    else:
+        stmt = (
+            f"CALL CREATE_FTS_INDEX('MarkdownSection', '{index_name}', {fields_literal}, "
+            f"stemmer := '{effective_stemmer}')"
+        )
+
     try:
-        backend.execute(f"CALL CREATE_FTS_INDEX('MarkdownSection', '{index_name}', {fields_literal})")
-        logger.info("Created FTS index {} over MarkdownSection({})", index_name, ", ".join(fields))
+        backend.execute(stmt)
+        logger.info(
+            "Created FTS index {} over MarkdownSection({}) (stemmer='{}', stopwords={})",
+            index_name,
+            ", ".join(fields),
+            effective_stemmer,
+            _STOPWORDS_TABLE if has_stopwords else "default",
+        )
     except Exception as exc:  # noqa: BLE001
         if "already" in str(exc).lower():
             logger.debug("FTS index {} already exists", index_name)

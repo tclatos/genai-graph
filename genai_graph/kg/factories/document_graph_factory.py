@@ -25,6 +25,7 @@ import mimetypes
 from datetime import datetime, timezone
 from pathlib import Path
 
+from genai_tk.extra.nlp import detect_language
 from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -288,6 +289,7 @@ class DocumentGraphFactory(KgFactory):
         ]
 
         chain = tree.chain_for(path)
+        doc_language = detect_language(text) or "en"
 
         document = Document(
             content_hash=content_hash,
@@ -301,6 +303,7 @@ class DocumentGraphFactory(KgFactory):
             modified_at=modified_at,
             token_count=_estimate_token_count(text),
             section_count=len(sections),
+            language=doc_language,
             description=document_description,
             summary=document_summary,
         )

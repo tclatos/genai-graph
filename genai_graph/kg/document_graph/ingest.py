@@ -365,7 +365,8 @@ def ingest_document_graph(
             result.warnings.append(msg)
     if retrieval_config is not None and retrieval_config.fts:
         try:
-            result.fts_index = ensure_section_fts_index(backend)
+            doc_languages = [doc.language for _, doc, _ in pending if doc and getattr(doc, "language", None)]
+            result.fts_index = ensure_section_fts_index(backend, languages=doc_languages)
         except Exception as exc:  # noqa: BLE001
             msg = f"Could not create FTS index: {exc}"
             logger.warning(msg)

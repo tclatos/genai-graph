@@ -17,24 +17,13 @@ Investigate this idea, and write a report in genai-graph/design.  You can be cri
 Think about that, ask questions, suggest/evaluare alternatives, propose a plan.
 
 
-# Faster processing
-
-Building the doc graph is very slow.  See how we could increase the injection speed.
-Ideas : 
-- add more paralelism in summerization and embeddings calculation
-- process more documents at a time
-- Check there's no semaphore or lock somewhere
-- Use non-thinking, fast model, fast provider (easy: we can now select llm that wau deepseekv4flash(none)@openai:speed )
-- ...
-- Analyse Prefect logs ? 
-
 
 
 # Generalize skills on doc navigation
 ex: skills/custom/officeqa-qa/SKILL.md "Targeted Search with `search_sections(query="<query>", document_id="<id>")`**:
 
 # Language detection
- Detect the language of the inhected document with 
+In genai-graph, detect the language of the injected document into the graphdoxwith 
 https://github.com/pemistahl/lingua-py 
 
 (restrict to common language  for business : European languages, Chinese, ...)

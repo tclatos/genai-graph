@@ -92,7 +92,7 @@ def load_bench_dataset_with_results(
     question_id: str | None = None,
 ) -> list[BenchQuestionDetail]:
     """Load and join dataset questions with existing run records and grader verdicts."""
-    adapter = resolve_benchmark_adapter(cfg.adapter, project_root=cfg.project_root)
+    adapter = resolve_benchmark_adapter(cfg.dataset_adapter, project_root=cfg.project_root)
     questions: list[BenchQuestion] = adapter.load_dataset()
 
     runs = load_existing_runs(Path(cfg.runs))

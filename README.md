@@ -324,28 +324,30 @@ class MyBenchmarkAdapter(BaseBenchmarkAdapter):
         )
 ```
 
-Configure `config/bench.yaml`:
+Configure `config/docgraph.yaml` and `config/bench.yaml`:
 ```yaml
-default_profile: standard
-adapter: my_package.adapter.MyBenchmarkAdapter
+# config/bench.yaml
+default_profile: default
+dataset_adapter: my_package.adapter.MyBenchmarkAdapter
+
+paths:
+  runs: ${paths.data_root}/my_bench/{profile}/runs.jsonl
+  scores: ${paths.data_root}/my_bench/{profile}/scores.jsonl
+  scores_summary: ${paths.data_root}/my_bench/{profile}/scores_summary.json
 
 bench_profiles:
-  standard:
-    llms:
-      agent: default
-      judge: default
-    build:
-      skip_ocr: false
-      structure_strategy: auto
-      summaries: true
-      workers: 4
+  default:
+    description: "Default benchmark evaluation"
+    docgraph_profile: default
+    agent_profile: default
     files:
       pathspecs: ["*"]
-    agent:
-      profile: default
+    runner:
       concurrency: 10
-    judge:
-      concurrency: 10
+    grader:
+      enabled: true
+      llm: DeepSeek-V4-Pro-0813@openrouter
+      concurrency: 5
 ```
 
 ---

@@ -60,27 +60,33 @@ class BenchCommands(CliTopCommand):
             table = Table(title="Benchmark Run Profiles")
             table.add_column("Profile", style="bold cyan")
             table.add_column("Description", style="white")
+            table.add_column("DocGraph", style="magenta")
             table.add_column("Markdownize", style="magenta")
             table.add_column("Agent LLM", style="green")
-            table.add_column("Judge LLM", style="blue")
+            table.add_column("Grader LLM", style="blue")
+            table.add_column("VLM / Images", style="cyan")
             table.add_column("Files / Pathspecs", style="yellow")
 
-            for name, data in profiles.items():
-                desc = data.get("description", "")
-                md_prof = data.get("markdownize_profile", "medium")
-                llms = data.get("llms", {}) or {}
-                agent_llm = llms.get("agent", "default")
-                judge_llm = llms.get("judge", "default")
-                files = data.get("files", {}) or data.get("questions", {}) or {}
-                pathspecs = files.get("pathspecs", [])
-                docs = files.get("docs", [])
-                if pathspecs:
-                    files_src = f"specs: {', '.join(pathspecs)}"
-                elif docs:
-                    files_src = f"{len(docs)} doc(s)"
-                else:
-                    files_src = "all docs"
-                table.add_row(name, desc, md_prof, agent_llm, judge_llm, files_src)
+            for name in profiles:
+                try:
+                    prof_cfg = load_bench_profile(profile_name=name, config_path=cfg_p)
+                    desc = prof_cfg.description
+                    dg_prof = prof_cfg.docgraph_profile
+                    md_prof = prof_cfg.docgraph.markdownize_profile
+                    agent_llm = prof_cfg.agent_llm
+                    grader_llm = prof_cfg.grader.llm
+                    vlm_info = prof_cfg.docgraph.llms.image or ("on" if prof_cfg.docgraph.images.enabled else "off")
+                    pathspecs = prof_cfg.files.pathspecs
+                    docs = prof_cfg.files.docs
+                    if pathspecs:
+                        files_src = f"specs: {', '.join(pathspecs)}"
+                    elif docs:
+                        files_src = f"{len(docs)} doc(s)"
+                    else:
+                        files_src = "all docs"
+                    table.add_row(name, desc, dg_prof, md_prof, agent_llm, grader_llm, vlm_info, files_src)
+                except Exception as exc:
+                    table.add_row(name, f"Error: {exc}", "-", "-", "-", "-", "-", "-")
 
             console.print(table)
 
@@ -178,12 +184,14 @@ class BenchCommands(CliTopCommand):
             cfg = load_bench_profile(
                 profile_name=profile,
                 config_path=cfg_p,
-                build_force=force or None,
                 force_run=rerun or None,
                 limit=limit if limit is not None else None,
-                judge_enabled=judge if judge is not None else None,
                 monitoring=monitoring if monitoring is not None else None,
             )
+            if force:
+                cfg.docgraph.build.force = True
+            if judge is not None:
+                cfg.grader.enabled = judge
 
             # Parse pathspecs, docs, and question_ids overrides
             p_specs = [s.strip() for s in pathspecs.split(",") if s.strip()] if pathspecs else None
@@ -191,9 +199,9 @@ class BenchCommands(CliTopCommand):
             if question_ids:
                 cfg.question_ids = [q.strip() for q in question_ids.split(",") if q.strip()]
 
-            adapter = get_benchmark_adapter(cfg.adapter, project_root=cfg.project_root)
+            adapter = get_benchmark_adapter(cfg.dataset_adapter, project_root=cfg.project_root)
             available_docs = adapter.get_available_docs()
-            cfg.docs = cfg.resolve_docs(
+            cfg.files.docs = cfg.resolve_docs(
                 available_docs=available_docs,
                 docs_override=d_list,
                 pathspecs_override=p_specs,
@@ -201,9 +209,13 @@ class BenchCommands(CliTopCommand):
 
             console.print(f"[bold green]Starting Benchmark Run:[/bold green] profile={cfg.profile_name}")
             console.print(
-                f"Target documents ({len(cfg.docs)}): {', '.join(cfg.docs[:5])}{'...' if len(cfg.docs) > 5 else ''}"
+                f"Target documents ({len(cfg.files.docs)}): {', '.join(cfg.files.docs[:5])}{'...' if len(cfg.files.docs) > 5 else ''}"
             )
-            console.print(f"Agent LLM: [cyan]{cfg.agent_llm}[/cyan] | Judge LLM: [magenta]{cfg.judge_llm}[/magenta]")
+            console.print(f"Agent LLM: [cyan]{cfg.agent_llm}[/cyan] | Grader LLM: [magenta]{cfg.grader.llm}[/magenta]")
+            console.print(
+                f"DocGraph Profile: [blue]{cfg.docgraph_profile}[/blue] "
+                f"(markdownize={cfg.docgraph.markdownize_profile}, vlm={cfg.docgraph.llms.image or 'none'})"
+            )
 
             full_bench_flow(cfg, step=step, skip=skip)
 
@@ -229,7 +241,7 @@ class BenchCommands(CliTopCommand):
                 scores,
                 profile_name=cfg.profile_name,
                 agent_llm=cfg.agent_llm,
-                judge_llm=cfg.judge_llm,
+                judge_llm=cfg.grader.llm,
             )
             save_bench_summary(summary, Path(cfg.scores_summary))
             display_bench_summary(summary)
@@ -266,7 +278,7 @@ class BenchCommands(CliTopCommand):
                     scores,
                     profile_name=cfg.profile_name,
                     agent_llm=cfg.agent_llm,
-                    judge_llm=cfg.judge_llm,
+                    judge_llm=cfg.grader.llm,
                 )
                 display_bench_summary(summary)
 

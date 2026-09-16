@@ -99,28 +99,25 @@ To achieve fast, high-quality summarization without blowing up prompt budgets or
 
 The configuration cleanly separates **how sections are discovered** from **whether they receive LLM descriptions and summaries**:
 
-### In `config/bench.yaml`:
+### In `config/docgraph.yaml`:
 
 ```yaml
-bench_profiles:
-  mistral_glm:
+docgraph_profiles:
+  default:
     llms:
-      agent: glm_5.2@openrouter
-      build: deepseek-v4-flash-0731@openrouter
-      judge: DeepSeek-V4-Pro-0813@openrouter
+      summary: deepseek-v4-flash-0731@openrouter  # Model used for outline structure and summaries
+      image: null                                # Optional VLM for image analysis
 
     build:
+      structure_strategy: auto                    # auto | algo | toc_preamble | llm_full
+      generate_summaries: true                    # true = generate descriptions & summaries; false = structure only
+      summary_min_tokens: 800                     # threshold for generating detailed paragraph summaries
+      context_safety_ratio: 0.9
+      fts: true                                   # BM25 full-text search index over MarkdownSection
+      chunk_size_tokens: 1500
+      workers: 4
       skip_ocr: false
       force: false
-      llm: deepseek-v4-flash-0731@openrouter  # Model used for LLM build operations
-      structure_strategy: auto                # auto | algo | toc_preamble | llm_full
-      summaries: true                         # true = generate descriptions & summaries; false = structure only
-      workers: 4
-      summary_min_tokens: 800                 # threshold for generating detailed paragraph summaries
-      context_safety_ratio: 0.9
-      embeddings: qwen3_06b@deepinfra         # SectionChunk vector model (null = no vector leg)
-      fts: true                               # BM25 full-text search index over MarkdownSection
-      chunk_size_tokens: 1500
 ```
 
 ### In Python / Workflows:

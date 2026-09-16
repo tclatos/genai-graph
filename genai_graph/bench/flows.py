@@ -235,26 +235,35 @@ def grade_run_task(
 @flow(name="bench-fetch")
 def fetch_flow(cfg: BenchConfig) -> list[str]:
     """Fetch raw documents in parallel."""
-    logger.info("Fetching {} document(s) in parallel...", len(cfg.docs))
-    futures = [fetch_doc_task.submit(doc, pdfs_dir=cfg.pdfs_dir, adapter_name=cfg.adapter) for doc in cfg.docs]
+    docs = cfg.files.docs
+    logger.info("Fetching {} document(s) in parallel...", len(docs))
+    futures = [
+        fetch_doc_task.submit(
+            doc,
+            pdfs_dir=cfg.docgraph.paths.sources_dir,
+            adapter_name=cfg.dataset_adapter,
+        )
+        for doc in docs
+    ]
     return [f.result() for f in futures]
 
 
 @flow(name="bench-markdownize")
 def markdownize_flow(cfg: BenchConfig) -> list[str]:
     """Convert/OCR documents to Markdown in parallel."""
-    logger.info("Markdownizing {} document(s) in parallel...", len(cfg.docs))
+    docs = cfg.files.docs
+    logger.info("Markdownizing {} document(s) in parallel...", len(docs))
     futures = [
         markdownize_doc_task.submit(
             doc,
-            force=cfg.build_force,
-            pdfs_dir=cfg.pdfs_dir,
-            saved_markdown_dir=cfg.saved_markdown_dir,
-            markdownize_profile=cfg.markdownize_profile,
-            markdown_dir=cfg.markdown_dir,
-            skip_ocr=cfg.skip_ocr,
+            force=cfg.docgraph.build.force,
+            pdfs_dir=cfg.docgraph.paths.sources_dir,
+            saved_markdown_dir=cfg.docgraph.paths.saved_markdown_dir,
+            markdownize_profile=cfg.docgraph.markdownize_profile,
+            markdown_dir=cfg.docgraph.paths.markdown_dir,
+            skip_ocr=cfg.docgraph.build.skip_ocr,
         )
-        for doc in cfg.docs
+        for doc in docs
     ]
     return [f.result() for f in futures]
 
@@ -268,43 +277,52 @@ def build_graph_flow(cfg: BenchConfig) -> dict[str, Any]:
     warmed outline cache and embeds/merges. A document whose outline task failed
     after retries still merges, degraded to algorithmic parsing.
     """
-    llm_arg = cfg.build_llm if cfg.build_llm_enabled else None
-    logger.info("Building Document Graph (db={}, llm={})...", cfg.kg_db, llm_arg or "algorithmic")
+    docs = cfg.files.docs
+    llm_arg = cfg.docgraph.llms.summary
+    logger.info(
+        "Building Document Graph (db={}, llm={})...",
+        cfg.docgraph.paths.kg_db,
+        llm_arg or "algorithmic",
+    )
 
     outline_futures = [
         extract_outline_task.submit(
             doc,
-            markdown_dir=cfg.markdown_dir,
-            kg_db=cfg.kg_db,
+            markdown_dir=cfg.docgraph.paths.markdown_dir,
+            kg_db=cfg.docgraph.paths.kg_db,
             build_llm=llm_arg,
-            structure_strategy=cfg.structure_strategy,
-            generate_summaries=cfg.generate_summaries,
-            workers=cfg.workers,
-            summary_min_tokens=cfg.summary_min_tokens,
-            context_safety_ratio=cfg.context_safety_ratio,
+            structure_strategy=cfg.docgraph.build.structure_strategy,
+            generate_summaries=cfg.docgraph.build.generate_summaries,
+            workers=cfg.docgraph.build.workers,
+            summary_min_tokens=cfg.docgraph.build.summary_min_tokens,
+            context_safety_ratio=cfg.docgraph.build.context_safety_ratio,
         )
-        for doc in cfg.docs
+        for doc in docs
     ]
-    for doc, fut in zip(cfg.docs, outline_futures, strict=True):
+    for doc, fut in zip(docs, outline_futures, strict=True):
         try:
             fut.result()
         except Exception as exc:  # noqa: BLE001
-            logger.error("Outline extraction failed for {}: {}; merge will degrade it to algorithmic parsing", doc, exc)
+            logger.error(
+                "Outline extraction failed for {}: {}; merge will degrade it to algorithmic parsing",
+                doc,
+                exc,
+            )
 
     future = merge_graph_task.submit(
-        cfg.docs,
-        markdown_dir=cfg.markdown_dir,
-        kg_db=cfg.kg_db,
-        force=cfg.build_force,
+        docs,
+        markdown_dir=cfg.docgraph.paths.markdown_dir,
+        kg_db=cfg.docgraph.paths.kg_db,
+        force=cfg.docgraph.build.force,
         build_llm=llm_arg,
-        structure_strategy=cfg.structure_strategy,
-        generate_summaries=cfg.generate_summaries,
-        workers=cfg.workers,
-        summary_min_tokens=cfg.summary_min_tokens,
-        context_safety_ratio=cfg.context_safety_ratio,
-        embeddings_id=cfg.embeddings,
-        fts=cfg.fts,
-        chunk_size_tokens=cfg.chunk_size_tokens,
+        structure_strategy=cfg.docgraph.build.structure_strategy,
+        generate_summaries=cfg.docgraph.build.generate_summaries,
+        workers=cfg.docgraph.build.workers,
+        summary_min_tokens=cfg.docgraph.build.summary_min_tokens,
+        context_safety_ratio=cfg.docgraph.build.context_safety_ratio,
+        embeddings_id=None,
+        fts=cfg.docgraph.build.fts,
+        chunk_size_tokens=cfg.docgraph.build.chunk_size_tokens,
     )
     return future.result()
 
@@ -320,18 +338,23 @@ def run_questions_flow(
     on disk in the runs JSONL — passing them between Prefect flows would blow the
     flow-run parameter size limit once tool results accumulate.
     """
-    configure_bench_monitoring(cfg.monitoring, project_name=f"bench-{cfg.profile_name}")
+    configure_bench_monitoring(cfg.runner.monitoring, project_name=f"bench-{cfg.profile_name}")
 
     if questions is None:
-        adapter = get_benchmark_adapter(cfg.adapter)
+        adapter = get_benchmark_adapter(cfg.dataset_adapter)
         all_qs = adapter.load_dataset()
-        doc_set = {d.removesuffix(".pdf") for d in cfg.docs} | set(cfg.docs)
-        questions = [q for q in all_qs if any(d.removesuffix(".pdf") in doc_set or d in doc_set for d in q.doc_names)]
+        docs = cfg.files.docs
+        doc_set = {d.removesuffix(".pdf") for d in docs} | set(docs)
+        questions = [
+            q
+            for q in all_qs
+            if not doc_set or any(d.removesuffix(".pdf") in doc_set or d in doc_set for d in q.doc_names)
+        ]
         if cfg.question_ids:
             q_set = set(cfg.question_ids)
             questions = [q for q in questions if q.id in q_set]
-        if cfg.limit:
-            questions = questions[: cfg.limit]
+        if cfg.files.limit:
+            questions = questions[: cfg.files.limit]
 
     runs_path = Path(cfg.runs)
     existing_runs = {} if cfg.force_run else load_existing_runs(runs_path)
@@ -350,17 +373,17 @@ def run_questions_flow(
     if not to_run:
         return [r.id for r in cached_runs]
 
-    logger.info("Executing {} question(s) (concurrency={})...", len(to_run), cfg.question_concurrency)
+    logger.info("Executing {} question(s) (concurrency={})...", len(to_run), cfg.runner.concurrency)
     futures = [
         run_question_task.submit(
             q,
             llm=cfg.agent_llm,
-            db_path=cfg.kg_db,
-            folder_id=cfg.folder_id,
+            db_path=cfg.docgraph.paths.kg_db,
+            folder_id=cfg.runner.folder_id,
             profile_name=cfg.agent_profile,
-            embeddings_id=cfg.embeddings,
+            embeddings_id=None,
             runs_path=cfg.runs,
-            concurrency=cfg.question_concurrency,
+            concurrency=cfg.runner.concurrency,
         )
         for q in to_run
     ]
@@ -388,7 +411,7 @@ def grade_flow(
         id_set = set(run_ids)
         runs = [r for r in runs if r.id in id_set]
 
-    adapter = get_benchmark_adapter(cfg.adapter)
+    adapter = get_benchmark_adapter(cfg.dataset_adapter)
     rubric = adapter.get_judge_rubric()
     scores_path = Path(cfg.scores)
     existing_scores = load_existing_scores(scores_path)
@@ -411,7 +434,7 @@ def grade_flow(
                         error_category=s_dict.get("error_category"),
                         rationale=s_dict.get("rationale", ""),
                     ),
-                    judge_llm=s_dict.get("judge_llm", cfg.judge_llm),
+                    judge_llm=s_dict.get("judge_llm", cfg.grader.llm),
                     scored_at=s_dict.get("scored_at"),
                 )
             )
@@ -424,14 +447,14 @@ def grade_flow(
     if not to_grade:
         return already_graded
 
-    logger.info("Grading {} run(s) with judge LLM {}...", len(to_grade), cfg.judge_llm)
+    logger.info("Grading {} run(s) with judge LLM {}...", len(to_grade), cfg.grader.llm)
     futures = [
         grade_run_task.submit(
             run,
-            judge_llm=cfg.judge_llm,
+            judge_llm=cfg.grader.llm,
             system_rubric=rubric,
             scores_path=cfg.scores,
-            concurrency=cfg.judge_concurrency,
+            concurrency=cfg.grader.concurrency,
         )
         for run in to_grade
     ]
@@ -469,7 +492,7 @@ def full_bench_flow(cfg: BenchConfig, step: str | None = None, skip: list[str] |
         outcome["runs"] = len(run_ids)
 
     # 5. Grade
-    if _should_run("grade") and cfg.judge_enabled:
+    if _should_run("grade") and cfg.grader.enabled:
         scores = grade_flow(cfg, run_ids=run_ids)
         outcome["scores"] = len(scores)
 
@@ -484,7 +507,7 @@ def full_bench_flow(cfg: BenchConfig, step: str | None = None, skip: list[str] |
             scores,
             profile_name=cfg.profile_name,
             agent_llm=cfg.agent_llm,
-            judge_llm=cfg.judge_llm,
+            judge_llm=cfg.grader.llm,
         )
         save_bench_summary(summary, Path(cfg.scores_summary))
         display_bench_summary(summary)

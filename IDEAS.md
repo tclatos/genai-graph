@@ -1,12 +1,7 @@
 
-# refactor config
+# Next ? 
+https://arxiv.org/abs/2607.11192
 
-During the development of the benchmarks, the YAML profiles bench_profiles has grown without structuration, mixing config from several plans.  We need to refactor. 
-The idea is to introduce a docgraph profile, that contains all information about the docgraph building: the LLM (one for summarization, one for image ), how images are handled,  the markdownizer profile, the kg and otyer relevant paths, Old stuff from nech.yaml can be removed (like he embeddings model) or simplify.  the vonfg in bench.yaml should contains only what is benchmark specific, such as the grader, the adapter (sholud be renamed) , the agent profile etc.
-try to avoid info duplication (such as the LLM used by the agent or the build)
-
-Refactar all bench projects (officeqa, financeweb, mmlongbench ), with explicit mention of the docgraph bench options they don't use (yet .. like the image processing)
-Simplify these projects - there should have the definitio of just one agent, one markdownizer, ...
 
 
 

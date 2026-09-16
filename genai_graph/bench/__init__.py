@@ -16,7 +16,9 @@ from genai_graph.bench.build_graph import (
     MD_FILENAME_SUFFIX,
     build_document_graph,
     copy_markdown_to_project,
+    find_pdf_path,
     markdownize_target,
+    markdownize_targets_batch,
 )
 from genai_graph.bench.config import (
     ALL_STEPS,
@@ -39,6 +41,7 @@ from genai_graph.bench.config import (
     load_raw_docgraph_yaml,
 )
 from genai_graph.bench.flows import (
+    batch_markdownize_task,
     build_graph_flow,
     extract_outline_task,
     fetch_doc_task,
@@ -128,9 +131,12 @@ __all__ = [
     "load_hf_dataset_to_pandas",
     "load_raw_bench_yaml",
     "load_raw_docgraph_yaml",
+    "batch_markdownize_task",
+    "find_pdf_path",
     "markdownize_doc_task",
     "markdownize_flow",
     "markdownize_target",
+    "markdownize_targets_batch",
     "merge_graph_task",
     "match_docs_by_pathspecs",
     "resolve_benchmark_adapter",

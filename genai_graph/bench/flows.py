@@ -82,6 +82,52 @@ def markdownize_doc_task(
     return str(dest)
 
 
+@task(task_run_name="batch-markdownize")
+def batch_markdownize_task(
+    docs: list[str],
+    *,
+    force: bool,
+    pdfs_dir: str,
+    saved_markdown_dir: str,
+    markdownize_profile: str,
+    markdown_dir: str,
+    skip_ocr: bool,
+) -> list[str]:
+    """Convert/OCR benchmark documents in batch (using Batch OCR API when available) and stage in markdown_dir."""
+    from genai_graph.bench.build_graph import (
+        MD_FILENAME_SUFFIX,
+        copy_markdown_to_project,
+        markdownize_targets_batch,
+    )
+
+    saved_p = Path(saved_markdown_dir)
+    md_p = Path(markdown_dir)
+    md_p.mkdir(parents=True, exist_ok=True)
+
+    if skip_ocr:
+        results = []
+        for doc in docs:
+            source_md = saved_p / f"{doc}{MD_FILENAME_SUFFIX}"
+            if not source_md.exists():
+                raise FileNotFoundError(f"--skip-ocr requested but markdown file missing: {source_md}")
+            dest = copy_markdown_to_project(source_md, markdown_dir=md_p)
+            results.append(str(dest))
+        return results
+
+    saved_md_files = markdownize_targets_batch(
+        docs,
+        force=force,
+        pdfs_dir=Path(pdfs_dir),
+        saved_markdown_dir=saved_p,
+        markdownize_profile=markdownize_profile,
+    )
+    results = []
+    for md_file in saved_md_files:
+        dest = copy_markdown_to_project(md_file, markdown_dir=md_p)
+        results.append(str(dest))
+    return results
+
+
 @task(retries=2, retry_delay_seconds=5, task_run_name="outline-{doc_name}")
 def extract_outline_task(
     doc_name: str,
@@ -250,22 +296,20 @@ def fetch_flow(cfg: BenchConfig) -> list[str]:
 
 @flow(name="bench-markdownize")
 def markdownize_flow(cfg: BenchConfig) -> list[str]:
-    """Convert/OCR documents to Markdown in parallel."""
+    """Convert/OCR documents to Markdown in batch."""
     docs = cfg.files.docs
-    logger.info("Markdownizing {} document(s) in parallel...", len(docs))
-    futures = [
-        markdownize_doc_task.submit(
-            doc,
-            force=cfg.docgraph.build.force,
-            pdfs_dir=cfg.docgraph.paths.sources_dir,
-            saved_markdown_dir=cfg.docgraph.paths.saved_markdown_dir,
-            markdownize_profile=cfg.docgraph.markdownize_profile,
-            markdown_dir=cfg.docgraph.paths.markdown_dir,
-            skip_ocr=cfg.docgraph.build.skip_ocr,
-        )
-        for doc in docs
-    ]
-    return [f.result() for f in futures]
+    logger.info("Markdownizing {} document(s)...", len(docs))
+    if not docs:
+        return []
+    return batch_markdownize_task(
+        docs,
+        force=cfg.docgraph.build.force,
+        pdfs_dir=cfg.docgraph.paths.sources_dir,
+        saved_markdown_dir=cfg.docgraph.paths.saved_markdown_dir,
+        markdownize_profile=cfg.docgraph.markdownize_profile,
+        markdown_dir=cfg.docgraph.paths.markdown_dir,
+        skip_ocr=cfg.docgraph.build.skip_ocr,
+    )
 
 
 @flow(name="bench-build-graph")

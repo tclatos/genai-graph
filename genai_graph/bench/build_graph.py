@@ -98,6 +98,33 @@ def _convert_pdf(pdf_path: Path, markdownize_profile: str = "medium") -> str:
     ) from last_exc
 
 
+def find_pdf_path(doc_name: str, pdf_root: Path | None = None) -> Path:
+    """Resolve the PDF path for a benchmark doc_name."""
+    clean_doc = doc_name[:-4] if doc_name.lower().endswith(".pdf") else doc_name
+    root = pdf_root or (Path.cwd() / "data" / "pdfs")
+    candidates = [
+        root / f"{clean_doc}.pdf",
+        root / doc_name,
+        root / "documents" / f"{clean_doc}.pdf",
+        root / "documents" / doc_name,
+    ]
+    # Files smaller than 1KB cannot be real documents (e.g. leftover error stubs
+    # written as <doc>.pdf); skipping them lets the real copy in documents/ win.
+    pdf_path = next(
+        (p for p in candidates if p.exists() and p.is_file() and p.stat().st_size > 1000),
+        None,
+    )
+    if pdf_path is None:
+        matches = list(root.rglob(f"{clean_doc}.pdf")) or list(root.rglob(doc_name))
+        if matches:
+            pdf_path = matches[0]
+        else:
+            raise FileNotFoundError(
+                f"PDF not found for doc {doc_name!r} at {root / f'{clean_doc}.pdf'}. Run fetch step first."
+            )
+    return pdf_path
+
+
 def markdownize_target(
     doc_name: str,
     *,
@@ -116,33 +143,122 @@ def markdownize_target(
         logger.debug("Markdown already exists in saved dir: {}", out_md)
         return out_md
 
-    clean_doc = doc_name[:-4] if doc_name.lower().endswith(".pdf") else doc_name
     pdf_root = pdfs_dir or (Path.cwd() / "data" / "pdfs")
-    candidates = [
-        pdf_root / f"{clean_doc}.pdf",
-        pdf_root / doc_name,
-        pdf_root / "documents" / f"{clean_doc}.pdf",
-        pdf_root / "documents" / doc_name,
-    ]
-    # Files smaller than 1KB cannot be real documents (e.g. leftover error stubs
-    # written as <doc>.pdf); skipping them lets the real copy in documents/ win.
-    pdf_path = next(
-        (p for p in candidates if p.exists() and p.is_file() and p.stat().st_size > 1000),
-        None,
-    )
-    if pdf_path is None:
-        matches = list(pdf_root.rglob(f"{clean_doc}.pdf")) or list(pdf_root.rglob(doc_name))
-        if matches:
-            pdf_path = matches[0]
-        else:
-            raise FileNotFoundError(
-                f"PDF not found for doc {doc_name!r} at {pdf_root / f'{clean_doc}.pdf'}. Run fetch step first."
-            )
+    pdf_path = find_pdf_path(doc_name, pdf_root)
 
     content = _convert_pdf(pdf_path, markdownize_profile=markdownize_profile)
     out_md.write_text(content, encoding="utf-8")
     logger.success("Wrote Markdown ({} bytes) -> {}", len(content), out_md)
     return out_md
+
+
+def markdownize_targets_batch(
+    doc_names: list[str],
+    *,
+    force: bool = False,
+    pdfs_dir: Path | None = None,
+    saved_markdown_dir: Path | None = None,
+    onedrive_markdown_dir: Path | None = None,
+    markdownize_profile: str = "medium",
+) -> list[Path]:
+    """Batch convert documents to Markdown using the converter's batch API when available.
+
+    1. Checks saved_markdown_dir for already converted files.
+    2. Collects all missing or forced document PDFs.
+    3. If multiple PDFs and converter supports batch_convert, executes batch conversion (e.g. Mistral Batch OCR).
+    4. Falls back to individual conversions with exponential backoff for any missing files.
+    """
+    import asyncio
+    import inspect
+
+    from genai_tk.extra.markdownize.factory import ConverterFactory
+    from genai_tk.workflow.markdownize.config import get_markdownize_profile
+
+    target_saved_dir = saved_markdown_dir or onedrive_markdown_dir or (Path.cwd() / "data" / "saved_markdown")
+    target_saved_dir.mkdir(parents=True, exist_ok=True)
+    pdf_root = pdfs_dir or (Path.cwd() / "data" / "pdfs")
+
+    to_convert: list[tuple[str, Path, Path]] = []  # (doc_name, pdf_path, out_md)
+    result_paths: dict[str, Path] = {}
+
+    for doc_name in doc_names:
+        out_md = target_saved_dir / f"{doc_name}{MD_FILENAME_SUFFIX}"
+        if out_md.exists() and not force and out_md.stat().st_size > 0:
+            logger.debug("Markdown already exists in saved dir: {}", out_md)
+            result_paths[doc_name] = out_md
+        else:
+            try:
+                pdf_p = find_pdf_path(doc_name, pdf_root)
+                to_convert.append((doc_name, pdf_p, out_md))
+            except Exception as exc:
+                logger.error("Could not find PDF for {}: {}", doc_name, exc)
+
+    if not to_convert:
+        return [result_paths[d] for d in doc_names if d in result_paths]
+
+    try:
+        prof = get_markdownize_profile(markdownize_profile)
+        converter_name = prof.select_route(to_convert[0][1])
+    except Exception as exc:
+        logger.warning(
+            "Failed to resolve markdownize profile '{}': {}; defaulting to mistral_ocr.",
+            markdownize_profile,
+            exc,
+        )
+        converter_name = "mistral_ocr"
+
+    def _sync_batch_convert(conv_obj: Any, paths: list[Path]) -> dict[str, str]:
+        ret = conv_obj.batch_convert(paths)
+        if inspect.isawaitable(ret):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None and loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    ret = pool.submit(asyncio.run, ret).result()
+            else:
+                ret = asyncio.run(ret)
+        return ret
+
+    # If multiple files and converter has batch_convert, run batch conversion
+    if len(to_convert) > 1:
+        try:
+            conv = ConverterFactory.create(converter_name)
+            pdf_paths = [pdf_p for _, pdf_p, _ in to_convert]
+            logger.info("Batch converting {} document(s) with '{}' (Batch API)", len(pdf_paths), converter_name)
+            batch_results = _sync_batch_convert(conv, pdf_paths)
+            for doc_name, pdf_p, out_md in to_convert:
+                content = batch_results.get(str(pdf_p))
+                if content and content.strip():
+                    out_md.write_text(content, encoding="utf-8")
+                    logger.success("Wrote Markdown ({} bytes) -> {}", len(content), out_md)
+                    result_paths[doc_name] = out_md
+        except Exception as exc:
+            logger.warning(
+                "Batch conversion failed with '{}': {}; falling back to single conversions",
+                converter_name,
+                exc,
+            )
+
+    # Convert any remaining missing documents individually
+    for doc_name, _pdf_p, _out_md in to_convert:
+        if doc_name not in result_paths:
+            try:
+                out_md = markdownize_target(
+                    doc_name,
+                    force=force,
+                    pdfs_dir=pdf_root,
+                    saved_markdown_dir=target_saved_dir,
+                    markdownize_profile=markdownize_profile,
+                )
+                result_paths[doc_name] = out_md
+            except Exception as exc:
+                logger.error("Failed to convert {}: {}", doc_name, exc)
+
+    return [result_paths[d] for d in doc_names if d in result_paths]
 
 
 def copy_markdown_to_project(

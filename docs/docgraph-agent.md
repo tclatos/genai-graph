@@ -94,7 +94,7 @@ from genai_graph.agent import (
     create_docgraph_agent,  # profile -> LangChainHarness (tools + skills + folder injected)
     prepare_docgraph_profile,  # mutate profile in place (system prompt, skills, backend)
     run_docgraph_agent,  # async: stream one turn, return assistant text
-    resolve_db_path,  # db_path or graph_db.default
+    resolve_db_path,  # db_path or docgraph_profiles.<profile>.paths.kg_db
     create_document_graph_tools_from_config,
     build_docgraph_system_prompt,
     DEFAULT_LLM,  # "deepseek_v4flash@openrouter"

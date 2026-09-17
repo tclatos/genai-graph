@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from genai_graph.agent.docgraph_agent import find_docgraph_db_path, resolve_db_path
 from genai_graph.bench.config import (
     BenchConfig,
     DocGraphProfileConfig,
@@ -34,7 +35,7 @@ def sample_config_dir(tmp_path: Path) -> Path:
               kg_db: data/kg/test.db
               saved_markdown_dir: ~/OneDrive/prj/test/markdown
             llms:
-              summary: deepseek-v4-flash-0731@openrouter
+              summary: deepseek-v4-flash-0731(none)@openrouter
               image: gemini-2.5-flash@openrouter
             images:
               enabled: true
@@ -107,7 +108,7 @@ def test_load_docgraph_profile(sample_config_dir: Path) -> None:
     assert isinstance(dg_cfg, DocGraphProfileConfig)
     assert dg_cfg.profile_name == "default"
     assert dg_cfg.markdownize_profile == "best"
-    assert dg_cfg.llms.summary == "deepseek-v4-flash-0731@openrouter"
+    assert dg_cfg.llms.summary == "deepseek-v4-flash-0731(none)@openrouter"
     assert dg_cfg.llms.image == "gemini-2.5-flash@openrouter"
     assert dg_cfg.images.enabled is True
     assert dg_cfg.images.describe_uncaptioned is True
@@ -126,7 +127,7 @@ def test_load_bench_profile(sample_config_dir: Path) -> None:
     assert bench_cfg.profile_name == "default"
     assert bench_cfg.dataset_adapter == "test.adapter.TestAdapter"
     assert bench_cfg.docgraph_profile == "default"
-    assert bench_cfg.docgraph.llms.summary == "deepseek-v4-flash-0731@openrouter"
+    assert bench_cfg.docgraph.llms.summary == "deepseek-v4-flash-0731(none)@openrouter"
     assert bench_cfg.agent_profile == "test_agent"
     assert bench_cfg.agent_llm == "glm_5.3_flash@openrouter"
     assert bench_cfg.grader.enabled is True
@@ -154,3 +155,18 @@ def test_bench_overrides(sample_config_dir: Path) -> None:
     )
     assert bench_cfg.files.limit == 2
     assert bench_cfg.force_run is True
+
+
+def test_find_and_resolve_docgraph_db_path(monkeypatch: pytest.MonkeyPatch, sample_config_dir: Path) -> None:
+    """Test find_docgraph_db_path and resolve_db_path using docgraph.yaml profiles."""
+    monkeypatch.chdir(sample_config_dir)
+
+    resolved = find_docgraph_db_path(profile="default")
+    assert resolved is not None
+    assert resolved.endswith("test.db")
+
+    path = resolve_db_path(profile="default")
+    assert path.endswith("test.db")
+
+    # Explicit path takes precedence
+    assert resolve_db_path("/custom/path.db") == "/custom/path.db"

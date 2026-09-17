@@ -40,30 +40,113 @@ DEFAULT_PROFILE = "docgraph"
 _PACKAGE_SKILLS_DIR = str(Path(__file__).resolve().parent / "skills")
 
 
-def resolve_db_path(db_path: str | None) -> str:
-    """Return *db_path* or the configured ``graph_db.default``.
+def find_docgraph_db_path(profile: str = "default") -> str | None:
+    """Search for database path in docgraph_profiles, paths.kg_db, or graph_db.default.
+
+    Checks:
+    1. global_config(): ``docgraph_profiles.<profile>.paths.kg_db`` / ``path.kg_db`` / ``kg_db``
+    2. config/docgraph.yaml: ``docgraph_profiles.<profile>.paths.kg_db`` / ``path.kg_db``
+    3. global_config(): ``graph_db.default`` / ``paths.kg_db``
+    """
+    try:
+        from genai_tk.config_mgmt.file_patterns import resolve_config_path
+    except ImportError:
+
+        def resolve_config_path(p: str) -> str:  # type: ignore[misc]
+            return str(Path(p).expanduser())
+
+    # 1. Try global_config()
+    try:
+        from genai_tk.config_mgmt.config_mngr import global_config
+
+        cfg = global_config()
+
+        # Dot-notation lookup
+        for key in (
+            f"docgraph_profiles.{profile}.paths.kg_db",
+            f"docgraph_profiles.{profile}.path.kg_db",
+            f"docgraph_profiles.{profile}.kg_db",
+        ):
+            val = cfg.get(key, None)
+            if val:
+                return resolve_config_path(str(val))
+
+        # DictConfig / dict lookup
+        profiles = cfg.get("docgraph_profiles", None)
+        if isinstance(profiles, dict) or hasattr(profiles, "get"):
+            p_data = profiles.get(profile, {})
+            if isinstance(p_data, dict) or hasattr(p_data, "get"):
+                paths = p_data.get("paths") if hasattr(p_data, "get") else getattr(p_data, "paths", None)
+                if not paths and (isinstance(p_data, dict) or hasattr(p_data, "get")):
+                    paths = p_data.get("path")
+                if isinstance(paths, dict) or hasattr(paths, "get"):
+                    kg_db = paths.get("kg_db")
+                    if kg_db:
+                        return resolve_config_path(str(kg_db))
+                elif isinstance(p_data, dict) and p_data.get("kg_db"):
+                    return resolve_config_path(str(p_data["kg_db"]))
+    except Exception:
+        pass
+
+    # 2. Try loading config/docgraph.yaml directly
+    try:
+        from genai_graph.bench.config import load_raw_docgraph_yaml
+
+        raw = load_raw_docgraph_yaml()
+        profiles = raw.get("docgraph_profiles", {}) or {}
+        if profile in profiles:
+            p_data = profiles[profile] or {}
+            paths = p_data.get("paths") or p_data.get("path") or {}
+            if isinstance(paths, dict):
+                kg_db = paths.get("kg_db")
+                if kg_db:
+                    return resolve_config_path(str(kg_db))
+            if p_data.get("kg_db"):
+                return resolve_config_path(str(p_data.get("kg_db")))
+    except Exception:
+        pass
+
+    # 3. Fallbacks: graph_db.default or top-level paths.kg_db
+    try:
+        from genai_tk.config_mgmt.config_mngr import global_config
+
+        cfg = global_config()
+        default_db = cfg.get("graph_db.default", None)
+        if default_db:
+            return resolve_config_path(str(default_db))
+        top_kg_db = cfg.get("paths.kg_db", None) or cfg.get("path.kg_db", None)
+        if top_kg_db:
+            return resolve_config_path(str(top_kg_db))
+    except Exception:
+        pass
+
+    return None
+
+
+def resolve_db_path(db_path: str | None = None, profile: str = "default") -> str:
+    """Return *db_path* or the configured ``docgraph_profiles.<profile>.paths.kg_db`` / ``graph_db.default``.
 
     Raises:
         DocumentGraphError: When no path is given and no default is configured.
     """
     if db_path:
         return db_path
-    from genai_tk.config_mgmt.config_mngr import global_config
 
-    default_db = global_config().get("graph_db.default", None)
-    if default_db:
-        return str(default_db)
+    resolved = find_docgraph_db_path(profile)
+    if resolved:
+        return resolved
+
     raise DocumentGraphError(
-        "No database path provided and no `graph_db.default` configured. "
-        "Pass --db <path> or add graph_db.default to your config."
+        f"No database path provided and no `docgraph_profiles.{profile}.paths.kg_db` or `graph_db.default` configured. "
+        "Pass --db <path>, --profile <name>, or configure docgraph_profiles in config/docgraph.yaml."
     )
 
 
 def create_document_graph_tools_from_config(
-    db_path: str | None = None, *, embeddings_id: str | None = None
+    db_path: str | None = None, *, profile: str = "default", embeddings_id: str | None = None
 ) -> list[BaseTool]:
     """Build the navigation tools, resolving *db_path* from config when omitted."""
-    return create_document_graph_tools(resolve_db_path(db_path), embeddings_id=embeddings_id)
+    return create_document_graph_tools(resolve_db_path(db_path, profile=profile), embeddings_id=embeddings_id)
 
 
 def build_docgraph_system_prompt(
@@ -157,6 +240,7 @@ def prepare_docgraph_profile(
     profile: Any,
     *,
     db_path: str | None = None,
+    docgraph_profile: str = "default",
     folder_id: str | None = None,
     extra_skill_dirs: list[str] | None = None,
 ) -> Any:
@@ -166,7 +250,7 @@ def prepare_docgraph_profile(
     directories (package skills + caller extras + profile-listed), and a
     filesystem backend rooted at the common ancestor of those skill dirs.
     """
-    resolved_db = resolve_db_path(db_path)
+    resolved_db = resolve_db_path(db_path, profile=docgraph_profile)
 
     folder_resolved_id: str | None = None
     folder_name: str | None = None
@@ -237,6 +321,7 @@ def create_docgraph_agent(
     *,
     llm: str | None = None,
     db_path: str | None = None,
+    docgraph_profile: str = "default",
     folder_id: str | None = None,
     extra_skill_dirs: list[str] | None = None,
     embeddings_id: str | None = None,
@@ -251,7 +336,8 @@ def create_docgraph_agent(
         profile: A resolved ``AgentProfileConfig`` (``type: deep``), typically from
             :func:`genai_tk.agents.harness.profiles.load_langchain_profiles`.
         llm: LLM identifier override (e.g. ``"deepseek_v4flash"``).
-        db_path: Ladybug database path; resolved from ``graph_db.default`` when None.
+        db_path: Ladybug database path; resolved from ``docgraph_profiles.<docgraph_profile>.paths.kg_db`` when None.
+        docgraph_profile: DocGraph profile name for database resolution (default: 'default').
         folder_id: Folder to scope the agent to (hash, prefix, or name).
         extra_skill_dirs: Additional runtime skill directories (e.g. a project's
             use-case skills).
@@ -263,8 +349,14 @@ def create_docgraph_agent(
     """
     from genai_tk.agents.harness.langchain_harness import LangChainHarness
 
-    prepare_docgraph_profile(profile, db_path=db_path, folder_id=folder_id, extra_skill_dirs=extra_skill_dirs)
-    tools = create_document_graph_tools_from_config(db_path, embeddings_id=embeddings_id)
+    prepare_docgraph_profile(
+        profile,
+        db_path=db_path,
+        docgraph_profile=docgraph_profile,
+        folder_id=folder_id,
+        extra_skill_dirs=extra_skill_dirs,
+    )
+    tools = create_document_graph_tools_from_config(db_path, profile=docgraph_profile, embeddings_id=embeddings_id)
     return LangChainHarness(
         profile,
         llm_override=llm,

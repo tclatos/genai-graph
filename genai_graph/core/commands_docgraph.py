@@ -19,7 +19,6 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
 import typer
-from genai_tk.config_mgmt.config_mngr import global_config
 from genai_tk.main.cli import CliTopCommand
 from genai_tk.workflow.force import ForceStage
 from loguru import logger
@@ -31,11 +30,12 @@ from rich.tree import Tree
 console = Console()
 
 
-def _resolve_db_path(db_path: str | None = None) -> str:
-    """Resolve database path from parameter or config default.
+def _resolve_db_path(db_path: str | None = None, profile: str = "default") -> str:
+    """Resolve database path from parameter, selected docgraph profile, or config default.
 
     Args:
         db_path: Explicit database path. If provided, use it.
+        profile: DocGraph profile name to look up in docgraph_profiles (default: "default").
 
     Returns:
         Resolved database path.
@@ -46,14 +46,15 @@ def _resolve_db_path(db_path: str | None = None) -> str:
     if db_path:
         return db_path
 
-    # Try to get default from config
-    default_db = global_config().get("graph_db.default", None)
-    if default_db:
-        return str(default_db)
+    from genai_graph.agent.docgraph_agent import find_docgraph_db_path
+
+    resolved = find_docgraph_db_path(profile)
+    if resolved:
+        return resolved
 
     console.print(
-        "[red]Error: No database path provided and no graph_db.default configured.[/red]\n"
-        "  Use --db <path> or add graph_db.default to your config file."
+        f"[red]Error: No database path provided and no docgraph_profiles.{profile}.paths.kg_db or graph_db.default configured.[/red]\n"
+        f"  Use --db <path>, --profile <name>, or add docgraph_profiles to your config/docgraph.yaml."
     )
     raise typer.Exit(1)
 
@@ -185,7 +186,8 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
             md_output_dir: Annotated[
@@ -201,7 +203,11 @@ class DocGraphCommands(CliTopCommand):
             ] = None,
             profile: Annotated[
                 str,
-                typer.Option("--profile", help="markdownize profile: fast, medium, best, or default."),
+                typer.Option(
+                    "--profile",
+                    "-p",
+                    help="DocGraph profile name (or markdownize profile: fast, medium, best, default).",
+                ),
             ] = "default",
             include: Annotated[
                 list[str] | None,
@@ -287,7 +293,7 @@ class DocGraphCommands(CliTopCommand):
                 cli docgraph build ./docs --db ./data/kg/tree.db --llm-max-tokens 32000
             """
             _validate_force(force)
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
 
             from genai_tk.config_mgmt.file_patterns import resolve_config_path
             from genai_tk.workflow.markdownize import markdownize_flow
@@ -295,6 +301,17 @@ class DocGraphCommands(CliTopCommand):
             from genai_graph.orchestration.document_graph_flow import document_graph_flow
 
             resolved_md_output_dir = md_output_dir or str(Path(db_path).with_suffix("")) + "_markdown"
+
+            # Determine markdownize profile: if the profile name corresponds to a docgraph profile,
+            # extract markdownize_profile from it if present; otherwise use profile directly.
+            md_profile = "default"
+            try:
+                from genai_tk.config_mgmt.config_mngr import global_config
+
+                cfg = global_config()
+                md_profile = cfg.get(f"docgraph_profiles.{profile}.markdownize_profile", None) or profile
+            except Exception:
+                md_profile = profile
 
             # Markdownize each source into its own subdirectory (named after the source's
             # stem) so the Document Graph's top-level Folder is named after the original
@@ -310,7 +327,7 @@ class DocGraphCommands(CliTopCommand):
                     sources=[src],
                     md_output_dir=src_output_dir,
                     cache_dir=src_cache_dir,
-                    profile=profile,
+                    profile=md_profile,
                     force_stage=force,
                 )
                 per_source_dirs.append(src_output_dir)
@@ -356,9 +373,14 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
             yes: Annotated[
                 bool,
                 typer.Option("--yes", "-y", help="Skip the confirmation prompt."),
@@ -368,7 +390,7 @@ class DocGraphCommands(CliTopCommand):
             from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.document_graph.ingest import drop_document_graph
 
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
             backend = KuzuBackend()
             backend.connect(db_path)
 
@@ -390,12 +412,17 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
         ) -> None:
             """List ingested documents, optionally filtered to one folder's subtree."""
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
             from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import list_documents
 
@@ -433,9 +460,14 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
             yaml_out: Annotated[
                 bool,
                 typer.Option("--yaml", help="Print as YAML (with descriptions), for feeding to an agent."),
@@ -450,7 +482,7 @@ class DocGraphCommands(CliTopCommand):
             ] = None,
         ) -> None:
             """Show the table of contents for one document, or list a folder's contents."""
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
             from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import (
                 document_toc_yaml,
@@ -514,9 +546,14 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
             sections: Annotated[
                 bool,
                 typer.Option("--sections", help="Also inline each document's section tree."),
@@ -531,7 +568,7 @@ class DocGraphCommands(CliTopCommand):
             Sections are omitted by default — this is the orientation view: pick a document,
             then run `docgraph toc <id> --yaml` for its sections. Pass --sections to inline them.
             """
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
             from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import folder_toc_yaml
 
@@ -555,9 +592,14 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
             cypher: Annotated[
                 bool,
                 typer.Option("--cypher", help="Print the Cypher query used to fetch the content."),
@@ -568,7 +610,7 @@ class DocGraphCommands(CliTopCommand):
             ] = False,
         ) -> None:
             """Reconstruct and print a document's (or one section's) Markdown text from its sections."""
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
             from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import (
                 reconstruct_document,
@@ -611,9 +653,14 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
             limit: Annotated[int, typer.Option("--limit", "-l", help="Max number of matches.")] = 20,
             folder: Annotated[
                 str | None,
@@ -654,7 +701,7 @@ class DocGraphCommands(CliTopCommand):
             ] = None,
         ) -> None:
             """Search section titles and text across ingested documents, with hybrid, vector, BM25, or native Cypher mode."""
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
             from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import (
                 get_available_indexes,
@@ -752,12 +799,17 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
         ) -> None:
             """Display the ingested folder hierarchy as a tree."""
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
             from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import get_folder_tree
 
@@ -798,9 +850,14 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
             doc: Annotated[
                 str | None,
                 typer.Option("--doc", "-d", help="Filter to a specific document (filename, content hash)."),
@@ -808,7 +865,7 @@ class DocGraphCommands(CliTopCommand):
             limit: Annotated[int, typer.Option("--limit", "-l", help="Max number of images to return.")] = 20,
         ) -> None:
             """List and search images extracted into the Document Graph."""
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
             from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import search_images
 
@@ -847,9 +904,14 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
             doc: Annotated[
                 str | None,
                 typer.Option("--doc", "-d", help="Filter to a specific document (filename, content hash)."),
@@ -857,7 +919,7 @@ class DocGraphCommands(CliTopCommand):
             limit: Annotated[int, typer.Option("--limit", "-l", help="Max number of tables to return.")] = 20,
         ) -> None:
             """List and search tables extracted into the Document Graph."""
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
             from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import search_tables
 
@@ -892,12 +954,17 @@ class DocGraphCommands(CliTopCommand):
             db_path: Annotated[
                 str | None,
                 typer.Option(
-                    "--db", help="Path to the Ladybug database file. Uses graph_db.default from config if omitted."
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
         ) -> None:
             """Launch an interactive Textual TUI to browse the Document Graph."""
-            db_path = _resolve_db_path(db_path)
+            db_path = _resolve_db_path(db_path, profile=profile)
             from genai_graph.kg.query.document_graph_tui import run_document_graph_tui
 
             run_document_graph_tui(db_path)
@@ -914,6 +981,10 @@ class DocGraphCommands(CliTopCommand):
                 str,
                 typer.Option("--profile", "-p", help="Agent profile key (default: docgraph)."),
             ] = "docgraph",
+            docgraph_profile: Annotated[
+                str,
+                typer.Option("--docgraph-profile", help="DocGraph profile name for db_path (default: default)."),
+            ] = "default",
             llm: Annotated[
                 str,
                 typer.Option("--llm", "-m", help="LLM id (name@provider) or tag. Defaults to the profile's LLM."),
@@ -922,7 +993,7 @@ class DocGraphCommands(CliTopCommand):
                 str | None,
                 typer.Option(
                     "--db",
-                    help="Path to the Ladybug database file. Uses graph_db.default from config if omitted.",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
                 ),
             ] = None,
             folder: Annotated[
@@ -960,13 +1031,15 @@ class DocGraphCommands(CliTopCommand):
             agent_profile = profiles[profile]
             agent_profile.recursion_limit = recursion_limit
             llm_id = llm if llm != "default" else None
+            resolved_db_path = _resolve_db_path(db_path, profile=docgraph_profile)
 
             async def _run() -> None:
                 try:
                     harness = create_docgraph_agent(
                         agent_profile,
                         llm=llm_id,
-                        db_path=db_path,
+                        db_path=resolved_db_path,
+                        docgraph_profile=docgraph_profile,
                         folder_id=folder,
                         extra_skill_dirs=skill_dir,
                     )

@@ -52,7 +52,7 @@ class DocGraphPathsConfig(BaseModel):
 class DocGraphLlmsConfig(BaseModel):
     """LLM configurations for Document Graph construction."""
 
-    summary: str = "deepseek-v4-flash-0731@openrouter"
+    summary: str = "deepseek-v4-flash-0731(none)@openrouter"
     image: str | None = None  # VLM model ID for image queries / descriptions
 
     model_config = {"arbitrary_types_allowed": True}

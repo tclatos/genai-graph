@@ -22,6 +22,7 @@ the LLM call itself failing.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +32,15 @@ from typing import Any
 from genai_tk.utils.tokens import count_tokens
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
+
+try:
+    from baml_py.logging import set_log_level
+
+    if os.environ.get("BAML_LOG", "").lower() not in {"debug", "info", "trace"}:
+        os.environ["BAML_LOG"] = "ERROR"
+        set_log_level("ERROR")
+except Exception:
+    pass
 
 from genai_graph.kg.document_graph.summarize import _clean_text, _is_length_limit_error
 from genai_graph.kg.document_graph.tree_parser import (

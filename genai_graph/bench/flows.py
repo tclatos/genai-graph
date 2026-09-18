@@ -18,7 +18,8 @@ from genai_graph.bench.adapters.base import get_benchmark_adapter
 from genai_graph.bench.config import BenchConfig, configure_bench_monitoring
 from genai_graph.bench.judge import evaluate_single_run, load_existing_scores
 from genai_graph.bench.models import BenchQuestion, BenchRunRecord, BenchScoreRecord
-from genai_graph.bench.runner import append_run_record, load_existing_runs, run_one_question
+from genai_graph.bench.runner import append_run_record, count_error_tool_results, load_existing_runs, run_one_question
+from genai_graph.bench.watchdog import SuspendWatchdog
 
 _QUESTION_SEMAPHORES: dict[int, threading.Semaphore] = {}
 _JUDGE_SEMAPHORES: dict[int, threading.Semaphore] = {}
@@ -418,21 +419,56 @@ def run_questions_flow(
         return [r.id for r in cached_runs]
 
     logger.info("Executing {} question(s) (concurrency={})...", len(to_run), cfg.runner.concurrency)
-    futures = [
-        run_question_task.submit(
-            q,
-            llm=cfg.agent_llm,
-            db_path=cfg.docgraph.paths.kg_db,
-            folder_id=cfg.runner.folder_id,
-            profile_name=cfg.agent_profile,
-            embeddings_id=None,
-            runs_path=cfg.runs,
-            concurrency=cfg.runner.concurrency,
+    # Abort new runs once a machine suspend/resume is detected mid-flight —
+    # continuing records answers against a degraded Ladybug buffer pool.
+    watchdog = SuspendWatchdog()
+    watchdog.start()
+    new_records: list[BenchRunRecord] = []
+    try:
+        futures = [
+            run_question_task.submit(
+                q,
+                llm=cfg.agent_llm,
+                db_path=cfg.docgraph.paths.kg_db,
+                folder_id=cfg.runner.folder_id,
+                profile_name=cfg.agent_profile,
+                embeddings_id=None,
+                runs_path=cfg.runs,
+                concurrency=cfg.runner.concurrency,
+            )
+            for q in to_run
+        ]
+        for future in futures:
+            try:
+                new_records.append(future.result())
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Question run failed (recorded nowhere, will retry on re-launch): {}", exc)
+    finally:
+        watchdog.stop()
+
+    if watchdog.triggered:
+        logger.critical(
+            "Machine suspend/resume was detected mid-run: {}/{} question runs completed before the abort; "
+            "the rest failed fast. Restart the machine fresh and re-launch the same command to resume.",
+            len(new_records),
+            len(to_run),
         )
-        for q in to_run
-    ]
-    new_run_ids = [f.result().id for f in futures]
-    return [r.id for r in cached_runs] + new_run_ids
+
+    # Post-run visibility: tool exceptions only surface inside tool results,
+    # never in the console log — count them before they poison scores.
+    error_stats = count_error_tool_results(new_records)
+    if error_stats["runs_with_errors"]:
+        logger.warning(
+            "Tool errors stuffed into results of {}/{} new runs ({} error results, by marker: {}) — "
+            "inspect tool_results in the runs JSONL. Sample ids: {}",
+            error_stats["runs_with_errors"],
+            len(new_records),
+            error_stats["total_error_results"],
+            error_stats["by_marker"],
+            error_stats["run_ids"][:10],
+        )
+
+    return [r.id for r in cached_runs] + [r.id for r in new_records]
 
 
 @flow(name="bench-grade")

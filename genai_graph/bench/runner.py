@@ -15,8 +15,20 @@ from typing import Any
 from loguru import logger
 
 from genai_graph.bench.models import BenchQuestion, BenchRunRecord
+from genai_graph.bench.watchdog import check_suspend
 
 _RUNS_WRITE_LOCK = threading.Lock()
+
+# Substrings that mark a tool result as an error stuffed into the agent's
+# context instead of real content (see ``_tool_error`` in the document-graph
+# tools and VLM/OCR fallback paths).
+TOOL_ERROR_MARKERS: tuple[str, ...] = (
+    "Buffer manager",
+    "buffer pool",
+    "Error:",
+    "Traceback",
+    "Exception:",
+)
 
 
 async def run_one_question(
@@ -25,6 +37,9 @@ async def run_one_question(
     llm: str,
 ) -> BenchRunRecord:
     """Stream one question through the agent harness and return a structured BenchRunRecord."""
+    # Fail fast when the machine was suspended mid-run: continuing would record
+    # runs against a degraded Ladybug buffer pool (see genai_graph.bench.watchdog).
+    check_suspend()
     from genai_tk.agents.harness import (
         EndEvent,
         ErrorEvent,
@@ -118,6 +133,36 @@ async def run_one_question(
             )
         },
     )
+
+
+def count_error_tool_results(records: list[BenchRunRecord]) -> dict[str, Any]:
+    """Count runs whose tool results carry error-stuffed content.
+
+    Tool exceptions never reach the console log on their own — they are
+    converted to result strings the agent sees. This post-run check makes the
+    failure rate visible so a degrading database is caught early instead of
+    silently poisoning scores.
+    """
+    by_marker: dict[str, int] = {}
+    runs_with_errors: list[str] = []
+    total_error_results = 0
+    for record in records:
+        markers_hit: set[str] = set()
+        for result in record.tool_results or []:
+            content = str(result.get("content", ""))
+            for marker in TOOL_ERROR_MARKERS:
+                if marker in content:
+                    markers_hit.add(marker)
+                    by_marker[marker] = by_marker.get(marker, 0) + 1
+                    total_error_results += 1
+        if markers_hit:
+            runs_with_errors.append(record.id)
+    return {
+        "runs_with_errors": len(runs_with_errors),
+        "total_error_results": total_error_results,
+        "by_marker": by_marker,
+        "run_ids": runs_with_errors,
+    }
 
 
 def append_run_record(record: BenchRunRecord, output_file: Path) -> None:

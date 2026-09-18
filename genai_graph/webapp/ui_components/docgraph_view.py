@@ -34,6 +34,20 @@ _MISTRAL_IMG_RE = re.compile(
     re.IGNORECASE,
 )
 _HTML_IMG_RE = re.compile(r"<\s*img\s+[^>]*src=[\"'](?P<url>[^\"']+)[\"']", re.IGNORECASE)
+_ORIGIN_COMMENT_RE = re.compile(r"<!--\s*source:\s*(.+?)\s*-->")
+
+
+def read_origin_path(md_path: str | None) -> str | None:
+    """Return the original source document path recorded in a converted Markdown file, if any."""
+    if not md_path:
+        return None
+    try:
+        with open(md_path, encoding="utf-8") as f:
+            first_line = f.readline()
+    except OSError:
+        return None
+    match = _ORIGIN_COMMENT_RE.search(first_line)
+    return match.group(1) if match else None
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +297,13 @@ async def search_sections_async(
     )
 
 
+async def fetch_section_markdown_async(backend: KgBackend, section_id: str) -> str | None:
+    """Asynchronously reconstruct the full markdown text for a section."""
+    from genai_graph.kg.query.document_graph_tools import reconstruct_section
+
+    return await asyncio.to_thread(reconstruct_section, backend, section_id)
+
+
 # ---------------------------------------------------------------------------
 # Tree Builder for `streamlit-tree-select2`
 # ---------------------------------------------------------------------------
@@ -361,6 +382,9 @@ def build_tree_select_nodes(
                 nodes.append(node)
             return nodes
 
+        roots = by_parent.get(None, [])
+        if len(roots) == 1 and roots[0].get("level") == 0 and by_parent.get(roots[0].get("section_id")):
+            return _build_subtree(roots[0].get("section_id"))
         return _build_subtree(None)
 
     def _build_doc_node(doc: dict[str, Any]) -> dict[str, Any]:
@@ -605,16 +629,138 @@ def extract_markdown_images(text: str) -> list[dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Section Content Renderer (Expander Inner)
+# Section Content & Banner Renderers
 # ---------------------------------------------------------------------------
+
+
+def render_section_banner(
+    section: dict[str, Any],
+    doc_name: str | None = None,
+    score: float | None = None,
+    show_summary: bool = True,
+) -> None:
+    """Render a prominent banner for a section including its Section ID, title, level, tokens, and summary."""
+    level = section.get("level", 1)
+    lvl_tag = f"H{level}" if level > 0 else "Doc"
+    title = (section.get("title") or "Untitled Section").strip()
+    sid = section.get("section_id") or "-"
+    seq = section.get("sequence", 0)
+    tok = section.get("token_count", 0)
+    l_start = section.get("line_start")
+    l_end = section.get("line_end")
+    line_str = f"L{l_start}-L{l_end}" if (l_start and l_end) else (f"L{l_start}" if l_start else "-")
+    summary = section.get("summary") or section.get("description")
+    summary_source = section.get("summary_source")
+
+    # Banner header with Section ID prominently displayed
+    st.markdown(
+        f"""
+        <div style="background: linear-gradient(135deg, #00005B 0%, #0073E6 100%); color: white; padding: 14px 18px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <div style="font-size: 0.85em; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
+                📑 [{lvl_tag}] Section #{seq} &nbsp;·&nbsp; 🔑 <strong>Section ID:</strong> <code style="color: #43C7F4; background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 4px; font-weight: bold;">{sid}</code>
+            </div>
+            <div style="font-size: 1.25em; font-weight: bold; margin-bottom: 6px;">
+                {title}
+            </div>
+            <div style="font-size: 0.85em; opacity: 0.95;">
+                {"📄 Document: <strong>" + str(doc_name) + "</strong> &nbsp;·&nbsp; " if doc_name else ""}
+                🔤 <strong>{tok:,}</strong> tokens &nbsp;·&nbsp; 📏 Lines: <strong>{line_str}</strong>
+                {" &nbsp;·&nbsp; 🎯 Score: <strong>" + f"{score:.3f}" + "</strong>" if score is not None else ""}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if show_summary and summary:
+        source_badge = f" *(source: `{summary_source}`)*" if summary_source else ""
+        st.markdown(
+            f"""
+            <div style="background-color: #f0f7ff; border-left: 4px solid #0073E6; padding: 10px 14px; border-radius: 4px; margin-bottom: 14px;">
+                <strong style="color: #00005B;">💡 Section Summary{source_badge}:</strong><br/>
+                <span style="color: #1a1a1a;">{summary}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_document_banner(doc_data: dict[str, Any]) -> None:
+    """Render a prominent banner for a document including its hash, path, tokens, and abstract."""
+    fname = doc_data.get("filename") or "Document"
+    m_hash = doc_data.get("markdown_hash") or doc_data.get("content_hash") or "-"
+    p = doc_data.get("path") or ""
+    origin_src = read_origin_path(p) if p else None
+    sec_count = doc_data.get("section_count", 0)
+    tok_count = doc_data.get("token_count", 0)
+    lang = str(doc_data.get("language") or "en").upper()
+    doc_abstract = doc_data.get("summary") or doc_data.get("description")
+
+    st.markdown(
+        f"""
+        <div style="background: linear-gradient(135deg, #0a2540 0%, #20639B 100%); color: white; padding: 14px 18px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <div style="font-size: 0.85em; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
+                📄 Document &nbsp;·&nbsp; 🔑 <strong>Hash:</strong> <code style="color: #43C7F4; background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 4px;">{m_hash}</code>
+            </div>
+            <div style="font-size: 1.3em; font-weight: bold; margin-bottom: 6px;">
+                {fname}
+            </div>
+            <div style="font-size: 0.85em; opacity: 0.95;">
+                📑 <strong>{sec_count}</strong> sections &nbsp;·&nbsp; 🔤 <strong>{tok_count:,}</strong> tokens &nbsp;·&nbsp; 🌐 Language: <strong>{lang}</strong>
+                {(" &nbsp;·&nbsp; 📁 Path: <code>" + p + "</code>") if p else ""}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if origin_src:
+        st.caption(f"**Original Source:** `{origin_src}`")
+
+    if doc_abstract:
+        st.markdown(
+            f"""
+            <div style="background-color: #f4f6f8; border-left: 4px solid #00005B; padding: 10px 14px; border-radius: 4px; margin-bottom: 14px;">
+                <strong style="color: #00005B;">📋 Document Abstract:</strong><br/>
+                <span style="color: #2b2b2b;">{doc_abstract}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_folder_banner(folder_data: dict[str, Any]) -> None:
+    """Render a prominent banner for a folder."""
+    name = folder_data.get("name") or folder_data.get("folder_id") or "Folder"
+    fid = folder_data.get("folder_id") or "-"
+    doc_count = folder_data.get("doc_count", 0)
+
+    st.markdown(
+        f"""
+        <div style="background: linear-gradient(135deg, #1b3a4b 0%, #3d5a80 100%); color: white; padding: 14px 18px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <div style="font-size: 0.85em; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
+                📁 Folder &nbsp;·&nbsp; 🔑 <strong>Folder ID:</strong> <code style="color: #43C7F4; background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 4px;">{fid}</code>
+            </div>
+            <div style="font-size: 1.3em; font-weight: bold; margin-bottom: 6px;">
+                {name}
+            </div>
+            <div style="font-size: 0.85em; opacity: 0.95;">
+                📄 <strong>{doc_count}</strong> document{"s" if doc_count != 1 else ""} contained
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_section_content_view(
     section: dict[str, Any],
     doc_path: str | None = None,
+    doc_name: str | None = None,
     db_path: str | None = None,
+    show_banner: bool = True,
 ) -> None:
-    """Render the full contents of a section inside an open `st.expander`."""
+    """Render the full contents of a section inside an open `st.expander` or standalone view."""
     summary = section.get("summary")
     description = section.get("description")
     summary_source = section.get("summary_source")
@@ -624,44 +770,47 @@ def render_section_content_view(
     images = section.get("images") or []
     graph_links = section.get("graph_links") or []
 
-    # 1. Summary Box
-    if summary or description:
-        with st.container():
-            if summary:
-                source_badge = f" *(source: `{summary_source}`)*" if summary_source else ""
-                st.markdown(
-                    f"""
-                    <div style="background-color: #f0f7ff; border-left: 4px solid #0073E6; padding: 10px 14px; border-radius: 4px; margin-bottom: 12px;">
-                        <strong style="color: #00005B;">💡 Section Summary{source_badge}:</strong><br/>
-                        <span style="color: #1a1a1a;">{summary}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            elif description:
-                st.markdown(
-                    f"""
-                    <div style="background-color: #f6f8fa; border-left: 4px solid #6c757d; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px;">
-                        <strong>📌 Overview:</strong> {description}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+    # 1. Summary Box / Banner
+    if show_banner:
+        render_section_banner(section, doc_name=doc_name, show_summary=True)
+    else:
+        if summary or description:
+            with st.container():
+                if summary:
+                    source_badge = f" *(source: `{summary_source}`)*" if summary_source else ""
+                    st.markdown(
+                        f"""
+                        <div style="background-color: #f0f7ff; border-left: 4px solid #0073E6; padding: 10px 14px; border-radius: 4px; margin-bottom: 12px;">
+                            <strong style="color: #00005B;">💡 Section Summary{source_badge}:</strong><br/>
+                            <span style="color: #1a1a1a;">{summary}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                elif description:
+                    st.markdown(
+                        f"""
+                        <div style="background-color: #f6f8fa; border-left: 4px solid #6c757d; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px;">
+                            <strong>📌 Overview:</strong> {description}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
-    # 2. Metadata Pills & Chips
-    meta_cols = st.columns([2, 2, 2, 3])
-    with meta_cols[0]:
-        st.caption(f"**Section ID:** `{section.get('section_id', '-')}`")
-    with meta_cols[1]:
-        st.caption(f"**Sequence:** #{section.get('sequence', 0)} (Level {section.get('level', 1)})")
-    with meta_cols[2]:
-        st.caption(f"**Tokens:** {section.get('token_count', 0):,} tok")
-    with meta_cols[3]:
-        if keywords:
-            kw_str = ", ".join(f"`{k}`" for k in keywords[:5])
-            st.caption(f"**Keywords:** {kw_str}")
+        # 2. Metadata Pills & Chips
+        meta_cols = st.columns([2, 2, 2, 3])
+        with meta_cols[0]:
+            st.caption(f"**Section ID:** `{section.get('section_id', '-')}`")
+        with meta_cols[1]:
+            st.caption(f"**Sequence:** #{section.get('sequence', 0)} (Level {section.get('level', 1)})")
+        with meta_cols[2]:
+            st.caption(f"**Tokens:** {section.get('token_count', 0):,} tok")
+        with meta_cols[3]:
+            if keywords:
+                kw_str = ", ".join(f"`{k}`" for k in keywords[:5])
+                st.caption(f"**Keywords:** {kw_str}")
 
-    st.divider()
+        st.divider()
 
     # 3. Main Section Markdown Text
     if sec_text.strip():
@@ -714,6 +863,35 @@ def render_section_content_view(
             tbl_name = tbl.get("name") or f"Table {idx + 1}"
             tbl_caption = tbl.get("caption") or ""
             tbl_format = tbl.get("table_format") or "markdown"
+            tbl_content = tbl.get("content") or ""
+
+            with st.expander(
+                f"📊 {tbl_name} ({tbl_format.upper()}) {('— ' + tbl_caption) if tbl_caption else ''}", expanded=True
+            ):
+                if tbl_caption:
+                    st.caption(f"**Caption:** {tbl_caption}")
+                if tbl_format == "html":
+                    st.markdown(tbl_content, unsafe_allow_html=True)
+                else:
+                    st.markdown(tbl_content)
+
+                with st.expander("Show raw table markup", expanded=False):
+                    st.code(tbl_content, language="html" if tbl_format == "html" else "markdown")
+
+    # 6. Graph Links / Knowledge Graph Entity Mentions
+    if graph_links:
+        st.markdown("#### 🕸️ Connected Knowledge Graph Entities")
+        for gl in graph_links:
+            rel = gl.get("rel_type") or "RELATED_TO"
+            labels = gl.get("entity_labels") or []
+            label_str = f":{':'.join(labels)}" if labels else ""
+            ename = gl.get("entity_name") or "Entity"
+            st.markdown(f"- **`-{rel}->`** `{ename}` `({label_str})`")
+
+    # 7. Raw Markdown Source Expander
+    if sec_text.strip():
+        with st.expander("📄 View Raw Markdown Source", expanded=False):
+            st.code(sec_text, language="markdown")
             tbl_content = tbl.get("content") or ""
 
             with st.expander(

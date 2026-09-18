@@ -2,11 +2,10 @@
 
 Provides a rich visual interface to browse, inspect, search, and navigate
 Ladybug Document Graphs:
-- Hierarchical tree navigation with `streamlit-tree-select2` (Folders → Docs → Sections)
-- Section expanders featuring summaries, token lengths, and Table/Image/Graph indicators
-- Rendered inline images with intelligent local/remote path resolution
-- Rendered tables and connected Knowledge Graph entity links
-- Cross-document Hybrid / Vector / BM25 / Cypher search
+- Hierarchical tree navigation in the main window (Folders → Docs → Sections → Subsections)
+- Clicking on a tree node displays full content of documents, sections, or sub-sections
+- Section banner with Section ID prominently displayed
+- Cross-document Hybrid / Vector / BM25 / Cypher search with rendered Markdown content
 - Corpus-wide Image Gallery and Tables Inspector
 - Full document Markdown reconstruction and download
 
@@ -29,7 +28,6 @@ from streamlit_tree_select import tree_select
 from genai_graph.agent.docgraph_agent import find_docgraph_db_path
 from genai_graph.kg.backend import KgBackend
 from genai_graph.kg.query.document_graph_tools import reconstruct_document
-from genai_graph.kg.query.document_graph_tui import _read_origin_path
 from genai_graph.webapp.ui_components.docgraph_view import (
     build_tree_select_nodes,
     fetch_all_images_async,
@@ -37,16 +35,54 @@ from genai_graph.webapp.ui_components.docgraph_view import (
     fetch_database_stats,
     fetch_document_sections_full,
     fetch_folders_and_documents,
+    fetch_section_markdown_async,
     format_section_expander_label,
     get_docgraph_backend,
+    render_document_banner,
+    render_folder_banner,
+    render_section_banner,
     render_section_content_view,
     resolve_image_path,
     search_sections_async,
 )
 
 # ---------------------------------------------------------------------------
-# Session State Initialization
+# Session State & Profile Discovery
 # ---------------------------------------------------------------------------
+
+
+def _get_configured_profiles() -> list[str]:
+    """Discover available DocGraph profiles from docgraph.yaml and global configuration."""
+    profiles: list[str] = []
+
+    # 1. Read config/docgraph.yaml
+    try:
+        from genai_graph.bench.config import list_docgraph_profiles
+
+        profs = list_docgraph_profiles()
+        if profs:
+            profiles.extend(profs.keys())
+    except Exception as exc:
+        logger.debug("Could not read docgraph_profiles from docgraph.yaml: {}", exc)
+
+    # 2. Read global_config()
+    try:
+        from genai_tk.config_mgmt.config_mngr import global_config
+
+        cfg = global_config()
+        p_dict = cfg.get("docgraph_profiles", None)
+        if isinstance(p_dict, dict):
+            profiles.extend(p_dict.keys())
+        elif hasattr(p_dict, "keys"):
+            profiles.extend(p_dict.keys())
+    except Exception as exc:
+        logger.debug("Could not load docgraph_profiles from global config: {}", exc)
+
+    if not profiles:
+        profiles = ["default"]
+    elif "default" not in profiles:
+        profiles.insert(0, "default")
+    return sorted(set(profiles))
 
 
 def _init_session_state() -> None:
@@ -54,32 +90,18 @@ def _init_session_state() -> None:
     if "docgraph_profile" not in st.session_state:
         st.session_state.docgraph_profile = os.getenv("DOCGRAPH_PROFILE", "default")
     if "docgraph_db_path" not in st.session_state:
-        st.session_state.docgraph_db_path = os.getenv("DOCGRAPH_DB_PATH", "")
+        initial_db = os.getenv("DOCGRAPH_DB_PATH") or find_docgraph_db_path(st.session_state.docgraph_profile) or ""
+        st.session_state.docgraph_db_path = initial_db
+    if "selected_node_type" not in st.session_state:
+        st.session_state.selected_node_type = None
     if "selected_doc_hash" not in st.session_state:
         st.session_state.selected_doc_hash = None
     if "selected_section_id" not in st.session_state:
         st.session_state.selected_section_id = None
+    if "selected_folder_id" not in st.session_state:
+        st.session_state.selected_folder_id = None
     if "expand_all_sections" not in st.session_state:
         st.session_state.expand_all_sections = False
-
-
-def _get_configured_profiles() -> list[str]:
-    """Discover available DocGraph profiles from global configuration."""
-    profiles = ["default"]
-    try:
-        from genai_tk.config_mgmt.config_mngr import global_config
-
-        cfg = global_config()
-        p_dict = cfg.get("docgraph_profiles", None)
-        if isinstance(p_dict, dict):
-            profiles = list(p_dict.keys())
-        elif hasattr(p_dict, "keys"):
-            profiles = list(p_dict.keys())
-    except Exception as exc:
-        logger.debug("Could not load docgraph_profiles from config: {}", exc)
-    if "default" not in profiles:
-        profiles.insert(0, "default")
-    return sorted(set(profiles))
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +124,7 @@ async def render_docgraph_explorer() -> None:
     st.caption("Interactive browser, search, and hierarchy navigator for Ladybug Document Graphs")
 
     # -----------------------------------------------------------------------
-    # Sidebar: Profile / Database Selector & Tree Navigation
+    # Sidebar: Database Connection & Global Filters
     # -----------------------------------------------------------------------
     with st.sidebar:
         st.header("🗄️ Database Connection")
@@ -118,17 +140,28 @@ async def render_docgraph_explorer() -> None:
             help="Select a profile from config/docgraph.yaml",
         )
 
-        # Resolve DB path for chosen profile if not manually set
-        resolved_db = find_docgraph_db_path(selected_profile) or st.session_state.docgraph_db_path
+        # When profile is changed, automatically update the resolved DB path
+        if selected_profile != st.session_state.docgraph_profile:
+            st.session_state.docgraph_profile = selected_profile
+            resolved = find_docgraph_db_path(selected_profile)
+            if resolved:
+                st.session_state.docgraph_db_path = resolved
+                st.session_state.selected_doc_hash = None
+                st.session_state.selected_section_id = None
+                st.session_state.selected_folder_id = None
+                st.session_state.selected_node_type = None
+
+        if not st.session_state.docgraph_db_path:
+            resolved = find_docgraph_db_path(selected_profile)
+            if resolved:
+                st.session_state.docgraph_db_path = resolved
 
         db_path_input = st.text_input(
             "Database Path (.lbdb / .db)",
-            value=st.session_state.docgraph_db_path or resolved_db or "",
+            value=st.session_state.docgraph_db_path,
             placeholder="/path/to/docgraph.db",
             help="Path to the Ladybug / Kuzu database directory",
         )
-
-        st.session_state.docgraph_profile = selected_profile
         st.session_state.docgraph_db_path = db_path_input.strip()
 
         col_ref, col_stat = st.columns([1, 1])
@@ -136,11 +169,14 @@ async def render_docgraph_explorer() -> None:
             if st.button("🔄 Reconnect", use_container_width=True):
                 st.session_state.selected_doc_hash = None
                 st.session_state.selected_section_id = None
+                st.session_state.selected_folder_id = None
+                st.session_state.selected_node_type = None
                 st.rerun()
 
         active_db_path = st.session_state.docgraph_db_path
         if not active_db_path:
             st.warning("⚠️ Please provide or configure a valid database path.")
+            st.info("Ensure the database exists or build one with `cli docgraph build <sources>`.")
             st.stop()
 
         # Connect to Ladybug DB
@@ -157,63 +193,6 @@ async def render_docgraph_explorer() -> None:
 
         st.divider()
 
-        # Sidebar Search & Tree Navigation
-        st.header("📂 Document Hierarchy")
-        st.caption("Navigate folders, documents, and sections via `streamlit-tree-select2`")
-
-        folders, documents = await fetch_folders_and_documents(backend)
-
-        if not documents:
-            st.warning("No documents found in this database.")
-            st.stop()
-
-        # Build tree nodes
-        # Pre-fetch TOC for all documents to build deep tree if reasonable count
-        sections_by_doc: dict[str, list[dict[str, Any]]] = {}
-        if len(documents) <= 50:
-            for d in documents:
-                m_hash = d.get("markdown_hash")
-                if m_hash:
-                    from genai_graph.kg.query.document_graph_tools import get_document_toc
-
-                    sections_by_doc[m_hash] = get_document_toc(backend, m_hash)  # type: ignore[assignment]
-
-        tree_nodes = build_tree_select_nodes(
-            folders=folders,
-            documents=documents,
-            sections_by_doc=sections_by_doc,
-            include_sections=True,
-        )
-
-        # Tree Select widget
-        tree_result = tree_select(
-            nodes=tree_nodes,
-            checked=None,
-            expanded=None,
-            expand_on_click=True,
-            show_expand_all=True,
-            key="docgraph_tree_select",
-        )
-
-        # Process tree selection
-        if tree_result and tree_result.get("checked"):
-            checked_items = tree_result["checked"]
-            # Prioritize the most specific checked item (section > doc > folder)
-            for val in reversed(checked_items):
-                if val.startswith("sec:"):
-                    sid = val.split("sec:", 1)[1]
-                    st.session_state.selected_section_id = sid
-                    # Extract document hash from section_id (format: {hash}::{seq})
-                    doc_hash = sid.split("::", 1)[0]
-                    st.session_state.selected_doc_hash = doc_hash
-                    break
-                elif val.startswith("doc:"):
-                    doc_hash = val.split("doc:", 1)[1]
-                    st.session_state.selected_doc_hash = doc_hash
-                    st.session_state.selected_section_id = None
-                    break
-
-        st.divider()
         st.markdown("### 🎛️ Section Display Filters")
         filter_text = st.text_input("Filter section title/text", "", placeholder="e.g. revenue, setup...")
         filter_level = st.selectbox("Max Heading Level", ["All Levels", "H1 Only", "Up to H2", "Up to H3", "Up to H4"])
@@ -239,153 +218,304 @@ async def render_docgraph_explorer() -> None:
     st.divider()
 
     # -----------------------------------------------------------------------
+    # Fetch Folders & Documents
+    # -----------------------------------------------------------------------
+    folders, documents = await fetch_folders_and_documents(backend)
+
+    if not documents:
+        st.warning("No documents found in this database.")
+        st.stop()
+
+    # Map documents by hash
+    doc_map: dict[str, dict[str, Any]] = {}
+    for d in documents:
+        m_hash = d.get("markdown_hash") or d.get("content_hash") or ""
+        doc_map[m_hash] = d
+
+    # Pre-fetch TOC for documents to build deep hierarchy tree
+    sections_by_doc: dict[str, list[dict[str, Any]]] = {}
+    if len(documents) <= 100:
+        for d in documents:
+            m_hash = d.get("markdown_hash")
+            if m_hash:
+                from genai_graph.kg.query.document_graph_tools import get_document_toc
+
+                sections_by_doc[m_hash] = get_document_toc(backend, m_hash)  # type: ignore[assignment]
+    elif st.session_state.selected_doc_hash:
+        from genai_graph.kg.query.document_graph_tools import get_document_toc
+
+        sections_by_doc[st.session_state.selected_doc_hash] = get_document_toc(  # type: ignore[assignment]
+            backend, st.session_state.selected_doc_hash
+        )
+
+    # Default selection if none set
+    if not st.session_state.selected_doc_hash and documents:
+        first_hash = documents[0].get("markdown_hash") or documents[0].get("content_hash")
+        st.session_state.selected_doc_hash = first_hash
+        st.session_state.selected_node_type = "document"
+
+    # -----------------------------------------------------------------------
     # Navigation Tabs
     # -----------------------------------------------------------------------
-    tab_doc, tab_search, tab_images, tab_tables, tab_graph, tab_raw = st.tabs(
+    tab_doc, tab_search, tab_images, tab_tables, tab_graph = st.tabs(
         [
-            "📑 Document Sections",
+            "📑 Document & Section Explorer",
             "🔍 Cross-Document Search",
             "🖼️ Image Gallery",
             "📊 Tables Inspector",
             "🕸️ Graph & Schema",
-            "📄 Full Markdown",
         ]
     )
 
     # -----------------------------------------------------------------------
-    # Tab 1: Document Sections Explorer (Core Feature)
+    # Tab 1: Document & Section Explorer (Main View: Tree on Left, Content on Right)
     # -----------------------------------------------------------------------
     with tab_doc:
-        doc_options: dict[str, dict[str, Any]] = {}
-        for d in documents:
-            m_hash = d.get("markdown_hash") or d.get("content_hash") or ""
-            fname = d.get("filename") or m_hash
-            p = d.get("path") or ""
-            parent_dir = str(Path(p).parent) if p else "."
-            label = f"{fname} ({parent_dir}) — {d.get('section_count', 0)} sections"
-            doc_options[m_hash] = {"label": label, "data": d}
+        col_tree, col_content = st.columns([5, 8], gap="large")
 
-        # Select active document
-        doc_hashes = list(doc_options.keys())
-        current_doc_hash = st.session_state.selected_doc_hash
-        default_idx = doc_hashes.index(current_doc_hash) if current_doc_hash in doc_hashes else 0
+        # -------------------------------------------------------------------
+        # Left Panel: Tree Navigation
+        # -------------------------------------------------------------------
+        with col_tree:
+            st.markdown("#### 📂 Document Hierarchy")
+            st.caption("Browse Folders 📁, Documents 📄, Sections & Subsections 📑")
 
-        selected_hash = st.selectbox(
-            "Select Document to Explore",
-            options=doc_hashes,
-            index=default_idx,
-            format_func=lambda h: doc_options[h]["label"],
-            key="doc_select_box",
-        )
+            # Quick document select dropdown as a shortcut
+            doc_options_list = list(doc_map.keys())
+            curr_doc_hash = st.session_state.selected_doc_hash
+            default_doc_idx = doc_options_list.index(curr_doc_hash) if curr_doc_hash in doc_options_list else 0
 
-        st.session_state.selected_doc_hash = selected_hash
-        active_doc_data = doc_options[selected_hash]["data"]
+            quick_doc = st.selectbox(
+                "Quick Document Jump",
+                options=doc_options_list,
+                index=default_doc_idx,
+                format_func=lambda h: f"📄 {doc_map[h].get('filename', h)} ({doc_map[h].get('section_count', 0)} sec)",
+                key="quick_doc_jump",
+            )
+            if quick_doc != st.session_state.selected_doc_hash and not st.session_state.selected_section_id:
+                st.session_state.selected_doc_hash = quick_doc
+                st.session_state.selected_node_type = "document"
 
-        # Fetch sections for selected document
-        doc_sections = await fetch_document_sections_full(backend, selected_hash)
+            # Build tree select nodes
+            tree_nodes = build_tree_select_nodes(
+                folders=folders,
+                documents=documents,
+                sections_by_doc=sections_by_doc,
+                include_sections=True,
+            )
 
-        # Document Header Card
-        with st.container():
-            dh_cols = st.columns([3, 1, 1, 1])
-            with dh_cols[0]:
-                st.subheader(f"📄 {active_doc_data.get('filename')}")
-                origin_src = _read_origin_path(active_doc_data.get("path"))
-                if origin_src:
-                    st.caption(f"**Original Source:** `{origin_src}`")
-                elif active_doc_data.get("path"):
-                    st.caption(f"**Path:** `{active_doc_data.get('path')}`")
-            with dh_cols[1]:
-                st.metric("Sections", f"{len(doc_sections)}")
-            with dh_cols[2]:
-                st.metric("Tokens", f"{active_doc_data.get('token_count', 0):,}")
-            with dh_cols[3]:
-                st.metric("Language", str(active_doc_data.get("language") or "en").upper())
+            # Tree select widget in main area
+            tree_result = tree_select(
+                nodes=tree_nodes,
+                checked=None,
+                expanded=None,
+                expand_on_click=True,
+                show_expand_all=True,
+                key="main_docgraph_tree",
+            )
 
-            # Document Abstract / Summary Callout
-            doc_abstract = active_doc_data.get("summary") or active_doc_data.get("description")
-            if doc_abstract:
-                st.markdown(
-                    f"""
-                    <div style="background-color: #f4f6f8; border-left: 4px solid #00005B; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px;">
-                        <strong style="color: #00005B;">📋 Document Abstract:</strong><br/>
-                        <span style="color: #2b2b2b;">{doc_abstract}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+            # Handle user clicks on tree nodes
+            if tree_result and tree_result.get("checked"):
+                checked_items = tree_result["checked"]
+                for val in reversed(checked_items):
+                    if val.startswith("sec:"):
+                        sid = val.split("sec:", 1)[1]
+                        st.session_state.selected_section_id = sid
+                        doc_hash = sid.split("::", 1)[0]
+                        st.session_state.selected_doc_hash = doc_hash
+                        st.session_state.selected_node_type = "section"
+                        break
+                    elif val.startswith("doc:"):
+                        doc_hash = val.split("doc:", 1)[1]
+                        st.session_state.selected_doc_hash = doc_hash
+                        st.session_state.selected_section_id = None
+                        st.session_state.selected_node_type = "document"
+                        break
+                    elif val.startswith("folder:"):
+                        fid = val.split("folder:", 1)[1]
+                        st.session_state.selected_folder_id = fid
+                        st.session_state.selected_section_id = None
+                        st.session_state.selected_node_type = "folder"
+                        break
 
-        st.divider()
+        # -------------------------------------------------------------------
+        # Right Panel: Selected Node Content Viewer
+        # -------------------------------------------------------------------
+        with col_content:
+            active_hash = st.session_state.selected_doc_hash
+            active_doc = doc_map.get(active_hash, documents[0] if documents else {})
+            active_sid = st.session_state.selected_section_id
+            node_type = st.session_state.selected_node_type or ("section" if active_sid else "document")
 
-        # Section Expanders Section
-        st.markdown(f"### Sections ({len(doc_sections)})")
+            # A. SECTION SELECTED
+            if node_type == "section" and active_sid:
+                # Fetch full sections for parent document
+                doc_sections = await fetch_document_sections_full(backend, active_hash)
+                target_sec = next((s for s in doc_sections if s["section_id"] == active_sid), None)
 
-        # Expand / Collapse toggle
-        exp_col1, exp_col2, _ = st.columns([1, 1, 4])
-        with exp_col1:
-            if st.button("Expand All", use_container_width=True):
-                st.session_state.expand_all_sections = True
-                st.rerun()
-        with exp_col2:
-            if st.button("Collapse All", use_container_width=True):
-                st.session_state.expand_all_sections = False
-                st.rerun()
+                if target_sec:
+                    # Prominent Section Banner with Section ID displayed
+                    render_section_banner(target_sec, doc_name=active_doc.get("filename"), show_summary=True)
 
-        # Filter sections according to sidebar criteria
-        filtered_sections = []
-        max_lvl_map = {"All Levels": 10, "H1 Only": 1, "Up to H2": 2, "Up to H3": 3, "Up to H4": 4}
-        max_allowed_lvl = max_lvl_map.get(filter_level, 10)
+                    btn_c1, btn_c2 = st.columns([1, 1])
+                    with btn_c1:
+                        if st.button(f"📄 View Full Document ({active_doc.get('filename')})", use_container_width=True):
+                            st.session_state.selected_section_id = None
+                            st.session_state.selected_node_type = "document"
+                            st.rerun()
+                    with btn_c2:
+                        sec_md_raw = target_sec.get("text") or ""
+                        st.download_button(
+                            "⬇️ Download Section Markdown",
+                            data=sec_md_raw,
+                            file_name=f"section_{target_sec.get('sequence', 0)}.md",
+                            mime="text/markdown",
+                            use_container_width=True,
+                        )
 
-        for sec in doc_sections:
-            lvl = sec.get("level", 1)
-            if lvl > max_allowed_lvl and lvl > 0:
-                continue
-            if only_tables and not sec.get("has_table"):
-                continue
-            if only_images and not sec.get("has_image"):
-                continue
-            if only_graph and not sec.get("has_graph"):
-                continue
-            if only_summaries and not sec.get("summary"):
-                continue
-            if filter_text:
-                q_low = filter_text.lower()
-                sec_title = (sec.get("title") or "").lower()
-                sec_body = (sec.get("text") or "").lower()
-                sec_sum = (sec.get("summary") or "").lower()
-                if q_low not in sec_title and q_low not in sec_body and q_low not in sec_sum:
-                    continue
-            filtered_sections.append(sec)
+                    st.divider()
 
-        if not filtered_sections:
-            st.info("No sections match the current filter criteria.")
-        else:
-            if len(filtered_sections) < len(doc_sections):
-                st.caption(f"Showing {len(filtered_sections)} of {len(doc_sections)} sections (filtered)")
-
-            for sec in filtered_sections:
-                sid = sec["section_id"]
-                label = format_section_expander_label(sec)
-
-                # Determine whether this expander should be open
-                is_selected_sec = st.session_state.selected_section_id == sid
-                is_expanded = st.session_state.expand_all_sections or is_selected_sec
-
-                with st.expander(label, expanded=is_expanded):
+                    # Render Section Content View (body, images, tables, KG links)
                     render_section_content_view(
-                        sec,
-                        doc_path=active_doc_data.get("path"),
+                        target_sec,
+                        doc_path=active_doc.get("path"),
+                        doc_name=active_doc.get("filename"),
                         db_path=active_db_path,
+                        show_banner=False,
                     )
+                else:
+                    st.warning(f"Section `{active_sid}` not found in document sections.")
+                    # Fallback direct markdown reconstruction
+                    sec_md = await fetch_section_markdown_async(backend, active_sid)
+                    if sec_md:
+                        st.markdown(
+                            f"""
+                            <div style="background: linear-gradient(135deg, #00005B 0%, #0073E6 100%); color: white; padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;">
+                                📑 🔑 <strong>Section ID:</strong> <code style="color: #43C7F4;">{active_sid}</code>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(sec_md, unsafe_allow_html=True)
+
+            # B. DOCUMENT SELECTED
+            elif node_type == "document" and active_doc:
+                render_document_banner(active_doc)
+
+                doc_sections = await fetch_document_sections_full(backend, active_hash)
+
+                # Sub-tabs for Document View: Sections List vs Full Reconstructed Markdown
+                doc_sub_tab1, doc_sub_tab2 = st.tabs(["📑 Document Sections", "📄 Full Document Markdown"])
+
+                with doc_sub_tab1:
+                    exp_col1, exp_col2, _ = st.columns([1, 1, 3])
+                    with exp_col1:
+                        if st.button("Expand All", use_container_width=True):
+                            st.session_state.expand_all_sections = True
+                            st.rerun()
+                    with exp_col2:
+                        if st.button("Collapse All", use_container_width=True):
+                            st.session_state.expand_all_sections = False
+                            st.rerun()
+
+                    # Filter sections according to sidebar criteria
+                    filtered_sections = []
+                    max_lvl_map = {"All Levels": 10, "H1 Only": 1, "Up to H2": 2, "Up to H3": 3, "Up to H4": 4}
+                    max_allowed_lvl = max_lvl_map.get(filter_level, 10)
+
+                    for sec in doc_sections:
+                        lvl = sec.get("level", 1)
+                        if lvl > max_allowed_lvl and lvl > 0:
+                            continue
+                        if only_tables and not sec.get("has_table"):
+                            continue
+                        if only_images and not sec.get("has_image"):
+                            continue
+                        if only_graph and not sec.get("has_graph"):
+                            continue
+                        if only_summaries and not sec.get("summary"):
+                            continue
+                        if filter_text:
+                            q_low = filter_text.lower()
+                            sec_title = (sec.get("title") or "").lower()
+                            sec_body = (sec.get("text") or "").lower()
+                            sec_sum = (sec.get("summary") or "").lower()
+                            if q_low not in sec_title and q_low not in sec_body and q_low not in sec_sum:
+                                continue
+                        filtered_sections.append(sec)
+
+                    if not filtered_sections:
+                        st.info("No sections match the current filter criteria.")
+                    else:
+                        if len(filtered_sections) < len(doc_sections):
+                            st.caption(f"Showing {len(filtered_sections)} of {len(doc_sections)} sections (filtered)")
+
+                        for sec in filtered_sections:
+                            label = format_section_expander_label(sec)
+                            is_expanded = st.session_state.expand_all_sections
+
+                            with st.expander(label, expanded=is_expanded):
+                                render_section_content_view(
+                                    sec,
+                                    doc_path=active_doc.get("path"),
+                                    doc_name=active_doc.get("filename"),
+                                    db_path=active_db_path,
+                                    show_banner=True,
+                                )
+
+                with doc_sub_tab2:
+                    full_md_text = reconstruct_document(backend, active_hash)
+                    if full_md_text:
+                        st.download_button(
+                            "⬇️ Download Markdown (.md)",
+                            data=full_md_text,
+                            file_name=f"{Path(active_doc.get('filename', 'doc')).stem}.md",
+                            mime="text/markdown",
+                        )
+                        st.markdown(full_md_text, unsafe_allow_html=True)
+                        with st.expander("Show raw markdown source", expanded=False):
+                            st.code(full_md_text, language="markdown")
+                    else:
+                        st.warning("Could not reconstruct Markdown for this document.")
+
+            # C. FOLDER SELECTED
+            elif node_type == "folder" and st.session_state.selected_folder_id:
+                fid = st.session_state.selected_folder_id
+                folder_obj = next((f for f in folders if f.get("folder_id") == fid), {"folder_id": fid, "name": fid})
+                render_folder_banner(folder_obj)
+
+                # Show contained documents
+                folder_docs = [d for d in documents if d.get("folder_id") == fid]
+                st.markdown(f"#### Documents in this Folder ({len(folder_docs)})")
+                if not folder_docs:
+                    st.info("No documents directly in this folder.")
+                else:
+                    for d in folder_docs:
+                        d_hash = d.get("markdown_hash") or d.get("content_hash") or ""
+                        with st.container():
+                            st.markdown(
+                                f"📄 **{d.get('filename')}** — {d.get('section_count', 0)} sections, {d.get('token_count', 0):,} tokens"
+                            )
+                            if st.button(f"Open Document: {d.get('filename')}", key=f"btn_doc_{d_hash}"):
+                                st.session_state.selected_doc_hash = d_hash
+                                st.session_state.selected_section_id = None
+                                st.session_state.selected_node_type = "document"
+                                st.rerun()
+                            st.divider()
 
     # -----------------------------------------------------------------------
-    # Tab 2: Cross-Document Search
+    # Tab 2: Cross-Document Search (with Markdown Content Display)
     # -----------------------------------------------------------------------
     with tab_search:
         st.subheader("🔍 Search Sections Across Documents")
+        st.caption("Search across all documents and sections with hybrid, semantic vector, BM25, or Cypher modes")
+
         s_col1, s_col2, s_col3 = st.columns([3, 1, 1])
         with s_col1:
             search_query = st.text_input(
-                "Search query / keywords", placeholder="e.g. cloud migration strategy", key="search_query_input"
+                "Search query / keywords",
+                placeholder="e.g. cloud migration strategy, revenue metrics...",
+                key="search_query_input",
             )
         with s_col2:
             search_mode = st.selectbox("Search Mode", ["hybrid", "vector", "bm25", "cypher"], index=0)
@@ -405,21 +535,53 @@ async def render_docgraph_explorer() -> None:
                 st.warning(f"No sections matched query: '{search_query}'")
             else:
                 st.success(f"Found {len(results)} matching section(s)")
-                for r in results:
+                for idx, r in enumerate(results):
                     score_val = r.get("score")
                     score_badge = f" `(Score: {score_val:.3f})`" if score_val else ""
-                    sec_title = r.get("title") or "Untitled"
+                    sec_title = r.get("title") or "Untitled Section"
                     sid = r.get("section_id") or ""
                     m_hash = r.get("markdown_hash") or ""
-                    desc = r.get("description") or ""
+                    lvl = r.get("level", 1)
+                    lvl_tag = f"H{lvl}" if lvl > 0 else "Doc"
 
-                    with st.expander(f"📑 {sec_title}{score_badge} — Section `{sid}`", expanded=False):
-                        st.caption(f"**Document Hash:** `{m_hash}` | **Line:** {r.get('line_start', '-')}")
-                        if desc:
-                            st.markdown(f"**Description:** {desc}")
+                    parent_doc = doc_map.get(m_hash, {})
+                    doc_fname = parent_doc.get("filename") or m_hash
+
+                    # Reconstruct section markdown content
+                    sec_md = (
+                        await fetch_section_markdown_async(backend, sid)
+                        or r.get("text")
+                        or r.get("matched_chunk")
+                        or ""
+                    )
+
+                    with st.expander(
+                        f"📑 [{lvl_tag}] {sec_title}{score_badge} — 🔑 ID: `{sid}` — 📄 {doc_fname}",
+                        expanded=(idx == 0),
+                    ):
+                        # Section Banner with Section ID displayed
+                        render_section_banner(r, doc_name=doc_fname, score=score_val, show_summary=True)
+
+                        # Matched Chunk callout if available
                         if r.get("matched_chunk"):
-                            st.markdown("**Matched Excerpt:**")
-                            st.code(r["matched_chunk"], language="markdown")
+                            st.markdown(
+                                f"""
+                                <div style="background-color: #f6f8fa; border-left: 4px solid #43C7F4; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px;">
+                                    <strong style="color: #00005B;">🎯 Matched Passage:</strong><br/>
+                                    <span style="color: #333;">{r["matched_chunk"]}</span>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                        # Rendered Markdown Content
+                        st.markdown("#### 📄 Section Markdown Content")
+                        if sec_md.strip():
+                            st.markdown(sec_md, unsafe_allow_html=True)
+                            with st.expander("Show raw markdown source", expanded=False):
+                                st.code(sec_md, language="markdown")
+                        else:
+                            st.info("*(Section body is empty or contains only sub-headings)*")
 
     # -----------------------------------------------------------------------
     # Tab 3: Image Gallery
@@ -548,23 +710,6 @@ async def render_docgraph_explorer() -> None:
                     st.info("Query returned 0 rows.")
             except Exception as exc:
                 st.error(f"Cypher Error: {exc}")
-
-    # -----------------------------------------------------------------------
-    # Tab 6: Full Document Markdown
-    # -----------------------------------------------------------------------
-    with tab_raw:
-        st.subheader(f"📄 Full Reconstructed Markdown: {active_doc_data.get('filename')}")
-        full_md_text = reconstruct_document(backend, selected_hash)
-        if full_md_text:
-            st.download_button(
-                "⬇️ Download Markdown (.md)",
-                data=full_md_text,
-                file_name=f"{Path(active_doc_data.get('filename', 'doc')).stem}.md",
-                mime="text/markdown",
-            )
-            st.code(full_md_text, language="markdown")
-        else:
-            st.warning("Could not reconstruct Markdown for this document.")
 
 
 # ---------------------------------------------------------------------------

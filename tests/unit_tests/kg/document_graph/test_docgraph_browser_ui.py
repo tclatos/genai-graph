@@ -13,12 +13,14 @@ from genai_graph.core.commands_docgraph import DocGraphCommands
 from genai_graph.kg.backend import KuzuBackend
 from genai_graph.kg.document_graph.ingest import ingest_document_graph
 from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
+from genai_graph.webapp.pages.demos.docgraph_browser import _get_configured_profiles
 from genai_graph.webapp.ui_components.docgraph_view import (
     build_tree_select_nodes,
     extract_markdown_images,
     fetch_database_stats,
     fetch_document_sections_full,
     fetch_folders_and_documents,
+    fetch_section_markdown_async,
     format_section_expander_label,
     resolve_image_path,
 )
@@ -265,3 +267,76 @@ def test_docgraph_web_help() -> None:
     assert res.exit_code == 0
     assert "--port" in res.output
     assert "--host" in res.output
+    assert "--profile" in res.output
+
+
+def test_get_configured_profiles() -> None:
+    profiles = _get_configured_profiles()
+    assert isinstance(profiles, list)
+    assert len(profiles) >= 1
+    assert "default" in profiles
+
+
+def test_build_tree_select_nodes_unwraps_synthetic_root() -> None:
+    docs = [
+        {
+            "markdown_hash": "h1",
+            "filename": "guide.md",
+            "section_count": 2,
+            "token_count": 100,
+        }
+    ]
+    sections_by_doc = {
+        "h1": [
+            {
+                "section_id": "h1::0",
+                "title": "(document root)",
+                "level": 0,
+                "parent_section_id": None,
+                "sequence": 0,
+                "token_count": 100,
+            },
+            {
+                "section_id": "h1::1",
+                "title": "Getting Started",
+                "level": 1,
+                "parent_section_id": "h1::0",
+                "sequence": 1,
+                "token_count": 60,
+            },
+            {
+                "section_id": "h1::2",
+                "title": "Installation",
+                "level": 2,
+                "parent_section_id": "h1::1",
+                "sequence": 2,
+                "token_count": 40,
+            },
+        ]
+    }
+    nodes = build_tree_select_nodes(folders=[], documents=docs, sections_by_doc=sections_by_doc, include_sections=True)
+    assert len(nodes) == 1
+    doc_node = nodes[0]
+    assert len(doc_node["children"]) == 1
+    # Real heading "Getting Started" is direct child of document, not "(document root)"
+    sec1 = doc_node["children"][0]
+    assert sec1["value"] == "sec:h1::1"
+    assert "Getting Started" in sec1["label"]
+    assert len(sec1["children"]) == 1
+    assert sec1["children"][0]["value"] == "sec:h1::2"
+
+
+@pytest.mark.anyio
+async def test_async_fetch_section_markdown(sample_docgraph_db: tuple[str, Path]) -> None:
+    db_path, _ = sample_docgraph_db
+    backend = KuzuBackend()
+    backend.connect(db_path)
+
+    _, docs = await fetch_folders_and_documents(backend)
+    doc_hash = docs[0]["markdown_hash"]
+    sections = await fetch_document_sections_full(backend, doc_hash)
+    sec_id = sections[1]["section_id"]
+
+    md_text = await fetch_section_markdown_async(backend, sec_id)
+    assert md_text is not None
+    assert len(md_text) > 0

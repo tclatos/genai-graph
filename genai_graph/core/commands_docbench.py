@@ -71,7 +71,12 @@ class DocBenchCommands(CliTopCommand):
                 cli docbench web --profile officeqa
                 cli docbench web --db ./data/kg/docgraph.db --port 8502
             """
-            resolved_db = _resolve_db_path(db_path, profile=profile) if db_path else None
+            resolved_db: str | None = None
+            try:
+                resolved_db = _resolve_db_path(db_path, profile=profile)
+            except Exception:
+                resolved_db = None
+
             app_script = str(
                 Path(__file__).resolve().parent.parent / "webapp" / "pages" / "demos" / "docgraph_browser.py"
             )

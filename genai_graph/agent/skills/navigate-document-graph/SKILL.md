@@ -33,12 +33,13 @@ Every section carries a one-line `description` (and optional `summary`) that ser
    - This performs hybrid search (vector similarity over SectionChunks fused with BM25 keyword search via RRF) and returns ranked sections with relevance scores and matching text snippets.
    - Always supply `document_id` when the document is already known to eliminate cross-document false positives.
 
-5. **Visual Charts, Plots & Image Inspection**:
-   - When a question requires reading a visual chart, graph, diagram, line plot, or figure that cannot be resolved from text OCR alone:
-     1. Locate the relevant section using `get_document_toc` or `search_sections`.
-     2. Read the section text with `get_section_content` to locate the image reference (e.g. `<!-- Image: {hash}.png -->` or `![alt](images/{hash}.png)`).
+5. **Visual Evidence — Figures, Charts & Page Layout**:
+   - Questions about a chart, plot, diagram, figure, or page layout are answered by **looking**, not by reading more text. Route to `query_image` **as soon as the candidate section is identified** — do NOT exhaust text search first (OCR text loses exactly the visual data these questions ask for).
+     1. Locate the candidate section with ONE pass of `get_document_toc` or `search_sections`.
+     2. Pick the image reference from the section markdown (`<!-- Image: {hash}.png -->` or `![alt](images/{hash}.png)`); image descriptions/keywords in the markdown help choose the right one.
      3. Call `query_image(image="<image filename or hash>", question="<specific, precise visual question>")` to have the Vision-Language Model inspect the chart and return exact data points, percentages, labels, and trends.
-     4. Strictly limit `query_image` calls (maximum 3 per question). Only invoke when visual evidence is necessary. If the VLM states it cannot answer from the image, proceed with text/table evidence.
+   - **Page-layout questions** (element position, composition, multi-column arrangement, where on the page something appears) usually have no text signal at all — go visual immediately after the TOC points at the relevant page/section.
+   - Budget: maximum 3 `query_image` calls per question — pick the single most relevant image first, and make each visual question self-contained (mention the chart title if known). If the VLM states it cannot answer from the image, fall back to text/table evidence.
 
 6. **Iterate & Synthesize**:
    - For multi-period, multi-table, or multi-document questions, repeat across the relevant sections until grounded evidence is obtained for every part of the question.

@@ -1380,7 +1380,13 @@ def _connect(db_path: str) -> KgBackend:
     backend = backends.get(db_path)
     if backend is None:
         backend = LadybugBackend()
-        backend.attach(get_shared_database(db_path, read_only=Path(db_path).exists()))
+        # Explicit buffer-pool ceiling (env-overridable): the engine default of
+        # ~80% of system RAM lets the pool squeeze the host process on long
+        # concurrent runs, surfacing as "buffer pool is full" tool errors.
+        pool_size = os.getenv("LADYBUG_BUFFER_POOL_SIZE", "").strip() or "4GB"
+        backend.attach(
+            get_shared_database(db_path, read_only=Path(db_path).exists(), buffer_pool_size=pool_size)
+        )
         backends[db_path] = backend
         _KEEPALIVE_BACKENDS.append(backend)
     return backend
@@ -1388,6 +1394,10 @@ def _connect(db_path: str) -> KgBackend:
 
 def _tool_error(exc: Exception) -> str:
     """Turn an exception into a concise, agent-friendly tool result string."""
+    # Tool failures otherwise vanish from the console (they only surface inside
+    # the tool result the agent sees), which hid the run-degrading buffer-manager
+    # errors during the 2026-09-18 MMLongBench overnight run.
+    logger.warning("Document-graph tool failed — {}: {}", type(exc).__name__, exc)
     if isinstance(exc, DocumentGraphError):
         return f"Error: {exc}"
     return f"Error: {type(exc).__name__}: {exc}"

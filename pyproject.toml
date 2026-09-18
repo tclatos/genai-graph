@@ -40,6 +40,7 @@ dependencies = [
     "lingua-language-detector>=2.0.2", # Accurate language detection
     "ladybug>=0.16.1",
     "markdown-it-py>=3.0.0",        # CommonMark parser with line-number tracking (Markdown Knowledge Tree)
+    "streamlit-tree-select2>=0.0.7",
 ]
 
 [project.urls]

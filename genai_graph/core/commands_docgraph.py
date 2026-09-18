@@ -969,6 +969,65 @@ class DocGraphCommands(CliTopCommand):
 
             run_document_graph_tui(db_path)
 
+        @cli_app.command("web")
+        def web(
+            db_path: Annotated[
+                str | None,
+                typer.Option(
+                    "--db",
+                    help="Path to the Ladybug database file. Uses docgraph_profiles.<profile>.paths.kg_db from config if omitted.",
+                ),
+            ] = None,
+            profile: Annotated[
+                str,
+                typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
+            ] = "default",
+            port: Annotated[
+                int,
+                typer.Option("--port", help="Port for the Streamlit web server."),
+            ] = 8501,
+            host: Annotated[
+                str,
+                typer.Option("--host", help="Host address for the Streamlit web server."),
+            ] = "localhost",
+            browser: Annotated[
+                bool,
+                typer.Option("--browser/--no-browser", help="Automatically open browser tab."),
+            ] = True,
+        ) -> None:
+            """Launch the interactive Streamlit webapp to browse the Document Graph."""
+            import os
+            import subprocess
+            import sys
+
+            resolved_db = _resolve_db_path(db_path, profile=profile) if db_path else None
+            app_script = str(
+                Path(__file__).resolve().parent.parent / "webapp" / "pages" / "demos" / "docgraph_browser.py"
+            )
+
+            cmd = [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                app_script,
+                "--server.port",
+                str(port),
+                "--server.address",
+                str(host),
+            ]
+            if not browser:
+                cmd.extend(["--server.headless", "true"])
+
+            env = os.environ.copy()
+            if resolved_db:
+                env["DOCGRAPH_DB_PATH"] = resolved_db
+            if profile:
+                env["DOCGRAPH_PROFILE"] = profile
+
+            console.print(f"[bold green]Starting Document Graph Explorer on http://{host}:{port}...[/bold green]")
+            subprocess.run(cmd, env=env)
+
         @cli_app.command("agent")
         def agent(
             query: Annotated[

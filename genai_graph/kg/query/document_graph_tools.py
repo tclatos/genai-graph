@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -1367,6 +1368,10 @@ def _connect(db_path: str) -> KgBackend:
 
     Reuses the process-shared ``ladybug.Database`` handle and keeps the native
     connection alive for the whole process (see ``_KEEPALIVE_BACKENDS``).
+    The database is opened read-only whenever the file already exists — every
+    tool here is a pure read, and read-only handles skip WAL bookkeeping and
+    checkpointing entirely (a missing file keeps the legacy read-write open so
+    the "not ingested yet" experience still works).
     """
     backends: dict[str, KgBackend] | None = getattr(_TOOL_CONN_LOCAL, "backends", None)
     if backends is None:
@@ -1375,7 +1380,7 @@ def _connect(db_path: str) -> KgBackend:
     backend = backends.get(db_path)
     if backend is None:
         backend = LadybugBackend()
-        backend.attach(get_shared_database(db_path))
+        backend.attach(get_shared_database(db_path, read_only=Path(db_path).exists()))
         backends[db_path] = backend
         _KEEPALIVE_BACKENDS.append(backend)
     return backend

@@ -114,6 +114,9 @@ ui:
       - settings/welcome.py
       - settings/configuration.py
       - settings/MCP_servers.py
+    Document Graph:
+      - path: demos/docgraph_browser.py
+        name: "Document Graph Explorer"
     Data Flows:
       - path: demos/kg_lineage.py
         name: "Markdown Files Lineage"
@@ -155,6 +158,7 @@ cli:
     - genai_tk.agents.commands_agents.AgentCommands
     - genai_tk.extra.structured.commands_baml.BamlCommands
     - genai_graph.core.commands_docgraph.DocGraphCommands
+    - genai_graph.core.commands_docbench.DocBenchCommands
     - genai_graph.core.commands_bench.BenchCommands
     - genai_tk.main.cli.register_commands
 

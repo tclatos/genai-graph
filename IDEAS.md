@@ -1,4 +1,6 @@
 
+# replace D3.js with echarts  (graphs, trees, ) ? 
+https://echarts.apache.org/examples/en/index.html#chart-type-graph
 
 
 

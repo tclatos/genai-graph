@@ -18,7 +18,7 @@ Usage:
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import streamlit as st
@@ -29,7 +29,9 @@ from genai_graph.agent.docgraph_agent import find_docgraph_db_path
 from genai_graph.kg.backend import KgBackend
 from genai_graph.kg.query.document_graph_tools import reconstruct_document
 from genai_graph.webapp.ui_components.docgraph_view import (
+    _folder_of,
     build_tree_select_nodes,
+    dedupe_documents,
     fetch_all_images_async,
     fetch_all_tables_async,
     fetch_database_stats,
@@ -92,6 +94,8 @@ def _init_session_state() -> None:
     if "docgraph_db_path" not in st.session_state:
         initial_db = os.getenv("DOCGRAPH_DB_PATH") or find_docgraph_db_path(st.session_state.docgraph_profile) or ""
         st.session_state.docgraph_db_path = initial_db
+    if "selected_tree_val" not in st.session_state:
+        st.session_state.selected_tree_val = None
     if "selected_node_type" not in st.session_state:
         st.session_state.selected_node_type = None
     if "selected_doc_hash" not in st.session_state:
@@ -226,6 +230,9 @@ async def render_docgraph_explorer() -> None:
         st.warning("No documents found in this database.")
         st.stop()
 
+    # Deduplicate documents across potential duplicate versions
+    documents = dedupe_documents(documents)
+
     # Map documents by hash
     doc_map: dict[str, dict[str, Any]] = {}
     for d in documents:
@@ -234,7 +241,7 @@ async def render_docgraph_explorer() -> None:
 
     # Pre-fetch TOC for documents to build deep hierarchy tree
     sections_by_doc: dict[str, list[dict[str, Any]]] = {}
-    if len(documents) <= 100:
+    if len(documents) <= 150:
         for d in documents:
             m_hash = d.get("markdown_hash")
             if m_hash:
@@ -252,6 +259,7 @@ async def render_docgraph_explorer() -> None:
     if not st.session_state.selected_doc_hash and documents:
         first_hash = documents[0].get("markdown_hash") or documents[0].get("content_hash")
         st.session_state.selected_doc_hash = first_hash
+        st.session_state.selected_tree_val = f"doc:{first_hash}"
         st.session_state.selected_node_type = "document"
 
     # -----------------------------------------------------------------------
@@ -292,8 +300,10 @@ async def render_docgraph_explorer() -> None:
                 format_func=lambda h: f"📄 {doc_map[h].get('filename', h)} ({doc_map[h].get('section_count', 0)} sec)",
                 key="quick_doc_jump",
             )
-            if quick_doc != st.session_state.selected_doc_hash and not st.session_state.selected_section_id:
+            if quick_doc != st.session_state.selected_doc_hash:
                 st.session_state.selected_doc_hash = quick_doc
+                st.session_state.selected_tree_val = f"doc:{quick_doc}"
+                st.session_state.selected_section_id = None
                 st.session_state.selected_node_type = "document"
 
             # Build tree select nodes
@@ -304,42 +314,53 @@ async def render_docgraph_explorer() -> None:
                 include_sections=True,
             )
 
-            # Tree select widget in main area
+            current_checked_val = st.session_state.get("selected_tree_val")
+
+            # Tree select widget in main area with no_cascade=True for single selection
             tree_result = tree_select(
                 nodes=tree_nodes,
-                checked=None,
-                expanded=None,
+                checked=[current_checked_val] if current_checked_val else None,
+                no_cascade=True,
                 expand_on_click=True,
                 show_expand_all=True,
                 key="main_docgraph_tree",
             )
 
-            # Handle user clicks on tree nodes
-            if tree_result and tree_result.get("checked"):
-                checked_items = tree_result["checked"]
-                for val in reversed(checked_items):
-                    if val.startswith("sec:"):
-                        sid = val.split("sec:", 1)[1]
-                        st.session_state.selected_section_id = sid
-                        doc_hash = sid.split("::", 1)[0]
-                        st.session_state.selected_doc_hash = doc_hash
-                        st.session_state.selected_node_type = "section"
-                        break
-                    elif val.startswith("doc:"):
-                        doc_hash = val.split("doc:", 1)[1]
-                        st.session_state.selected_doc_hash = doc_hash
+            # Handle user clicks on tree nodes - strict single selection
+            if tree_result and "checked" in tree_result:
+                checked_items = tree_result.get("checked") or []
+                if checked_items:
+                    new_picks = [v for v in checked_items if v != current_checked_val]
+                    chosen_val = new_picks[-1] if new_picks else checked_items[-1]
+                else:
+                    chosen_val = None
+
+                if chosen_val != current_checked_val:
+                    st.session_state.selected_tree_val = chosen_val
+                    if chosen_val:
+                        if chosen_val.startswith("sec:"):
+                            sid = chosen_val.split("sec:", 1)[1]
+                            st.session_state.selected_section_id = sid
+                            doc_hash = sid.split("::", 1)[0]
+                            st.session_state.selected_doc_hash = doc_hash
+                            st.session_state.selected_node_type = "section"
+                        elif chosen_val.startswith("doc:"):
+                            doc_hash = chosen_val.split("doc:", 1)[1]
+                            st.session_state.selected_doc_hash = doc_hash
+                            st.session_state.selected_section_id = None
+                            st.session_state.selected_node_type = "document"
+                        elif chosen_val.startswith("folder:"):
+                            fid = chosen_val.split("folder:", 1)[1]
+                            st.session_state.selected_folder_id = fid
+                            st.session_state.selected_section_id = None
+                            st.session_state.selected_node_type = "folder"
+                    else:
                         st.session_state.selected_section_id = None
                         st.session_state.selected_node_type = "document"
-                        break
-                    elif val.startswith("folder:"):
-                        fid = val.split("folder:", 1)[1]
-                        st.session_state.selected_folder_id = fid
-                        st.session_state.selected_section_id = None
-                        st.session_state.selected_node_type = "folder"
-                        break
+                    st.rerun()
 
         # -------------------------------------------------------------------
-        # Right Panel: Selected Node Content Viewer
+        # Right Panel: Selected Node Content Viewer (Compact & Clean)
         # -------------------------------------------------------------------
         with col_content:
             active_hash = st.session_state.selected_doc_hash
@@ -349,24 +370,23 @@ async def render_docgraph_explorer() -> None:
 
             # A. SECTION SELECTED
             if node_type == "section" and active_sid:
-                # Fetch full sections for parent document
                 doc_sections = await fetch_document_sections_full(backend, active_hash)
                 target_sec = next((s for s in doc_sections if s["section_id"] == active_sid), None)
 
                 if target_sec:
-                    # Prominent Section Banner with Section ID displayed
                     render_section_banner(target_sec, doc_name=active_doc.get("filename"), show_summary=True)
 
                     btn_c1, btn_c2 = st.columns([1, 1])
                     with btn_c1:
-                        if st.button(f"📄 View Full Document ({active_doc.get('filename')})", use_container_width=True):
+                        if st.button(f"📑 View All Sections in {active_doc.get('filename')}", use_container_width=True):
                             st.session_state.selected_section_id = None
+                            st.session_state.selected_tree_val = f"doc:{active_hash}"
                             st.session_state.selected_node_type = "document"
                             st.rerun()
                     with btn_c2:
                         sec_md_raw = target_sec.get("text") or ""
                         st.download_button(
-                            "⬇️ Download Section Markdown",
+                            "⬇️ Download Section (.md)",
                             data=sec_md_raw,
                             file_name=f"section_{target_sec.get('sequence', 0)}.md",
                             mime="text/markdown",
@@ -375,7 +395,6 @@ async def render_docgraph_explorer() -> None:
 
                     st.divider()
 
-                    # Render Section Content View (body, images, tables, KG links)
                     render_section_content_view(
                         target_sec,
                         doc_path=active_doc.get("path"),
@@ -384,18 +403,10 @@ async def render_docgraph_explorer() -> None:
                         show_banner=False,
                     )
                 else:
-                    st.warning(f"Section `{active_sid}` not found in document sections.")
-                    # Fallback direct markdown reconstruction
+                    st.warning(f"Section `{active_sid}` not found.")
                     sec_md = await fetch_section_markdown_async(backend, active_sid)
                     if sec_md:
-                        st.markdown(
-                            f"""
-                            <div style="background: linear-gradient(135deg, #00005B 0%, #0073E6 100%); color: white; padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;">
-                                📑 🔑 <strong>Section ID:</strong> <code style="color: #43C7F4;">{active_sid}</code>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
+                        st.markdown(f"**Section ID:** `{active_sid}`")
                         st.markdown(sec_md, unsafe_allow_html=True)
 
             # B. DOCUMENT SELECTED
@@ -404,17 +415,16 @@ async def render_docgraph_explorer() -> None:
 
                 doc_sections = await fetch_document_sections_full(backend, active_hash)
 
-                # Sub-tabs for Document View: Sections List vs Full Reconstructed Markdown
                 doc_sub_tab1, doc_sub_tab2 = st.tabs(["📑 Document Sections", "📄 Full Document Markdown"])
 
                 with doc_sub_tab1:
                     exp_col1, exp_col2, _ = st.columns([1, 1, 3])
                     with exp_col1:
-                        if st.button("Expand All", use_container_width=True):
+                        if st.button("➕ Expand All", use_container_width=True):
                             st.session_state.expand_all_sections = True
                             st.rerun()
                     with exp_col2:
-                        if st.button("Collapse All", use_container_width=True):
+                        if st.button("➖ Collapse All", use_container_width=True):
                             st.session_state.expand_all_sections = False
                             st.rerun()
 
@@ -452,7 +462,9 @@ async def render_docgraph_explorer() -> None:
 
                         for sec in filtered_sections:
                             label = format_section_expander_label(sec)
-                            is_expanded = st.session_state.expand_all_sections
+                            is_expanded = st.session_state.expand_all_sections or (
+                                st.session_state.selected_section_id == sec.get("section_id")
+                            )
 
                             with st.expander(label, expanded=is_expanded):
                                 render_section_content_view(
@@ -460,7 +472,7 @@ async def render_docgraph_explorer() -> None:
                                     doc_path=active_doc.get("path"),
                                     doc_name=active_doc.get("filename"),
                                     db_path=active_db_path,
-                                    show_banner=True,
+                                    show_banner=False,
                                 )
 
                 with doc_sub_tab2:
@@ -471,9 +483,10 @@ async def render_docgraph_explorer() -> None:
                             data=full_md_text,
                             file_name=f"{Path(active_doc.get('filename', 'doc')).stem}.md",
                             mime="text/markdown",
+                            use_container_width=False,
                         )
                         st.markdown(full_md_text, unsafe_allow_html=True)
-                        with st.expander("Show raw markdown source", expanded=False):
+                        with st.expander("Show raw Markdown source", expanded=False):
                             st.code(full_md_text, language="markdown")
                     else:
                         st.warning("Could not reconstruct Markdown for this document.")
@@ -481,11 +494,14 @@ async def render_docgraph_explorer() -> None:
             # C. FOLDER SELECTED
             elif node_type == "folder" and st.session_state.selected_folder_id:
                 fid = st.session_state.selected_folder_id
-                folder_obj = next((f for f in folders if f.get("folder_id") == fid), {"folder_id": fid, "name": fid})
+                folder_name = PurePosixPath(fid).name if fid != "." else "(root)"
+                folder_obj = {"folder_id": fid, "name": folder_name, "doc_count": 0}
+
+                # Find contained documents
+                folder_docs = [d for d in documents if _folder_of(d) == fid or d.get("folder_id") == fid]
+                folder_obj["doc_count"] = len(folder_docs)
                 render_folder_banner(folder_obj)
 
-                # Show contained documents
-                folder_docs = [d for d in documents if d.get("folder_id") == fid]
                 st.markdown(f"#### Documents in this Folder ({len(folder_docs)})")
                 if not folder_docs:
                     st.info("No documents directly in this folder.")
@@ -498,6 +514,7 @@ async def render_docgraph_explorer() -> None:
                             )
                             if st.button(f"Open Document: {d.get('filename')}", key=f"btn_doc_{d_hash}"):
                                 st.session_state.selected_doc_hash = d_hash
+                                st.session_state.selected_tree_val = f"doc:{d_hash}"
                                 st.session_state.selected_section_id = None
                                 st.session_state.selected_node_type = "document"
                                 st.rerun()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import streamlit as st
@@ -305,18 +305,42 @@ async def fetch_section_markdown_async(backend: KgBackend, section_id: str) -> s
 
 
 # ---------------------------------------------------------------------------
-# Tree Builder for `streamlit-tree-select2`
+# Document deduplication & Tree Builder for `streamlit-tree-select2`
 # ---------------------------------------------------------------------------
 
 
+def dedupe_documents(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one Document per source path/filename — the richest (most sections)."""
+    best: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = row.get("path") or row.get("filename") or row.get("markdown_hash") or ""
+        current = best.get(key)
+        if current is None or (row.get("section_count", 0) > current.get("section_count", 0)):
+            best[key] = row
+    return sorted(best.values(), key=lambda r: str(r.get("filename") or r.get("path") or ""))
+
+
+def _folder_of(doc: dict[str, Any]) -> str:
+    """Parent directory or folder identifier of a document row, '.' for root."""
+    path = doc.get("path") or ""
+    if path:
+        parent = str(PurePosixPath(path).parent)
+        if parent and parent != ".":
+            return parent
+    folder_id = doc.get("folder_id")
+    if folder_id:
+        return folder_id
+    return "."
+
+
 def build_tree_select_nodes(
-    folders: list[dict[str, Any]],
+    folders: list[dict[str, Any]] | None,
     documents: list[dict[str, Any]],
     sections_by_doc: dict[str, list[dict[str, Any]]] | None = None,
     include_sections: bool = True,
     max_section_level: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Convert folders, documents, and sections into the tree structure required by `streamlit-tree-select2`.
+    """Convert documents and their sections into a clean hierarchical tree for `streamlit-tree-select2`.
 
     Tree structure:
         📁 Folder (doc_count)
@@ -325,21 +349,14 @@ def build_tree_select_nodes(
                      └── 📑 [H2] Subsection Title
     """
     sections_by_doc = sections_by_doc or {}
+    deduped_docs = dedupe_documents(documents)
+    folder_map = {f["folder_id"]: (f.get("name") or f["folder_id"]) for f in (folders or []) if f.get("folder_id")}
 
-    # Group documents by folder_id
-    docs_by_folder: dict[str | None, list[dict[str, Any]]] = {}
-    for doc in documents:
-        fid = doc.get("folder_id")
-        docs_by_folder.setdefault(fid, []).append(doc)
-
-    # Group folders by parent_folder_id
-    folders_by_parent: dict[str | None, list[dict[str, Any]]] = {}
-    folder_map: dict[str, dict[str, Any]] = {}
-    for f in folders:
-        fid = f.get("folder_id")
-        if fid:
-            folder_map[fid] = f
-            folders_by_parent.setdefault(f.get("parent_folder_id"), []).append(f)
+    # Group documents by their parent folder path / id
+    docs_by_folder: dict[str, list[dict[str, Any]]] = {}
+    for doc in deduped_docs:
+        f_path = _folder_of(doc)
+        docs_by_folder.setdefault(f_path, []).append(doc)
 
     def _build_section_nodes(toc_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Recursively build nested section nodes from TOC rows."""
@@ -350,7 +367,7 @@ def build_tree_select_nodes(
         def _build_subtree(parent_id: str | None) -> list[dict[str, Any]]:
             children = by_parent.get(parent_id, [])
             nodes: list[dict[str, Any]] = []
-            for sec in children:
+            for sec in sorted(children, key=lambda s: s.get("sequence", 0)):
                 lvl = sec.get("level", 1)
                 if max_section_level is not None and lvl > max_section_level:
                     continue
@@ -407,48 +424,35 @@ def build_tree_select_nodes(
 
         return doc_node
 
-    def _build_folder_tree(parent_folder_id: str | None) -> list[dict[str, Any]]:
-        """Recursively build folder nodes and their contained documents."""
-        nodes: list[dict[str, Any]] = []
+    # If all documents are in root ('.')
+    if len(docs_by_folder) == 1 and "." in docs_by_folder:
+        return [_build_doc_node(doc) for doc in docs_by_folder["."]]
 
-        child_folders = folders_by_parent.get(parent_folder_id, [])
-        for f in sorted(child_folders, key=lambda x: str(x.get("name") or "")):
-            fid = f["folder_id"]
-            name = f.get("name") or fid
-            doc_cnt = f.get("doc_count", 0)
-
-            f_node: dict[str, Any] = {
-                "label": f"📁 {name} ({doc_cnt} doc{'s' if doc_cnt != 1 else ''})",
-                "value": f"folder:{fid}",
+    # If all documents are in one single folder
+    if len(docs_by_folder) == 1:
+        f_path, f_docs = next(iter(docs_by_folder.items()))
+        f_name = folder_map.get(f_path) or PurePosixPath(f_path).name or f_path
+        return [
+            {
+                "label": f"📁 {f_name} ({len(f_docs)} docs)",
+                "value": f"folder:{f_path}",
+                "children": [_build_doc_node(doc) for doc in f_docs],
             }
+        ]
 
-            children: list[dict[str, Any]] = []
-            # Add subfolders
-            sub_f_nodes = _build_folder_tree(fid)
-            if sub_f_nodes:
-                children.extend(sub_f_nodes)
-
-            # Add documents in this folder
-            for doc in sorted(docs_by_folder.get(fid, []), key=lambda x: str(x.get("filename") or "")):
-                children.append(_build_doc_node(doc))
-
-            if children:
-                f_node["children"] = children
-            nodes.append(f_node)
-
-        # If root level (parent_folder_id is None), also add orphan/root documents
-        if parent_folder_id is None:
-            root_docs = docs_by_folder.get(None, [])
-            for doc in sorted(root_docs, key=lambda x: str(x.get("filename") or "")):
-                nodes.append(_build_doc_node(doc))
-
-        return nodes
-
-    # If no folders exist, just return flat list of document nodes
-    if not folders:
-        return [_build_doc_node(doc) for doc in sorted(documents, key=lambda x: str(x.get("filename") or ""))]
-
-    return _build_folder_tree(None)
+    # Multiple distinct folders
+    tree_nodes: list[dict[str, Any]] = []
+    for f_path in sorted(docs_by_folder.keys()):
+        f_docs = docs_by_folder[f_path]
+        f_name = folder_map.get(f_path) or (PurePosixPath(f_path).name if f_path != "." else "(root)")
+        tree_nodes.append(
+            {
+                "label": f"📁 {f_name} ({len(f_docs)} docs)",
+                "value": f"folder:{f_path}",
+                "children": [_build_doc_node(doc) for doc in f_docs],
+            }
+        )
+    return tree_nodes
 
 
 # ---------------------------------------------------------------------------
@@ -457,47 +461,52 @@ def build_tree_select_nodes(
 
 
 def format_section_expander_label(section: dict[str, Any]) -> str:
-    """Format a descriptive label for a section's `st.expander`.
-
-    Includes:
-    - Heading level tag (`[H1]`, `[H2]`, etc.)
-    - Title
-    - Summary or routing description (as the section label text)
-    - Length (approximate token count and line range)
-    - Indicator icons:
-        - 📊 Table (if section contains a table)
-        - 🖼️ Image (if section contains an image)
-        - 🕸️ Graph (if section links to knowledge graph entities)
+    """Format a compact, descriptive label for a section's `st.expander`.
 
     Example:
-        `📑 [H2] Setup Guide — Step-by-step setup instructions for Linux · 📊 · 🖼️ · 420 tokens (L15-L52)`
+        `📑 [H2] Setup Guide — Step-by-step instructions · 📊 🖼️ · 420 tok (L15-L52) · 🔑 hash::2`
     """
     level = section.get("level", 1)
     lvl_tag = f"[H{level}]" if level > 0 else "[Doc]"
     title = (section.get("title") or "Untitled Section").strip()
+    sid = section.get("section_id") or ""
 
-    # Get summary or fallback description
     summary = (section.get("summary") or section.get("description") or "").strip()
     if summary:
-        # Keep summary concise for the header label
         summary_clean = re.sub(r"\s+", " ", summary)
-        if len(summary_clean) > 95:
-            summary_preview = f" — {summary_clean[:92]}..."
+        if len(summary_clean) > 80:
+            summary_preview = f" — {summary_clean[:77]}..."
         else:
             summary_preview = f" — {summary_clean}"
     else:
         summary_preview = ""
 
-    # Indicators
     icons: list[str] = []
     if section.get("has_table") or section.get("tables"):
-        icons.append("📊 Table")
+        icons.append("📊")
     if section.get("has_image") or section.get("images"):
-        icons.append("🖼️ Image")
+        icons.append("🖼️")
     if section.get("has_graph") or section.get("graph_links"):
-        icons.append("🕸️ Graph")
+        icons.append("🕸️")
 
-    icon_str = f" · {' · '.join(icons)}" if icons else ""
+    icon_str = f" {' '.join(icons)}" if icons else ""
+
+    tokens = section.get("token_count", 0)
+    l_start = section.get("line_start")
+    l_end = section.get("line_end")
+
+    if l_start and l_end:
+        line_info = f"L{l_start}-L{l_end}"
+    elif l_start:
+        line_info = f"L{l_start}"
+    else:
+        line_info = None
+
+    token_str = f"{tokens:,} tok"
+    length_str = f"{token_str} ({line_info})" if line_info else token_str
+    id_str = f" · 🔑 {sid}" if sid else ""
+
+    return f"📑 {lvl_tag} {title}{summary_preview}{icon_str} · {length_str}{id_str}"
 
     # Length & Line numbers
     tokens = section.get("token_count", 0)
@@ -639,7 +648,7 @@ def render_section_banner(
     score: float | None = None,
     show_summary: bool = True,
 ) -> None:
-    """Render a prominent banner for a section including its Section ID, title, level, tokens, and summary."""
+    """Render a compact, informative banner for a section with Section ID prominently displayed."""
     level = section.get("level", 1)
     lvl_tag = f"H{level}" if level > 0 else "Doc"
     title = (section.get("title") or "Untitled Section").strip()
@@ -652,20 +661,18 @@ def render_section_banner(
     summary = section.get("summary") or section.get("description")
     summary_source = section.get("summary_source")
 
-    # Banner header with Section ID prominently displayed
+    score_badge = f" · 🎯 Score: <strong>{score:.3f}</strong>" if score is not None else ""
+    doc_badge = f"📄 Doc: <strong>{doc_name}</strong> · " if doc_name else ""
+
     st.markdown(
         f"""
-        <div style="background: linear-gradient(135deg, #00005B 0%, #0073E6 100%); color: white; padding: 14px 18px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <div style="font-size: 0.85em; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
-                📑 [{lvl_tag}] Section #{seq} &nbsp;·&nbsp; 🔑 <strong>Section ID:</strong> <code style="color: #43C7F4; background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 4px; font-weight: bold;">{sid}</code>
+        <div style="background: #f0f4f8; border-left: 5px solid #00005B; padding: 10px 14px; border-radius: 4px; margin-bottom: 10px;">
+            <div style="font-size: 1.15em; font-weight: bold; color: #00005B;">
+                📑 [{lvl_tag}] #{seq}: {title}
             </div>
-            <div style="font-size: 1.25em; font-weight: bold; margin-bottom: 6px;">
-                {title}
-            </div>
-            <div style="font-size: 0.85em; opacity: 0.95;">
-                {"📄 Document: <strong>" + str(doc_name) + "</strong> &nbsp;·&nbsp; " if doc_name else ""}
-                🔤 <strong>{tok:,}</strong> tokens &nbsp;·&nbsp; 📏 Lines: <strong>{line_str}</strong>
-                {" &nbsp;·&nbsp; 🎯 Score: <strong>" + f"{score:.3f}" + "</strong>" if score is not None else ""}
+            <div style="font-size: 0.88em; color: #444; margin-top: 4px;">
+                {doc_badge}🔑 <strong>Section ID:</strong> <code style="color: #0073E6; font-weight: bold;">{sid}</code>
+                · 🔤 <strong>{tok:,}</strong> tokens · 📏 <strong>{line_str}</strong>{score_badge}
             </div>
         </div>
         """,
@@ -676,9 +683,9 @@ def render_section_banner(
         source_badge = f" *(source: `{summary_source}`)*" if summary_source else ""
         st.markdown(
             f"""
-            <div style="background-color: #f0f7ff; border-left: 4px solid #0073E6; padding: 10px 14px; border-radius: 4px; margin-bottom: 14px;">
-                <strong style="color: #00005B;">💡 Section Summary{source_badge}:</strong><br/>
-                <span style="color: #1a1a1a;">{summary}</span>
+            <div style="background-color: #f7fbff; border-left: 4px solid #0073E6; padding: 8px 12px; border-radius: 4px; margin-bottom: 10px;">
+                <strong style="color: #00005B;">💡 Summary{source_badge}:</strong>
+                <span style="color: #222;">{summary}</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -686,7 +693,7 @@ def render_section_banner(
 
 
 def render_document_banner(doc_data: dict[str, Any]) -> None:
-    """Render a prominent banner for a document including its hash, path, tokens, and abstract."""
+    """Render a compact header card for a document."""
     fname = doc_data.get("filename") or "Document"
     m_hash = doc_data.get("markdown_hash") or doc_data.get("content_hash") or "-"
     p = doc_data.get("path") or ""
@@ -698,16 +705,13 @@ def render_document_banner(doc_data: dict[str, Any]) -> None:
 
     st.markdown(
         f"""
-        <div style="background: linear-gradient(135deg, #0a2540 0%, #20639B 100%); color: white; padding: 14px 18px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <div style="font-size: 0.85em; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
-                📄 Document &nbsp;·&nbsp; 🔑 <strong>Hash:</strong> <code style="color: #43C7F4; background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 4px;">{m_hash}</code>
+        <div style="background: #eef3f8; border-left: 5px solid #0073E6; padding: 12px 16px; border-radius: 4px; margin-bottom: 10px;">
+            <div style="font-size: 1.25em; font-weight: bold; color: #00005B;">
+                📄 {fname}
             </div>
-            <div style="font-size: 1.3em; font-weight: bold; margin-bottom: 6px;">
-                {fname}
-            </div>
-            <div style="font-size: 0.85em; opacity: 0.95;">
-                📑 <strong>{sec_count}</strong> sections &nbsp;·&nbsp; 🔤 <strong>{tok_count:,}</strong> tokens &nbsp;·&nbsp; 🌐 Language: <strong>{lang}</strong>
-                {(" &nbsp;·&nbsp; 📁 Path: <code>" + p + "</code>") if p else ""}
+            <div style="font-size: 0.88em; color: #444; margin-top: 4px;">
+                🔑 <strong>Hash:</strong> <code>{m_hash[:12]}...</code> · 📑 <strong>{sec_count}</strong> sections · 🔤 <strong>{tok_count:,}</strong> tokens · 🌐 <strong>{lang}</strong>
+                {(" · 📁 <code>" + p + "</code>") if p else ""}
             </div>
         </div>
         """,
@@ -715,14 +719,14 @@ def render_document_banner(doc_data: dict[str, Any]) -> None:
     )
 
     if origin_src:
-        st.caption(f"**Original Source:** `{origin_src}`")
+        st.caption(f"**Original Source Document:** `{origin_src}`")
 
     if doc_abstract:
         st.markdown(
             f"""
-            <div style="background-color: #f4f6f8; border-left: 4px solid #00005B; padding: 10px 14px; border-radius: 4px; margin-bottom: 14px;">
-                <strong style="color: #00005B;">📋 Document Abstract:</strong><br/>
-                <span style="color: #2b2b2b;">{doc_abstract}</span>
+            <div style="background-color: #f8fafc; border-left: 4px solid #00005B; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px;">
+                <strong style="color: #00005B;">📋 Abstract:</strong>
+                <span style="color: #333;">{doc_abstract}</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -730,22 +734,19 @@ def render_document_banner(doc_data: dict[str, Any]) -> None:
 
 
 def render_folder_banner(folder_data: dict[str, Any]) -> None:
-    """Render a prominent banner for a folder."""
+    """Render a compact header card for a folder."""
     name = folder_data.get("name") or folder_data.get("folder_id") or "Folder"
     fid = folder_data.get("folder_id") or "-"
     doc_count = folder_data.get("doc_count", 0)
 
     st.markdown(
         f"""
-        <div style="background: linear-gradient(135deg, #1b3a4b 0%, #3d5a80 100%); color: white; padding: 14px 18px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <div style="font-size: 0.85em; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">
-                📁 Folder &nbsp;·&nbsp; 🔑 <strong>Folder ID:</strong> <code style="color: #43C7F4; background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 4px;">{fid}</code>
+        <div style="background: #eef3f8; border-left: 5px solid #3d5a80; padding: 12px 16px; border-radius: 4px; margin-bottom: 10px;">
+            <div style="font-size: 1.25em; font-weight: bold; color: #1b3a4b;">
+                📁 {name}
             </div>
-            <div style="font-size: 1.3em; font-weight: bold; margin-bottom: 6px;">
-                {name}
-            </div>
-            <div style="font-size: 0.85em; opacity: 0.95;">
-                📄 <strong>{doc_count}</strong> document{"s" if doc_count != 1 else ""} contained
+            <div style="font-size: 0.88em; color: #444; margin-top: 4px;">
+                🔑 <strong>Path / ID:</strong> <code>{fid}</code> · 📄 <strong>{doc_count}</strong> document{"s" if doc_count != 1 else ""}
             </div>
         </div>
         """,
@@ -780,8 +781,8 @@ def render_section_content_view(
                     source_badge = f" *(source: `{summary_source}`)*" if summary_source else ""
                     st.markdown(
                         f"""
-                        <div style="background-color: #f0f7ff; border-left: 4px solid #0073E6; padding: 10px 14px; border-radius: 4px; margin-bottom: 12px;">
-                            <strong style="color: #00005B;">💡 Section Summary{source_badge}:</strong><br/>
+                        <div style="background-color: #f0f7ff; border-left: 4px solid #0073E6; padding: 8px 12px; border-radius: 4px; margin-bottom: 10px;">
+                            <strong style="color: #00005B;">💡 Summary{source_badge}:</strong>
                             <span style="color: #1a1a1a;">{summary}</span>
                         </div>
                         """,
@@ -790,26 +791,20 @@ def render_section_content_view(
                 elif description:
                     st.markdown(
                         f"""
-                        <div style="background-color: #f6f8fa; border-left: 4px solid #6c757d; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px;">
+                        <div style="background-color: #f6f8fa; border-left: 4px solid #6c757d; padding: 6px 10px; border-radius: 4px; margin-bottom: 10px;">
                             <strong>📌 Overview:</strong> {description}
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
 
-        # 2. Metadata Pills & Chips
-        meta_cols = st.columns([2, 2, 2, 3])
-        with meta_cols[0]:
-            st.caption(f"**Section ID:** `{section.get('section_id', '-')}`")
-        with meta_cols[1]:
-            st.caption(f"**Sequence:** #{section.get('sequence', 0)} (Level {section.get('level', 1)})")
-        with meta_cols[2]:
-            st.caption(f"**Tokens:** {section.get('token_count', 0):,} tok")
-        with meta_cols[3]:
-            if keywords:
-                kw_str = ", ".join(f"`{k}`" for k in keywords[:5])
-                st.caption(f"**Keywords:** {kw_str}")
-
+        # 2. Metadata line
+        sid = section.get("section_id", "-")
+        seq = section.get("sequence", 0)
+        lvl = section.get("level", 1)
+        tok = section.get("token_count", 0)
+        kw_str = f" · Keywords: {', '.join(f'`{k}`' for k in keywords[:4])}" if keywords else ""
+        st.caption(f"🔑 ID: `{sid}` · #{seq} (H{lvl}) · {tok:,} tok{kw_str}")
         st.divider()
 
     # 3. Main Section Markdown Text
@@ -820,7 +815,6 @@ def render_section_content_view(
 
     # 4. Images Display (explicit node images + parsed markdown images)
     all_img_refs = list(images)
-    # Also extract inline markdown images if no node images present
     if not all_img_refs:
         parsed_imgs = extract_markdown_images(sec_text)
         for pi in parsed_imgs:
@@ -834,7 +828,7 @@ def render_section_content_view(
             )
 
     if all_img_refs:
-        st.markdown("#### 🖼️ Images in this Section")
+        st.markdown("##### 🖼️ Images in this Section")
         img_cols = st.columns(min(len(all_img_refs), 2))
         for idx, img in enumerate(all_img_refs):
             col = img_cols[idx % len(img_cols)]
@@ -858,7 +852,7 @@ def render_section_content_view(
 
     # 5. Tables Display
     if tables:
-        st.markdown("#### 📊 Structured Tables in this Section")
+        st.markdown("##### 📊 Structured Tables in this Section")
         for idx, tbl in enumerate(tables):
             tbl_name = tbl.get("name") or f"Table {idx + 1}"
             tbl_caption = tbl.get("caption") or ""
@@ -880,7 +874,7 @@ def render_section_content_view(
 
     # 6. Graph Links / Knowledge Graph Entity Mentions
     if graph_links:
-        st.markdown("#### 🕸️ Connected Knowledge Graph Entities")
+        st.markdown("##### 🕸️ Connected Knowledge Graph Entities")
         for gl in graph_links:
             rel = gl.get("rel_type") or "RELATED_TO"
             labels = gl.get("entity_labels") or []
@@ -892,27 +886,3 @@ def render_section_content_view(
     if sec_text.strip():
         with st.expander("📄 View Raw Markdown Source", expanded=False):
             st.code(sec_text, language="markdown")
-            tbl_content = tbl.get("content") or ""
-
-            with st.expander(
-                f"📊 {tbl_name} ({tbl_format.upper()}) {('— ' + tbl_caption) if tbl_caption else ''}", expanded=True
-            ):
-                if tbl_caption:
-                    st.caption(f"**Caption:** {tbl_caption}")
-                if tbl_format == "html":
-                    st.markdown(tbl_content, unsafe_allow_html=True)
-                else:
-                    st.markdown(tbl_content)
-
-                with st.expander("Show raw table markup", expanded=False):
-                    st.code(tbl_content, language="html" if tbl_format == "html" else "markdown")
-
-    # 6. Graph Links / Knowledge Graph Entity Mentions
-    if graph_links:
-        st.markdown("#### 🕸️ Connected Knowledge Graph Entities")
-        for gl in graph_links:
-            rel = gl.get("rel_type") or "RELATED_TO"
-            labels = gl.get("entity_labels") or []
-            label_str = f":{':'.join(labels)}" if labels else ""
-            ename = gl.get("entity_name") or "Entity"
-            st.markdown(f"- **`-{rel}->`** `{ename}` `({label_str})`")

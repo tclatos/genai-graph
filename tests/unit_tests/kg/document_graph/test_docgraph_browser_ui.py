@@ -85,7 +85,7 @@ def test_format_section_expander_label_basic() -> None:
     assert "[H1]" in label
     assert "Introduction" in label
     assert "Covers company background" in label
-    assert "250 tokens" in label
+    assert "250 tok" in label
     assert "L5-L20" in label
 
 
@@ -105,10 +105,10 @@ def test_format_section_expander_label_with_indicators() -> None:
 
     assert "[H2]" in label
     assert "Quarterly Breakdown" in label
-    assert "📊 Table" in label
-    assert "🖼️ Image" in label
-    assert "🕸️ Graph" in label
-    assert "890 tokens" in label
+    assert "📊" in label
+    assert "🖼️" in label
+    assert "🕸️" in label
+    assert "890 tok" in label
 
 
 def test_build_tree_select_nodes_hierarchy() -> None:

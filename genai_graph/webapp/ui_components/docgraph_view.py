@@ -843,7 +843,7 @@ def render_section_content_view(
                         st.image(
                             resolved,
                             caption=f"{img_name}: {img_desc}" if img_desc else img_name,
-                            use_container_width=True,
+                            width="stretch",
                         )
                     except Exception as exc:
                         st.warning(f"Could not render image `{img_path}`: {exc}")

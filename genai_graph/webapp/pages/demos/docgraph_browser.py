@@ -124,6 +124,92 @@ async def render_docgraph_explorer() -> None:
         initial_sidebar_state="expanded",
     )
 
+    import streamlit.components.v1 as components
+
+    # Custom styling to ensure tree navigation scrolls horizontally and doesn't get cut off on the left
+    st.markdown(
+        """
+        <style>
+        /* Allow horizontal scroll on tree column and ensure iframe doesn't clip */
+        div[data-testid="stColumn"]:has(iframe[title*="tree_select"]) {
+            overflow-x: auto !important;
+        }
+        div[data-testid="stColumn"] iframe[title*="tree_select"] {
+            min-width: 100% !important;
+            width: 100% !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    components.html(
+        """
+        <script>
+        function fixTreeSelectLayout() {
+            try {
+                const doc = window.parent.document;
+                const iframes = doc.querySelectorAll('iframe[title*="streamlit_tree_select"], iframe[title*="tree_select"]');
+                iframes.forEach(function(frame) {
+                    try {
+                        const fdoc = frame.contentDocument || frame.contentWindow.document;
+                        if (fdoc && !fdoc.getElementById('tree-fix-css')) {
+                            const style = fdoc.createElement('style');
+                            style.id = 'tree-fix-css';
+                            style.textContent = `
+                                html, body {
+                                    overflow-x: auto !important;
+                                    min-width: fit-content !important;
+                                    margin: 0 !important;
+                                    padding: 0 !important;
+                                }
+                                .react-checkbox-tree {
+                                    display: flex !important;
+                                    flex-direction: row !important;
+                                    justify-content: flex-start !important;
+                                    align-items: flex-start !important;
+                                    width: 100% !important;
+                                    min-width: max-content !important;
+                                }
+                                .react-checkbox-tree > ol {
+                                    flex: 1 1 auto !important;
+                                    min-width: max-content !important;
+                                    width: 100% !important;
+                                }
+                                .rct-options {
+                                    flex: 0 0 auto !important;
+                                    order: 2 !important;
+                                    margin-left: auto !important;
+                                    padding-right: 4px !important;
+                                }
+                                .rct-text {
+                                    white-space: nowrap !important;
+                                    display: flex !important;
+                                    align-items: center !important;
+                                }
+                                .rct-title {
+                                    white-space: nowrap !important;
+                                    font-size: 13.5px !important;
+                                }
+                                .rct-node-clickable {
+                                    border-radius: 4px !important;
+                                    padding: 1px 4px !important;
+                                }
+                            `;
+                            fdoc.head.appendChild(style);
+                        }
+                    } catch (e) {}
+                });
+            } catch (e) {}
+        }
+        fixTreeSelectLayout();
+        setInterval(fixTreeSelectLayout, 250);
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
     st.title("📑 Document Graph Explorer")
     st.caption("Interactive browser, search, and hierarchy navigator for Ladybug Document Graphs")
 
@@ -170,7 +256,7 @@ async def render_docgraph_explorer() -> None:
 
         col_ref, col_stat = st.columns([1, 1])
         with col_ref:
-            if st.button("🔄 Reconnect", use_container_width=True):
+            if st.button("🔄 Reconnect", width="stretch"):
                 st.session_state.selected_doc_hash = None
                 st.session_state.selected_section_id = None
                 st.session_state.selected_folder_id = None
@@ -378,7 +464,7 @@ async def render_docgraph_explorer() -> None:
 
                     btn_c1, btn_c2 = st.columns([1, 1])
                     with btn_c1:
-                        if st.button(f"📑 View All Sections in {active_doc.get('filename')}", use_container_width=True):
+                        if st.button(f"📑 View All Sections in {active_doc.get('filename')}", width="stretch"):
                             st.session_state.selected_section_id = None
                             st.session_state.selected_tree_val = f"doc:{active_hash}"
                             st.session_state.selected_node_type = "document"
@@ -390,7 +476,7 @@ async def render_docgraph_explorer() -> None:
                             data=sec_md_raw,
                             file_name=f"section_{target_sec.get('sequence', 0)}.md",
                             mime="text/markdown",
-                            use_container_width=True,
+                            width="stretch",
                         )
 
                     st.divider()
@@ -420,11 +506,11 @@ async def render_docgraph_explorer() -> None:
                 with doc_sub_tab1:
                     exp_col1, exp_col2, _ = st.columns([1, 1, 3])
                     with exp_col1:
-                        if st.button("➕ Expand All", use_container_width=True):
+                        if st.button("➕ Expand All", width="stretch"):
                             st.session_state.expand_all_sections = True
                             st.rerun()
                     with exp_col2:
-                        if st.button("➖ Collapse All", use_container_width=True):
+                        if st.button("➖ Collapse All", width="stretch"):
                             st.session_state.expand_all_sections = False
                             st.rerun()
 
@@ -483,7 +569,7 @@ async def render_docgraph_explorer() -> None:
                             data=full_md_text,
                             file_name=f"{Path(active_doc.get('filename', 'doc')).stem}.md",
                             mime="text/markdown",
-                            use_container_width=False,
+                            width="content",
                         )
                         st.markdown(full_md_text, unsafe_allow_html=True)
                         with st.expander("Show raw Markdown source", expanded=False):
@@ -640,7 +726,7 @@ async def render_docgraph_explorer() -> None:
                     resolved = resolve_image_path(img_path, img.get("filename"), db_path=active_db_path)
                     if resolved:
                         try:
-                            st.image(resolved, caption=img_name, use_container_width=True)
+                            st.image(resolved, caption=img_name, width="stretch")
                         except Exception:
                             st.warning(f"Could not load image `{img_path}`")
                     else:
@@ -709,7 +795,7 @@ async def render_docgraph_explorer() -> None:
 
         try:
             tbl_df = backend.execute_get_as_df("CALL show_tables() RETURN *", union=False)
-            st.dataframe(tbl_df, use_container_width=True)
+            st.dataframe(tbl_df, width="stretch")
         except Exception as exc:
             st.warning(f"Could not fetch table info: {exc}")
 
@@ -718,11 +804,11 @@ async def render_docgraph_explorer() -> None:
             "MATCH (d:Document)-[:HAS_SECTION]->(s:MarkdownSection) RETURN d.filename, s.title, s.token_count LIMIT 10"
         )
         user_cypher = st.text_area("Cypher Query", value=sample_query, height=100)
-        if st.button("Execute Cypher", use_container_width=False):
+        if st.button("Execute Cypher", width="content"):
             try:
                 res_df = backend.execute_get_as_df(user_cypher, union=False)
                 if res_df is not None and not res_df.empty:
-                    st.dataframe(res_df, use_container_width=True)
+                    st.dataframe(res_df, width="stretch")
                 else:
                     st.info("Query returned 0 rows.")
             except Exception as exc:

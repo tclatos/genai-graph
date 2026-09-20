@@ -161,7 +161,7 @@ def main() -> None:
         )
 
         with col3:
-            execute_btn = st.button("▶️ Execute", type="primary", key="execute_cypher", use_container_width=True)
+            execute_btn = st.button("▶️ Execute", type="primary", key="execute_cypher", width="stretch")
 
         if execute_btn:
             # Capture whatever is currently in the editor (may be None if unchanged)
@@ -217,10 +217,10 @@ def main() -> None:
             st.markdown("<br>", unsafe_allow_html=True)
             col2a, col2b = st.columns(2)
             with col2a:
-                generate_btn = st.button("🤖 Generate", type="primary", use_container_width=True)
+                generate_btn = st.button("🤖 Generate", type="primary", width="stretch")
             with col2b:
                 execute_nl_btn = st.button(
-                    "▶️ Execute", type="secondary", use_container_width=True, disabled=not sss.generated_cypher
+                    "▶️ Execute", type="secondary", width="stretch", disabled=not sss.generated_cypher
                 )
 
         # Execute previously generated query

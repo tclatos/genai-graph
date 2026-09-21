@@ -22,7 +22,7 @@ import os
 import re
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 import yaml
 from genai_tk.utils.ladybug import get_shared_database
@@ -174,7 +174,8 @@ def _query_rows(
         raise
     # pandas renders SQL/Cypher NULLs (e.g. a root section's parent_section_id) as
     # float NaN rather than None — normalize so callers can compare with `is None`.
-    return df.astype(object).where(df.notna(), None).to_dict(orient="records"), query
+    records = cast(list[dict[str, Any]], df.astype(object).where(df.notna(), None).to_dict(orient="records"))
+    return records, query
 
 
 def _resolve_markdown_hash(backend: KgBackend, document_id: str) -> str | None:
@@ -612,6 +613,18 @@ def folder_toc_yaml(
     return yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
 
 
+@overload
+def get_section_content(
+    backend: KgBackend, section_ids: list[str], return_query: Literal[False] = False
+) -> list[dict[str, Any]]: ...
+
+
+@overload
+def get_section_content(
+    backend: KgBackend, section_ids: list[str], return_query: Literal[True]
+) -> tuple[list[dict[str, Any]], str]: ...
+
+
 def get_section_content(
     backend: KgBackend, section_ids: list[str], return_query: bool = False
 ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], str]:
@@ -631,6 +644,16 @@ def get_section_content(
     """
     rows, _ = _query_rows(backend, query, {"section_ids": section_ids})
     return (rows, query) if return_query else rows
+
+
+@overload
+def reconstruct_document(backend: KgBackend, document_id: str, return_query: Literal[False] = False) -> str | None: ...
+
+
+@overload
+def reconstruct_document(
+    backend: KgBackend, document_id: str, return_query: Literal[True]
+) -> tuple[str | None, str]: ...
 
 
 def reconstruct_document(
@@ -830,7 +853,7 @@ def _extract_query_phrases_and_terms(query: str, language_code: str = "en") -> l
 
     # 4. Form 2-word contiguous chunks from adjacent non-stop tokens
     for i in range(len(content_tokens) - 1):
-        bigram = f"{content_tokens[i]} {content_tokens[i+1]}"
+        bigram = f"{content_tokens[i]} {content_tokens[i + 1]}"
         if bigram not in phrases:
             phrases.append(bigram)
 
@@ -1463,9 +1486,7 @@ def _connect(db_path: str) -> KgBackend:
         # ~80% of system RAM lets the pool squeeze the host process on long
         # concurrent runs, surfacing as "buffer pool is full" tool errors.
         pool_size = os.getenv("LADYBUG_BUFFER_POOL_SIZE", "").strip() or "4GB"
-        backend.attach(
-            get_shared_database(db_path, read_only=Path(db_path).exists(), buffer_pool_size=pool_size)
-        )
+        backend.attach(get_shared_database(db_path, read_only=Path(db_path).exists(), buffer_pool_size=pool_size))
         backends[db_path] = backend
         _KEEPALIVE_BACKENDS.append(backend)
     return backend

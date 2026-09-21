@@ -19,6 +19,7 @@ raw Cypher binder error. Truly-missing structures surface as
 from __future__ import annotations
 
 import os
+import re
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -180,15 +181,28 @@ def _resolve_markdown_hash(backend: KgBackend, document_id: str) -> str | None:
     """Resolve a document reference to a Document.markdown_hash.
 
     Accepts a Document content hash (full or prefix), a ``markdown_hash``, a
-    filename, or a source Document path.
+    filename, or a source Document path (with or without .md / .pdf extensions).
     """
+    clean_id = document_id.strip()
+    id_stem = Path(clean_id).stem
     query = (
         f"MATCH (d:{_DOCUMENT_LABEL}) "
         "WHERE d.content_hash = $id OR d.content_hash STARTS WITH $id OR d.markdown_hash = $id "
         "OR d.markdown_hash STARTS WITH $id OR d.filename = $id OR d.path = $id "
+        "OR d.filename = $id_md OR d.filename = $id_pdf OR d.filename STARTS WITH $stem "
+        "OR d.path STARTS WITH $stem "
         "RETURN d.markdown_hash AS h LIMIT 1"
     )
-    rows, _ = _query_rows(backend, query, {"id": document_id})
+    rows, _ = _query_rows(
+        backend,
+        query,
+        {
+            "id": clean_id,
+            "id_md": f"{id_stem}.md",
+            "id_pdf": f"{id_stem}.pdf",
+            "stem": id_stem,
+        },
+    )
     if rows:
         return rows[0]["h"]
     return None
@@ -785,6 +799,53 @@ def _semantic_section_hits(
     return sorted(best.values(), key=lambda r: r["distance"])[:limit]
 
 
+def _extract_query_phrases_and_terms(query: str, language_code: str = "en") -> list[str]:
+    """Decompose natural language query into core entity phrases, table names, and keywords.
+
+    Uses spaCy linguistic stop words from genai_tk.extra.nlp.stopwords.
+    """
+    from genai_tk.extra.nlp.stopwords import get_stopwords
+
+    phrases: list[str] = []
+    sw = get_stopwords(language_code)
+
+    # 1. Match Table/Chart/Schedule/Exhibit identifiers (e.g. Table FFO-3, FFO-2, Table 3, FD-1, USCC-1)
+    table_matches = re.findall(
+        r"(?:Table|Chart|Schedule|Exhibit)\s+[\w\d\-\.]+|[A-Z]{2,4}-[\w\d\-\.]+", query, re.IGNORECASE
+    )
+    for tm in table_matches:
+        s = tm.strip()
+        if s and s not in phrases:
+            phrases.append(s)
+
+    # 2. Tokenize and filter standard spaCy stop words across the query
+    clean = re.sub(r"[^\w\s\-\.\/]", " ", query)
+    tokens = clean.split()
+    content_tokens = [t for t in tokens if len(t) >= 3 and t.lower() not in sw]
+
+    # 3. Add distinctive single content tokens (longer first)
+    for t in sorted(set(content_tokens), key=lambda x: -len(x)):
+        if t not in phrases:
+            phrases.append(t)
+
+    # 4. Form 2-word contiguous chunks from adjacent non-stop tokens
+    for i in range(len(content_tokens) - 1):
+        bigram = f"{content_tokens[i]} {content_tokens[i+1]}"
+        if bigram not in phrases:
+            phrases.append(bigram)
+
+    # 5. Extract specific 4-digit years (e.g. 1940, 1953, 1985)
+    years = re.findall(r"\b(?:19|20)\d{2}\b", query)
+    for y in years:
+        if y not in phrases:
+            phrases.append(y)
+
+    if not phrases:
+        phrases = [t for t in tokens if len(t) >= 2][:6]
+
+    return phrases[:12]
+
+
 def _contains_section_hits(
     backend: KgBackend,
     keyword: str,
@@ -792,61 +853,57 @@ def _contains_section_hits(
     folder_id: str | None = None,
     allowed: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """CONTAINS search (native Cypher substring search over section title/text).
+    """CONTAINS search (case-insensitive Cypher substring search over section title/text).
 
-    Multi-word queries are split into terms OR-ed together and ranked by how
-    many terms match, since a verbatim substring match of a whole
-    natural-language phrase is almost never present in the text.
+    Multi-word queries are decomposed into noun phrases and core terms OR-ed together
+    and ranked by how many terms match, with multi-word phrase matches weighted higher.
     """
     cols = _table_columns(backend, _SECTION_LABEL)
     desc_field = ", s.description AS description" if "description" in cols else ""
-    terms = [t for t in dict.fromkeys(keyword.split()) if len(t) >= 3][:8]
-    params: dict[str, Any] = {"limit": limit}
-    if len(terms) > 1:
-        params.update({f"t{i}": t for i, t in enumerate(terms)})
-        where = "(" + " OR ".join(f"(s.title CONTAINS $t{i} OR s.text CONTAINS $t{i})" for i in range(len(terms))) + ")"
-        score = " + ".join(
-            f"(CASE WHEN s.title CONTAINS $t{i} OR s.text CONTAINS $t{i} THEN 1 ELSE 0 END)" for i in range(len(terms))
+    phrases = _extract_query_phrases_and_terms(keyword)
+    if not phrases:
+        return []
+
+    conditions: list[str] = []
+    score_parts: list[str] = []
+    for p in phrases:
+        escaped = p.lower().replace("'", "\\'")
+        weight = 3 if " " in p else 1
+        conditions.append(f"(lower(s.title) CONTAINS '{escaped}' OR lower(s.text) CONTAINS '{escaped}')")
+        score_parts.append(
+            f"(CASE WHEN lower(s.title) CONTAINS '{escaped}' OR lower(s.text) CONTAINS '{escaped}' THEN {weight} ELSE 0 END)"
         )
-        ret = (
-            f"RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
-            f"s.level AS level, s.line_start AS line_start{desc_field}, "
-            f"({score}) AS score "
-            "ORDER BY score DESC, s.markdown_hash, s.line_start LIMIT $limit"
-        )
-    else:
-        params["keyword"] = keyword
-        where = "(s.title CONTAINS $keyword OR s.text CONTAINS $keyword)"
-        ret = (
-            f"RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
-            f"s.level AS level, s.line_start AS line_start{desc_field}, 1 AS score "
-            "ORDER BY s.markdown_hash, s.line_start LIMIT $limit"
-        )
+
+    where = "(" + " OR ".join(conditions) + ")"
+    score = " + ".join(score_parts)
+    ret = (
+        f"RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
+        f"s.level AS level, s.line_start AS line_start{desc_field}, ({score}) AS score "
+        f"ORDER BY score DESC, s.markdown_hash, s.line_start LIMIT {limit}"
+    )
+
     if allowed is not None:
         if not allowed:
             return []
-        if len(allowed) == 1:
-            query = f"MATCH (s:{_SECTION_LABEL}) WHERE s.markdown_hash = $mh AND {where} {ret}"
-            params["mh"] = next(iter(allowed))
-        else:
-            query = f"MATCH (s:{_SECTION_LABEL}) WHERE s.markdown_hash IN $allowed AND {where} {ret}"
-            params["allowed"] = list(allowed)
+        allowed_list_str = "[" + ", ".join(f"'{h}'" for h in allowed) + "]"
+        query = f"MATCH (s:{_SECTION_LABEL}) WHERE s.markdown_hash IN {allowed_list_str} AND {where} {ret}"
     elif folder_id is not None:
+        escaped_fid = folder_id.replace("'", "\\'")
         if _has_relationship(backend, "HAS_SUBFOLDER"):
             query = (
-                f"MATCH (root:{_FOLDER_LABEL} {{folder_id: $folder_id}})-[:HAS_SUBFOLDER*0..30]->(f:{_FOLDER_LABEL}) "
+                f"MATCH (root:{_FOLDER_LABEL} {{folder_id: '{escaped_fid}'}})-[:HAS_SUBFOLDER*0..30]->(f:{_FOLDER_LABEL}) "
                 f"MATCH (f)-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) "
                 f"MATCH (s:{_SECTION_LABEL} {{markdown_hash: d.markdown_hash}}) WHERE {where} {ret}"
             )
         else:
             query = (
-                f"MATCH (f:{_FOLDER_LABEL} {{folder_id: $folder_id}})-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) "
+                f"MATCH (f:{_FOLDER_LABEL} {{folder_id: '{escaped_fid}'}})-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) "
                 f"MATCH (s:{_SECTION_LABEL} {{markdown_hash: d.markdown_hash}}) WHERE {where} {ret}"
             )
-        params["folder_id"] = folder_id
     else:
         query = f"MATCH (s:{_SECTION_LABEL}) WHERE {where} {ret}"
-    rows, _ = _query_rows(backend, query, params)
+
+    rows, _ = _query_rows(backend, query)
     return rows
 
 
@@ -857,34 +914,56 @@ def _keyword_section_hits(
     folder_id: str | None = None,
     allowed: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """BM25 (FTS) search over MarkdownSection; falls back to CONTAINS."""
+    """BM25 (FTS) search over MarkdownSection with dynamic relaxation and CONTAINS fallback."""
     if allowed is not None and not allowed:
         return []
+    fts_hits: list[dict[str, Any]] = []
     if not _native_index_queries_disabled and isinstance(backend, KuzuBackend):
         try:
             backend.ensure_fts_extension()
-            fetch_k = max(limit * 5, 50) if allowed is not None else limit
+            fetch_k = max(limit * 20, 200) if allowed is not None else limit
             cols = _table_columns(backend, _SECTION_LABEL)
             desc_field = ", node.description AS description" if "description" in cols else ""
-            fts = (
-                f"CALL QUERY_FTS_INDEX('{_SECTION_LABEL}','{_SECTION_FTS_INDEX}', $query) "
-                "RETURN node.markdown_hash AS markdown_hash, node.section_id AS section_id, "
-                f"node.title AS title, node.level AS level, node.line_start AS line_start{desc_field}, "
-                "score AS score ORDER BY score DESC LIMIT $limit"
-            )
-            rows, _ = _query_rows(backend, fts, {"query": query, "limit": fetch_k})
-            if rows:
+
+            def _run_fts(q_text: str) -> list[dict[str, Any]]:
+                clean_q = re.sub(r"[^\w\s\-\.\/]", " ", q_text).strip().replace("'", "\\'")
+                if not clean_q:
+                    return []
+                fts = (
+                    f"CALL QUERY_FTS_INDEX('{_SECTION_LABEL}','{_SECTION_FTS_INDEX}', '{clean_q}') "
+                    "RETURN node.markdown_hash AS markdown_hash, node.section_id AS section_id, "
+                    f"node.title AS title, node.level AS level, node.line_start AS line_start{desc_field}, "
+                    f"score AS score ORDER BY score DESC LIMIT {fetch_k}"
+                )
+                r, _ = _query_rows(backend, fts)
                 if allowed is not None:
-                    # The corpus-wide FTS top-k is often dominated by other documents
-                    # (scope starvation); when the scope filter empties it, fall through
-                    # to the scoped CONTAINS search instead of returning nothing.
-                    rows = [r for r in rows if r.get("markdown_hash") in allowed]
-                if rows:
-                    return rows[:limit]
+                    r = [row for row in r if row.get("markdown_hash") in allowed]
+                return r
+
+            # 1. Primary FTS query
+            fts_hits = _run_fts(query)
+
+            # 2. Dynamic Query Relaxation if primary query returned 0 or few hits
+            if len(fts_hits) < min(limit, 3):
+                phrases = _extract_query_phrases_and_terms(query)
+                relaxed_candidates = [p for p in phrases if " " in p] or phrases[:3]
+                existing_sids = {h["section_id"] for h in fts_hits}
+                for cand in relaxed_candidates:
+                    cand_hits = _run_fts(cand)
+                    for ch in cand_hits:
+                        if ch["section_id"] not in existing_sids:
+                            fts_hits.append(ch)
+                            existing_sids.add(ch["section_id"])
+                    if len(fts_hits) >= limit:
+                        break
+
+            if fts_hits:
+                return fts_hits[:limit]
         except Exception as exc:  # noqa: BLE001
-            logger.debug("FTS search unavailable, falling back to CONTAINS: {}", exc)
-    rows = _contains_section_hits(backend, query, limit, folder_id=folder_id, allowed=allowed)
-    return rows
+            logger.debug("FTS search unavailable or failed, falling back to CONTAINS: {}", exc)
+
+    # 3. Fallback to case-insensitive multi-term Cypher CONTAINS
+    return _contains_section_hits(backend, query, limit, folder_id=folder_id, allowed=allowed)
 
 
 def _fetch_section_meta(backend: KgBackend, section_ids: list[str]) -> dict[str, dict[str, Any]]:

@@ -1,3 +1,8 @@
+# Use BAML
+/home/tcl/prj/genai-graph/genai_graph/bench/models.py
+
+
+
 
 # replace D3.js with echarts  (graphs, trees, ) ? 
 https://echarts.apache.org/examples/en/index.html#chart-type-graph

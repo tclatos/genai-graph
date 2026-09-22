@@ -1485,7 +1485,7 @@ def _connect(db_path: str) -> KgBackend:
         # Explicit buffer-pool ceiling (env-overridable): the engine default of
         # ~80% of system RAM lets the pool squeeze the host process on long
         # concurrent runs, surfacing as "buffer pool is full" tool errors.
-        pool_size = os.getenv("LADYBUG_BUFFER_POOL_SIZE", "").strip() or "4GB"
+        pool_size = os.getenv("LADYBUG_BUFFER_POOL_SIZE", "").strip() or "8GB"
         backend.attach(get_shared_database(db_path, read_only=Path(db_path).exists(), buffer_pool_size=pool_size))
         backends[db_path] = backend
         _KEEPALIVE_BACKENDS.append(backend)

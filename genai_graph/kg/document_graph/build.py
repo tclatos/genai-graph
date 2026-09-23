@@ -261,6 +261,7 @@ def build_document_graph(
             fts,
         )
         t1 = time.monotonic()
+        staging_dir = str(db_p.with_suffix("")) + "_staging"
         result = ingest_document_graph(
             backend,
             factory,
@@ -271,6 +272,7 @@ def build_document_graph(
                 fts=fts,
             ),
             embed_workers=max(1, embed_workers if embed_workers is not None else workers),
+            staging_dir=staging_dir,
         )
         timings["ingest_s"] = round(time.monotonic() - t1, 3)
     finally:

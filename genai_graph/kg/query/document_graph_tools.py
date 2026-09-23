@@ -482,6 +482,33 @@ def get_document_toc(
     """
     rows, q = _query_rows(backend, query, {"markdown_hash": markdown_hash})
     rows = [_normalize_row(r, _SECTION_TOC_KEYS) for r in rows]
+
+    # Attach images if Image table and HAS_IMAGE relation exist
+    if _has_table(backend, "Image") and _has_relationship(backend, "HAS_IMAGE"):
+        try:
+            img_query = f"""
+                MATCH (s:{_SECTION_LABEL} {{markdown_hash: $markdown_hash}})-[:HAS_IMAGE]->(i:Image)
+                RETURN s.section_id AS section_id, i.image_id AS image_id, i.filename AS filename,
+                       i.caption AS caption, i.description AS description
+            """
+            img_rows, _ = _query_rows(backend, img_query, {"markdown_hash": markdown_hash})
+            imgs_by_sec: dict[str, list[dict[str, Any]]] = {}
+            for ir in img_rows:
+                sec_id = ir.get("section_id")
+                if sec_id:
+                    imgs_by_sec.setdefault(sec_id, []).append({
+                        "image_id": ir.get("image_id"),
+                        "filename": ir.get("filename"),
+                        "caption": ir.get("caption"),
+                        "description": ir.get("description"),
+                    })
+            for r in rows:
+                sid = r.get("section_id")
+                if sid in imgs_by_sec:
+                    r["images"] = imgs_by_sec[sid]
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Could not query images for TOC: {}", exc)
+
     return (rows, q) if return_query else rows
 
 
@@ -521,6 +548,8 @@ def build_toc_tree(
                 node["summary"] = row["summary"]
             if row.get("keywords"):
                 node["keywords"] = row["keywords"]
+            if row.get("images"):
+                node["images"] = row["images"]
             children = build(row["section_id"])
             if children:
                 node["sections"] = children
@@ -541,7 +570,18 @@ def render_toc_outline(toc_rows: list[dict[str, Any]]) -> str:
             continue  # synthetic root: not a navigable heading
         indent = "  " * max(int(row["level"]) - 1, 0)
         desc = f" — {row['description']}" if row.get("description") else ""
-        lines.append(f"{indent}- [{row['section_id']}] {row['title']} (line {row['line_start']}){desc}")
+        images_info = ""
+        if row.get("images"):
+            img_labels = []
+            for img in row["images"]:
+                lbl = img.get("caption") or img.get("description") or img.get("filename")
+                if lbl:
+                    img_labels.append(f'"{lbl}"')
+            if img_labels:
+                images_info = f" [{len(row['images'])} image(s): {', '.join(img_labels)}]"
+            else:
+                images_info = f" [{len(row['images'])} image(s)]"
+        lines.append(f"{indent}- [{row['section_id']}] {row['title']} (line {row['line_start']}){images_info}{desc}")
     return "\n".join(lines)
 
 
@@ -1321,73 +1361,121 @@ def execute_image_query(
 
     candidate_path: str = image_ref
     caption_context: str | None = None
+    b64_from_db: str | None = None
+    img_format: str = "png"
 
-    # 1. Try DB lookup if Image table exists
+    # 1. Try DB lookup if Image table exists (pull base64_data directly from node)
     cols = _table_columns(backend, "Image")
     if cols:
-        query = (
-            "MATCH (i:Image) "
-            "WHERE i.image_id = $ref OR i.name = $ref OR i.filename = $ref OR i.path = $ref "
-            "RETURN i.path AS path, i.filename AS filename, i.description AS description "
-            "LIMIT 1"
-        )
+        fields = ["i.image_id AS image_id", "i.filename AS filename"]
+        if "description" in cols:
+            fields.append("i.description AS description")
+        if "caption" in cols:
+            fields.append("i.caption AS caption")
+        if "format" in cols:
+            fields.append("i.format AS format")
+        if "base64_data" in cols:
+            fields.append("i.base64_data AS base64_data")
+        if "path" in cols:
+            fields.append("i.path AS path")
+
+        fields_str = ", ".join(fields)
+        query = f"""
+            MATCH (i:Image)
+            WHERE i.image_id = $ref OR i.filename = $ref
+               OR (i.image_hash IS NOT NULL AND i.image_hash = $ref)
+               OR (i.name IS NOT NULL AND i.name = $ref)
+            RETURN {fields_str}
+            LIMIT 1
+        """
         try:
             rows, _ = _query_rows(backend, query, {"ref": image_ref})
             if rows:
-                candidate_path = rows[0].get("path") or image_ref
-                caption_context = rows[0].get("description")
+                row = rows[0]
+                caption_context = row.get("caption") or row.get("description")
+                img_format = row.get("format") or "png"
+                if row.get("base64_data"):
+                    b64_from_db = row.get("base64_data")
+                elif row.get("path"):
+                    candidate_path = row.get("path")
         except Exception as exc:  # noqa: BLE001
             logger.debug("Error looking up image {}: {}", image_ref, exc)
 
-    # 2. Resolve to a real file path on disk
-    resolved_path: Path | None = None
-    ref_p = Path(candidate_path)
-    if ref_p.is_absolute() and ref_p.exists():
-        resolved_path = ref_p
+    if b64_from_db:
+        mime_type = f"image/{img_format.lower()}"
+        if img_format.lower() in ("jpg", "jpeg"):
+            mime_type = "image/jpeg"
+        data_url = f"data:{mime_type};base64,{b64_from_db}"
     else:
-        clean_name = ref_p.name
-        candidates = [
-            Path.cwd() / ref_p,
-            Path.cwd() / "images" / clean_name,
-            Path.cwd() / "data" / ref_p,
-            Path.cwd() / "data" / "images" / clean_name,
-            Path.cwd() / "data" / "markdown_multi" / ref_p,
-            Path.cwd() / "data" / "markdown_multi" / "images" / clean_name,
-            Path.cwd() / "data" / "saved_markdown" / "images" / clean_name,
-            Path.cwd() / "data" / "pdfs" / ref_p,
-        ]
-        for cand in candidates:
-            if cand.exists() and cand.is_file():
-                resolved_path = cand
-                break
+        # 2. Resolve to a real file path on disk (fallback)
+        resolved_path: Path | None = None
+        ref_p = Path(candidate_path)
+        if ref_p.is_absolute() and ref_p.exists():
+            resolved_path = ref_p
+        else:
+            clean_name = ref_p.name
+            candidates = [
+                Path.cwd() / ref_p,
+                Path.cwd() / "images" / clean_name,
+                Path.cwd() / "data" / ref_p,
+                Path.cwd() / "data" / "images" / clean_name,
+                Path.cwd() / "data" / "markdown_multi" / ref_p,
+                Path.cwd() / "data" / "markdown_multi" / "images" / clean_name,
+                Path.cwd() / "data" / "saved_markdown" / "images" / clean_name,
+                Path.cwd() / "data" / "pdfs" / ref_p,
+            ]
+            for cand in candidates:
+                if cand.exists() and cand.is_file():
+                    resolved_path = cand
+                    break
 
-        # If still not found, try recursive search in data/ and images/
-        if resolved_path is None:
-            for search_root in (Path.cwd() / "data", Path.cwd() / "images"):
-                if search_root.exists():
-                    for match in search_root.rglob(clean_name):
-                        if match.is_file():
-                            resolved_path = match
+            # If still not found, try recursive search in data/ and images/
+            if resolved_path is None:
+                for search_root in (Path.cwd() / "data", Path.cwd() / "images"):
+                    if search_root.exists():
+                        for match in search_root.rglob(clean_name):
+                            if match.is_file():
+                                resolved_path = match
+                                break
+                        if resolved_path is not None:
                             break
-                    if resolved_path is not None:
-                        break
 
-    if resolved_path is None or not resolved_path.exists():
-        return (
-            f"Error: Image file not found on disk for reference '{image_ref}'. "
-            "Check the image filename or comment in the section markdown (e.g. `<!-- Image: {hash}.png -->`)."
-        )
+        if resolved_path is None or not resolved_path.exists():
+            return (
+                f"Error: Image '{image_ref}' not found in database or on disk. "
+                "Check the image filename or reference in the section."
+            )
 
-    # 3. Guard: only real image files can be sent to the VLM.
-    image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-    if resolved_path.suffix.lower() not in image_extensions:
-        return (
-            f"Error: '{resolved_path.name}' is not an image file (type '{resolved_path.suffix or 'unknown'}'). "
-            "query_image only accepts image files."
-        )
+        # 3. Guard: only real image files can be sent to the VLM.
+        image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        if resolved_path.suffix.lower() not in image_extensions:
+            return (
+                f"Error: '{resolved_path.name}' is not an image file (type '{resolved_path.suffix or 'unknown'}'). "
+                "query_image only accepts image files."
+            )
 
-    import base64
-    import mimetypes
+        import base64
+        import mimetypes
+
+        from genai_tk.extra.markdownize.image_describer import upscale_small_image
+
+        raw_bytes = upscale_small_image(resolved_path)
+        if len(raw_bytes) > 20 * 1024 * 1024:
+            return f"Error: Image file too large ({len(raw_bytes)} bytes). Ask about a smaller image or crop."
+        b64_str = base64.b64encode(raw_bytes).decode("utf-8")
+        mime_type, _ = mimetypes.guess_type(str(resolved_path))
+        if not mime_type or not mime_type.startswith("image/"):
+            ext = resolved_path.suffix.lower()
+            if ext in (".jpg", ".jpeg"):
+                mime_type = "image/jpeg"
+            elif ext == ".webp":
+                mime_type = "image/webp"
+            elif ext == ".gif":
+                mime_type = "image/gif"
+            else:
+                mime_type = "image/png"
+
+        data_url = f"data:{mime_type};base64,{b64_str}"
 
     from genai_tk.extra.markdownize.image_describer import upscale_small_image
 

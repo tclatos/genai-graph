@@ -130,3 +130,51 @@ HAS_CHUNK: GraphRelation = GraphRelation(
     description="Section contains a chunk (embedding-bearing sub-unit)",
     field_paths=[("", "")],
 )
+
+
+# ---------------------------------------------------------------------------
+# Images — multimodal visual assets attached to a section
+# ---------------------------------------------------------------------------
+#
+# An ``Image`` node represents a visual asset (chart, figure, diagram, photo)
+# referenced by a ``MarkdownSection``. Rather than relying on external files or
+# synthetic markdown comments, the image binary is encoded directly as base64 in
+# ``base64_data`` alongside extracted captions and VLM-generated descriptions.
+
+
+class Image(BaseModel):
+    """An image / visual figure attached to a MarkdownSection."""
+
+    image_id: str = Field(..., description="Primary key: f'{section_id}::{image_hash}'")
+    section_id: str = Field(..., description="section_id of the owning MarkdownSection (foreign key)")
+    markdown_hash: str = Field(..., description="markdown_hash of the owning Document (foreign key)")
+    image_hash: str = Field(..., description="Hash of image binary content")
+    name: str = Field(default="", description="Image name / hash code")
+    filename: str = Field(..., description="Image filename (e.g. chart1.png)")
+    path: str = Field(default="", description="Path to image file (relative to project or absolute)")
+    format: str = Field(default="png", description="Image format / extension (png, jpeg, webp, svg, etc.)")
+    caption: str | None = Field(default=None, description="Immediate caption or alt text extracted from document")
+    description: str | None = Field(default=None, description="VLM-generated or full description of the image content")
+    keywords: list[str] = Field(default_factory=list, description="Extracted search keywords for the image")
+    base64_data: str | None = Field(
+        default=None, description="Base64-encoded image binary for direct LLM/VLM consumption"
+    )
+    file_size_bytes: int = Field(default=0, description="Image file size in bytes")
+    size: int = Field(default=0, description="Image file size in bytes")
+
+
+ImageNode: GraphNode = GraphNode(
+    node_class=Image,
+    name_from="filename",
+    key_from="image_id",
+    description="An image / figure attached to a MarkdownSection",
+    explicitly_defined=True,
+)
+
+HAS_IMAGE: GraphRelation = GraphRelation(
+    name="HAS_IMAGE",
+    from_node=SectionNode,
+    to_node=ImageNode,
+    description="Section contains an image / figure",
+    field_paths=[("", "")],
+)

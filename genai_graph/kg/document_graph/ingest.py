@@ -17,6 +17,7 @@ creation is skipped entirely, avoiding costly recomputation.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -50,8 +51,10 @@ from genai_graph.kg.nodes.document import (
 )
 from genai_graph.kg.nodes.document_section import (
     HAS_CHUNK,
+    HAS_IMAGE,
     HAS_SECTION,
     HAS_SUBSECTION,
+    ImageNode,
     SectionChunkNode,
     SectionNode,
 )
@@ -60,6 +63,7 @@ _FOLDER_TYPE = FolderNode.node_class.__name__
 _DOCUMENT_TYPE = DocumentNode.node_class.__name__
 _SECTION_TYPE = SectionNode.node_class.__name__
 _CHUNK_TYPE = SectionChunkNode.node_class.__name__
+_IMAGE_TYPE = ImageNode.node_class.__name__
 
 
 class DocumentGraphIngestResult(BaseModel):
@@ -71,6 +75,7 @@ class DocumentGraphIngestResult(BaseModel):
     sections_created: int = 0
     sections_summarized: int = 0
     chunks_created: int = 0
+    images_created: int = 0
     relationships_created: int = 0
     embeddings_model: str | None = None
     embeddings_dim: int | None = None
@@ -122,6 +127,7 @@ def ingest_document_graph(
     force: bool = False,
     retrieval_config: RetrievalConfig | None = None,
     embed_workers: int = 1,
+    staging_dir: str | Path | None = None,
 ) -> DocumentGraphIngestResult:
     """Ingest a Markdown corpus (via *factory*) into *backend* as a hash-keyed tree.
 
@@ -144,6 +150,7 @@ def ingest_document_graph(
             the (single-writer) merge. Values > 1 overlap per-document embedding
             batches in a thread pool; the DB is only touched afterwards. 1 keeps
             embedding serial.
+        staging_dir: Optional directory to stage Parquet cache tables into.
 
     Returns:
         `DocumentGraphIngestResult` with counts and any warnings.
@@ -322,6 +329,23 @@ def ingest_document_graph(
         result.sections_created += len(bundle.sections)
         result.sections_summarized += sum(1 for s in bundle.sections if s.summary)
 
+        # Images attached to sections
+        for img in bundle.images:
+            img_dict = img.model_dump()
+            img_dict["name"] = img.filename
+            nodes.add(_IMAGE_TYPE, img_dict)
+            relationships.append(
+                RelationshipRecord(
+                    _SECTION_TYPE,
+                    img.section_id,
+                    _IMAGE_TYPE,
+                    img.image_id,
+                    HAS_IMAGE.name,
+                    {},
+                )
+            )
+        result.images_created += len(bundle.images)
+
         doc_chunks_count = 0
         if chunks_enabled and retrieval_config is not None:
             section_chunks = chunk_lists[doc_idx - 1]
@@ -342,13 +366,28 @@ def ingest_document_graph(
 
         result.documents_processed += 1
         logger.info(
-            "Ingested [{}/{}]: {} (sections={}, chunks={})",
+            "Ingested [{}/{}]: {} (sections={}, chunks={}, images={})",
             doc_idx,
             total_keys,
             document.filename,
             len(bundle.sections),
             doc_chunks_count,
+            len(bundle.images),
         )
+
+    # Optional Parquet staging
+    if staging_dir is not None:
+        try:
+            from genai_graph.kg.document_graph.staging import stage_document_graph_to_parquet
+
+            stage_document_graph_to_parquet(
+                [b for b, _, _ in pending],
+                staging_dir,
+                chunk_lists=chunk_lists if chunks_enabled else None,
+                source_files=keys,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not stage Document Graph to Parquet: {}", exc)
 
     merge_result = merge_nodes_batch(backend, nodes, registry)
     result.relationships_created = merge_relationships_batch(backend, relationships, registry, merge_result.id_mapping)
@@ -375,19 +414,27 @@ def ingest_document_graph(
     result.embeddings_dim = embeddings_dim
 
     logger.info(
-        "Document Graph ingest: {} processed ({} skipped), {} failed, {} section(s), {} chunk(s), {} rel(s)",
+        "Document Graph ingest: {} processed ({} skipped), {} failed, {} section(s), {} chunk(s), {} image(s), {} rel(s)",
         result.documents_processed,
         result.documents_skipped,
         result.documents_failed,
         result.sections_created,
         result.chunks_created,
+        result.images_created,
         result.relationships_created,
     )
     return result
 
 
 def _delete_document_sections(backend: KgBackend, markdown_hash: str) -> None:
-    """Delete existing sections (and their chunks) for a document (used on force)."""
+    """Delete existing sections (and their chunks/images) for a document (used on force)."""
+    try:
+        backend.execute(
+            f"MATCH (s:{_SECTION_TYPE} {{markdown_hash: $h}})-[:{HAS_IMAGE.name}]->(i:{_IMAGE_TYPE}) DETACH DELETE i",
+            {"h": markdown_hash},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not clear stale {} for {}: {}", _IMAGE_TYPE, markdown_hash, exc)
     try:
         backend.execute(f"MATCH (c:{_CHUNK_TYPE} {{markdown_hash: $h}}) DETACH DELETE c", {"h": markdown_hash})
     except Exception as exc:  # noqa: BLE001
@@ -399,9 +446,9 @@ def _delete_document_sections(backend: KgBackend, markdown_hash: str) -> None:
 
 
 def drop_document_graph(backend: KgBackend, *, drop_documents: bool = False) -> None:
-    """Drop the Document Graph structure tables (sections + their relationships).
+    """Drop the Document Graph structure tables (sections, chunks, images + relationships).
 
-    By default only drops the Section table and its relationships, leaving
+    By default only drops the Section/Chunk/Image tables and their relationships, leaving
     Folder/Document metadata intact (since they may be shared with other
     factories). This means `list_documents()` will still return entries. Pass
     `drop_documents=True` for a full reset.
@@ -411,12 +458,14 @@ def drop_document_graph(backend: KgBackend, *, drop_documents: bool = False) -> 
         drop_documents: Also drop Folder/Document tables. Leave `False` when those
             are shared with other factories; set `True` for a complete reset.
     """
-    for rel in (HAS_CHUNK.name, HAS_SUBSECTION.name, HAS_SECTION.name):
+    for rel in (HAS_IMAGE.name, HAS_CHUNK.name, HAS_SUBSECTION.name, HAS_SECTION.name):
         backend.drop_table(rel)
+    backend.drop_table(_IMAGE_TYPE)
     backend.drop_table(_SECTION_TYPE)
     backend.drop_table(_CHUNK_TYPE)
     if drop_documents:
         backend.drop_table(CONTAINS_DOC.name)
+        backend.drop_table(_DOCUMENT_TYPE)
         backend.drop_table(_DOCUMENT_TYPE)
         backend.drop_table(HAS_SUBFOLDER.name)
         backend.drop_table(_FOLDER_TYPE)

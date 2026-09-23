@@ -2,33 +2,28 @@
 
 from __future__ import annotations
 
+import base64
 import re
 from pathlib import Path
 
 from loguru import logger
-from pydantic import BaseModel, Field
 
-from genai_graph.kg.nodes.document_section import MarkdownSection
-
-
-class Image(BaseModel):
-    """An image extracted from a document's Markdown rendering."""
-
-    image_id: str = Field(..., description="Primary key: f'{section_id}::{image_hash}'")
-    section_id: str = Field(..., description="section_id of the owning MarkdownSection (foreign key)")
-    markdown_hash: str = Field(..., description="markdown_hash of the owning Document")
-    image_hash: str = Field(..., description="xxhash32 hex hash of image content")
-    name: str = Field(..., description="Image name / hash code")
-    filename: str = Field(..., description="Image filename on disk (e.g. {hash}.png)")
-    path: str = Field(..., description="Path to image file (relative to project or absolute)")
-    description: str | None = Field(default=None, description="Extracted caption or description of image")
-    size: int | None = Field(default=None, description="Image file size in bytes")
-
+from genai_graph.kg.nodes.document_section import Image, MarkdownSection
 
 # Matches: <!-- Image: filename.png (hash: 1234abcd) -->
 # optionally followed by markdown image: ![alt](url "title")
 _MISTRAL_IMG_COMMENT_PATTERN = re.compile(
     r"<!--\s*Image:\s*(?P<filename>[^\s\(\)]+)\s*\(hash:\s*(?P<hash>[a-fA-F0-9]+)\)\s*-->",
+    re.IGNORECASE,
+)
+
+_MISTRAL_IMG_DESC_PATTERN = re.compile(
+    r"<!--\s*Image\s+Description:\s*(?P<desc>.*?)\s*-->",
+    re.IGNORECASE,
+)
+
+_MISTRAL_IMG_KW_PATTERN = re.compile(
+    r"<!--\s*Image\s+Keywords:\s*(?P<keywords>.*?)\s*-->",
     re.IGNORECASE,
 )
 
@@ -156,12 +151,24 @@ def extract_section_images(
         if not caption and not _is_generic_alt(alt_text, fn, h):
             caption = _clean_caption_text(alt_text)
 
+        desc: str | None = None
+        keywords: list[str] = []
+        desc_match = _MISTRAL_IMG_DESC_PATTERN.search(after_comm)
+        if desc_match and desc_match.start() < 300:
+            desc = desc_match.group("desc").strip()
+        kw_match = _MISTRAL_IMG_KW_PATTERN.search(after_comm)
+        if kw_match and kw_match.start() < 300:
+            kw_str = kw_match.group("keywords").strip()
+            keywords = [k.strip() for k in kw_str.split(",") if k.strip()]
+
         img_obj = _build_image_node(
             section=section,
             image_hash=h,
             filename=fn or Path(url).name,
             url=url,
             caption=caption,
+            description=desc,
+            keywords=keywords,
             markdown_file_path=markdown_file_path,
         )
         if img_obj.image_hash not in seen_hashes:
@@ -207,11 +214,14 @@ def _build_image_node(
     filename: str,
     url: str,
     caption: str | None,
-    markdown_file_path: Path | None,
+    description: str | None = None,
+    keywords: list[str] | None = None,
+    markdown_file_path: Path | None = None,
 ) -> Image:
-    """Resolve file path, compute size, and instantiate an Image node."""
+    """Resolve file path, read base64 binary, and instantiate an Image node."""
     resolved_path: Path | None = None
-    file_size: int | None = None
+    file_size: int = 0
+    base64_data: str | None = None
 
     url_path = Path(url)
     if url_path.is_absolute() and url_path.exists():
@@ -221,10 +231,12 @@ def _build_image_node(
         candidate1 = markdown_file_path.parent / url_path
         # Check relative to markdown file parent / images
         candidate2 = markdown_file_path.parent / "images" / filename
+        # Check relative to markdown file parent / images / hash.png
+        candidate3 = markdown_file_path.parent / "images" / f"{image_hash}.png"
         # Check relative to CWD / data
-        candidate3 = Path.cwd() / url_path
+        candidate4 = Path.cwd() / url_path
 
-        for cand in (candidate1, candidate2, candidate3):
+        for cand in (candidate1, candidate2, candidate3, candidate4):
             if cand.exists():
                 resolved_path = cand
                 break
@@ -236,16 +248,19 @@ def _build_image_node(
             resolved_path = cand
 
     stored_path = url
-    if resolved_path is not None:
+    if resolved_path is not None and resolved_path.is_file():
         try:
-            file_size = resolved_path.stat().st_size
-            # Make relative to CWD if possible
+            raw_bytes = resolved_path.read_bytes()
+            file_size = len(raw_bytes)
+            base64_data = base64.b64encode(raw_bytes).decode("ascii")
             try:
                 stored_path = str(resolved_path.relative_to(Path.cwd()))
             except ValueError:
                 stored_path = str(resolved_path)
         except Exception as exc:  # noqa: BLE001
-            logger.debug("Could not stat image {}: {}", resolved_path, exc)
+            logger.debug("Could not read image binary {}: {}", resolved_path, exc)
+
+    fmt = Path(filename).suffix.lstrip(".").lower() or "png"
 
     return Image(
         image_id=f"{section.section_id}::{image_hash}",
@@ -255,6 +270,11 @@ def _build_image_node(
         name=image_hash,
         filename=filename,
         path=stored_path,
-        description=caption,
+        format=fmt,
+        caption=caption,
+        description=description or caption,
+        keywords=keywords or [],
+        base64_data=base64_data,
+        file_size_bytes=file_size,
         size=file_size,
     )

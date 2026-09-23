@@ -29,6 +29,7 @@ from genai_tk.extra.nlp import detect_language
 from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr
 
+from genai_graph.kg.document_graph.images import extract_section_images
 from genai_graph.kg.document_graph.outline_extract import (
     OutlineConfig,
     OutlineResult,
@@ -49,8 +50,11 @@ from genai_graph.kg.nodes.document import (
 )
 from genai_graph.kg.nodes.document_section import (
     HAS_CHUNK,
+    HAS_IMAGE,
     HAS_SECTION,
     HAS_SUBSECTION,
+    Image,
+    ImageNode,
     MarkdownSection,
     SectionChunkNode,
     SectionNode,
@@ -59,11 +63,12 @@ from genai_graph.kg.schema.core import GraphSchema
 
 
 class DocumentGraphBundle(BaseModel):
-    """A fully parsed Markdown document: its folder ancestor chain, document, and sections."""
+    """A fully parsed Markdown document: its folder ancestor chain, document, sections, and images."""
 
     folders: list[Folder] = Field(..., description="Ancestor Folder chain, root-first, immediate-parent-last")
     document: Document
     sections: list[MarkdownSection] = Field(default_factory=list)
+    images: list[Image] = Field(default_factory=list)
 
 
 class DocumentGraphFactory(KgFactory):
@@ -103,8 +108,8 @@ class DocumentGraphFactory(KgFactory):
     def build_schema(self) -> GraphSchema:
         return GraphSchema(
             root_model_class=None,
-            nodes=[FolderNode, DocumentNode, SectionNode, SectionChunkNode],
-            relations=[CONTAINS_DOC, HAS_SUBFOLDER, HAS_SECTION, HAS_SUBSECTION, HAS_CHUNK],
+            nodes=[FolderNode, DocumentNode, SectionNode, SectionChunkNode, ImageNode],
+            relations=[CONTAINS_DOC, HAS_SUBFOLDER, HAS_SECTION, HAS_SUBSECTION, HAS_CHUNK, HAS_IMAGE],
         )
 
     def get_keys(self) -> list[str]:
@@ -288,6 +293,11 @@ class DocumentGraphFactory(KgFactory):
             for idx, fs in enumerate(flat_sections)
         ]
 
+        images: list[Image] = []
+        for sec in sections:
+            sec_imgs = extract_section_images(sec, markdown_file_path=path)
+            images.extend(sec_imgs)
+
         chain = tree.chain_for(path)
         doc_language = detect_language(text) or "en"
 
@@ -312,4 +322,5 @@ class DocumentGraphFactory(KgFactory):
             folders=[tree.folders[fid] for fid in chain],
             document=document,
             sections=sections,
+            images=images,
         )

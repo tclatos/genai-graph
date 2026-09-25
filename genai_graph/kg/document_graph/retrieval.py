@@ -24,6 +24,7 @@ from genai_tk.extra.nlp import (
     get_dominant_language,
     get_ladybug_stemmer,
     get_stopwords_union,
+    stem_stopwords,
 )
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -181,7 +182,9 @@ def ensure_section_fts_index(
 
     dominant_lang = get_dominant_language(lang_list, default="en")
     effective_stemmer = stemmer or get_ladybug_stemmer(dominant_lang, default="english")
-    stopwords_set = get_stopwords_union(lang_list)
+    # Ladybug stems indexed tokens before matching them against the stop-word
+    # list, so the stop words must be provided in their stemmed form (FTS docs).
+    stopwords_set = stem_stopwords(get_stopwords_union(lang_list), effective_stemmer)
 
     has_stopwords = _ensure_stopwords_table(backend, stopwords_set, _STOPWORDS_TABLE)
 

@@ -76,14 +76,19 @@ class TestDocumentLanguageAndFts:
         total_stopwords = int(df_stops["total"].iloc[0])
         assert total_stopwords > 100
 
-        # Check specific English and French stop words in DB
+        # Check specific English and French stop words in DB. Stop words are
+        # stored stemmed ('dans'→'dan') so they match the tokens Ladybug
+        # produces after index-time Snowball stemming (FTS docs).
         df_sample = graph_backend.execute_get_as_df(
-            "MATCH (s:_FtsStopWords) WHERE s.word IN ['the', 'and', 'le', 'la', 'dans', 'des'] RETURN s.word AS word",
+            "MATCH (s:_FtsStopWords) WHERE s.word IN ['the', 'and', 'le', 'la', 'dans', 'des', 'dan'] "
+            "RETURN s.word AS word",
             union=False,
         )
         sample_words = set(df_sample["word"])
         assert "the" in sample_words
         assert "le" in sample_words or "la" in sample_words or "dans" in sample_words
+        assert "dan" in sample_words
+        assert "dans" not in sample_words
 
         # 3. Test FTS / BM25 search over sections
         fr_hits = search_sections(graph_backend, query="bénéfices comptables", mode="bm25")

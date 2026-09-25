@@ -20,6 +20,8 @@ profile: ${oc.env:BLUEPRINT_CONFIG,ekg_local}
         fake: parrot_local@fake
         fast: llama31_8@groq
         coder: qwen25_coder32@openrouter
+        # Vision model for image analysis (query_image tool, image descriptions)
+        default_vlm: gemini-2.5-flash@openrouter
       cache: sqlite
       cache_path: ${paths.data_root}/llm_cache/langchain.db
     embeddings:

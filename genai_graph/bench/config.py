@@ -53,7 +53,9 @@ class DocGraphLlmsConfig(BaseModel):
     """LLM configurations for Document Graph construction."""
 
     summary: str = "deepseek-v4-flash-0731(none)@openrouter"
-    image: str | None = None  # VLM model ID for image queries / descriptions
+    # VLM model id used at build time to describe uncaptioned images. Query-time
+    # image analysis defaults to the 'default_vlm' config tag instead.
+    image: str | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 

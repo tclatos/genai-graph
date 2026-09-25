@@ -28,8 +28,15 @@ from genai_graph.kg.document_graph.build import warm_outline_cache as _warm_outl
 MD_FILENAME_SUFFIX = "_pdf.md"
 
 
-def _convert_pdf(pdf_path: Path, markdownize_profile: str = "medium") -> str:
-    """Return the Markdown text for *pdf_path* via the configured markdownize profile."""
+def _convert_pdf(pdf_path: Path, markdownize_profile: str = "medium", vlm_model: str | None = None) -> str:
+    """Return the Markdown text for *pdf_path* via the configured markdownize profile.
+
+    Args:
+        pdf_path: PDF file to convert.
+        markdownize_profile: Name of the markdownize profile selecting the converter.
+        vlm_model: VLM model id used to describe uncaptioned images; None keeps
+            the converter default (the 'default_vlm' config tag).
+    """
     import asyncio
     import inspect
 
@@ -77,7 +84,8 @@ def _convert_pdf(pdf_path: Path, markdownize_profile: str = "medium") -> str:
                 attempt,
                 max_retries,
             )
-            conv = ConverterFactory.create(converter_name)
+            converter_kwargs = {"vlm_model": vlm_model} if vlm_model else {}
+            conv = ConverterFactory.create(converter_name, **converter_kwargs)
             content = _sync_convert(conv, pdf_path)
             if content and content.strip():
                 return content
@@ -133,8 +141,20 @@ def markdownize_target(
     saved_markdown_dir: Path | None = None,
     onedrive_markdown_dir: Path | None = None,
     markdownize_profile: str = "medium",
+    vlm_model: str | None = None,
 ) -> Path:
-    """Ensure document PDF is converted to Markdown and saved in saved_markdown_dir."""
+    """Ensure document PDF is converted to Markdown and saved in saved_markdown_dir.
+
+    Args:
+        doc_name: Benchmark document name.
+        force: Reconvert even when the output Markdown already exists.
+        pdfs_dir: Directory holding source PDFs.
+        saved_markdown_dir: Persistent backup/mirror directory for the Markdown.
+        onedrive_markdown_dir: Fallback saved directory when saved_markdown_dir is None.
+        markdownize_profile: Name of the markdownize profile selecting the converter.
+        vlm_model: VLM model id used to describe uncaptioned images; None keeps
+            the converter default (the 'default_vlm' config tag).
+    """
     target_saved_dir = saved_markdown_dir or onedrive_markdown_dir or (Path.cwd() / "data" / "saved_markdown")
     target_saved_dir.mkdir(parents=True, exist_ok=True)
     out_md = target_saved_dir / f"{doc_name}{MD_FILENAME_SUFFIX}"
@@ -146,7 +166,7 @@ def markdownize_target(
     pdf_root = pdfs_dir or (Path.cwd() / "data" / "pdfs")
     pdf_path = find_pdf_path(doc_name, pdf_root)
 
-    content = _convert_pdf(pdf_path, markdownize_profile=markdownize_profile)
+    content = _convert_pdf(pdf_path, markdownize_profile=markdownize_profile, vlm_model=vlm_model)
     out_md.write_text(content, encoding="utf-8")
     logger.success("Wrote Markdown ({} bytes) -> {}", len(content), out_md)
     return out_md
@@ -160,6 +180,7 @@ def markdownize_targets_batch(
     saved_markdown_dir: Path | None = None,
     onedrive_markdown_dir: Path | None = None,
     markdownize_profile: str = "medium",
+    vlm_model: str | None = None,
 ) -> list[Path]:
     """Batch convert documents to Markdown using the converter's batch API when available.
 
@@ -226,7 +247,8 @@ def markdownize_targets_batch(
     # If multiple files and converter has batch_convert, run batch conversion
     if len(to_convert) > 1:
         try:
-            conv = ConverterFactory.create(converter_name)
+            converter_kwargs = {"vlm_model": vlm_model} if vlm_model else {}
+            conv = ConverterFactory.create(converter_name, **converter_kwargs)
             pdf_paths = [pdf_p for _, pdf_p, _ in to_convert]
             logger.info("Batch converting {} document(s) with '{}' (Batch API)", len(pdf_paths), converter_name)
             batch_results = _sync_batch_convert(conv, pdf_paths)
@@ -253,6 +275,7 @@ def markdownize_targets_batch(
                     pdfs_dir=pdf_root,
                     saved_markdown_dir=target_saved_dir,
                     markdownize_profile=markdownize_profile,
+                    vlm_model=vlm_model,
                 )
                 result_paths[doc_name] = out_md
             except Exception as exc:

@@ -54,6 +54,7 @@ def markdownize_doc_task(
     markdownize_profile: str,
     markdown_dir: str,
     skip_ocr: bool,
+    vlm_model: str | None = None,
 ) -> str:
     """Convert/OCR a document to Markdown and stage it in the project markdown directory."""
     from genai_graph.bench.build_graph import (
@@ -77,6 +78,7 @@ def markdownize_doc_task(
             pdfs_dir=Path(pdfs_dir),
             saved_markdown_dir=saved_p,
             markdownize_profile=markdownize_profile,
+            vlm_model=vlm_model,
         )
 
     dest = copy_markdown_to_project(source_md, markdown_dir=md_p)
@@ -93,6 +95,7 @@ def batch_markdownize_task(
     markdownize_profile: str,
     markdown_dir: str,
     skip_ocr: bool,
+    vlm_model: str | None = None,
 ) -> list[str]:
     """Convert/OCR benchmark documents in batch (using Batch OCR API when available) and stage in markdown_dir."""
     from genai_graph.bench.build_graph import (
@@ -121,6 +124,7 @@ def batch_markdownize_task(
         pdfs_dir=Path(pdfs_dir),
         saved_markdown_dir=saved_p,
         markdownize_profile=markdownize_profile,
+        vlm_model=vlm_model,
     )
     results = []
     for md_file in saved_md_files:
@@ -310,6 +314,7 @@ def markdownize_flow(cfg: BenchConfig) -> list[str]:
         markdownize_profile=cfg.docgraph.markdownize_profile,
         markdown_dir=cfg.docgraph.paths.markdown_dir,
         skip_ocr=cfg.docgraph.build.skip_ocr,
+        vlm_model=cfg.docgraph.llms.image,
     )
 
 

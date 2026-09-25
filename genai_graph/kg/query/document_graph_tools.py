@@ -1520,14 +1520,16 @@ def execute_image_query(
         ),
     ]
 
-    vlm_model_id = model or "gemini-2.5-flash@openrouter"
+    # 'default_vlm' is a config tag (llm.models in app config); pass an explicit
+    # model id to override it.
+    vlm_model_id = model or "default_vlm"
     try:
         llm = get_llm(vlm_model_id)
         resp = llm.invoke(messages)
         return str(resp.content)
     except Exception as exc:
         logger.warning("Failed invoking VLM with '{}': {}", vlm_model_id, exc)
-        for fallback in ("glm_5.3_flash@openrouter", "default"):
+        for fallback in ("default_vlm", "default"):
             if vlm_model_id == fallback:
                 continue
             try:
@@ -1772,7 +1774,7 @@ def create_document_graph_tools(
         Args:
             image: Image filename (e.g. '7a8b9c0d.png'), image hash code, or image file path.
             question: Specific, precise visual question to answer.
-            model: Optional VLM model ID (defaults to 'gemini-2.5-flash@openrouter').
+            model: Optional VLM model ID (defaults to the 'default_vlm' config tag).
 
         Returns:
             The VLM's detailed analysis, or a clear statement if the question cannot be answered from the image.

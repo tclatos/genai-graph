@@ -1,4 +1,13 @@
+# HTML tables
+ 
+
+
+
 # Use BAML
+
+We saw when running some error on handlig bad LLM formated JSO?
+We have already BAML in gnai-graph, that as a bettter parser. 
+TRy to use in in place of langchain "with_structured_output"
 /home/tcl/prj/genai-graph/genai_graph/bench/models.py
 
 
@@ -15,30 +24,11 @@ https://arxiv.org/abs/2607.11192
 
 
 
-# Stemmer
- genai_tk/extra/nlp/stopwords.py : useless for english
-/home/tcl/prj/genai-tk/genai_tk/extra/nlp/language.py : limit to the one supported by Ladybub
+# Refactor
 
-
-Refactor
-Move vlm_model -> markdownize_profiles
 
 /home/tcl/prj/genai-graph/genai_graph/agent/middleware/wrap_up.py => tcl-tk
 
-
-# LightRAG
-We have a well working docgraph construction process, efficient (SOA on benchmarks).
-On the other side, we have graph fabrics to extract entitoes and relationship from docs through a BAML schema. That's  fine.
-
-But my feeling is that we could without too much effort extract entities and relationship using technique inspired by LightRag (https://github.com/hkuds/lightrag) : we have very good text chunking capabilities, LLM to summerize documents or sections (they could also extract entities..), hybrid search, etc
-
-https://github.com/NanoNets/nanoindex/ also extract entities fro a table of content strucrire similar to ours, but they use GLiner.  That's look unneccessary if we aleady pass  docs to LLM.
-
-Mu idea is that we could have a new graph factory to create these entities / relationsih using a light-rag inspired approach without too much complexity.
- 
-Investigate this idea, and write a report in genai-graph/design.  You can be critical
-
-Think about that, ask questions, suggest/evaluare alternatives, propose a plan.
 
 
 
@@ -63,20 +53,6 @@ Put generic code in /home/tcl/prj/genai-tk/genai_tk/extra/nlp
 
 # refactor genai_tk/utils
 - move trace, monitoring and trajectories files in a genai_tk/extra/monitoring
-
-
-
-# Middleware
-Consider ToolCallLimitMiddleware  
-
-
-# Marjdownization
-- Analyse embedded diagrams
-
-# Multi-write
-Analyse how KG building van be speed uo wuth new 
- (kg/backend.py): KuzuBackend.connect(..., enable_multi_writes=) forwards to ladybug.Database; new KuzuBackend.attach(db) reuses an already-open Database with a fresh Connection (no vector extension) — the shape Ladybug requires for shared-DB workers.
-and async call
 
 
 

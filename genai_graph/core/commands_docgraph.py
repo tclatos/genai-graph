@@ -1083,17 +1083,18 @@ class DocGraphCommands(CliTopCommand):
             """
             import asyncio
 
-            from genai_tk.agents.harness.profiles import load_langchain_profiles
+            from genai_tk.agents.harness.profiles import load_agent_profiles
 
             from genai_graph.agent import create_docgraph_agent, run_docgraph_agent
             from genai_graph.kg.query.document_graph_tools import DocumentGraphError
 
-            profiles = load_langchain_profiles()
+            profiles, _defaults, _default_key = load_agent_profiles()
             if profile not in profiles:
                 console.print(f"[red]Agent profile {profile!r} not found. Available: {sorted(profiles)}[/red]")
                 raise typer.Exit(1)
             agent_profile = profiles[profile]
-            agent_profile.recursion_limit = recursion_limit
+            if hasattr(agent_profile, "recursion_limit"):
+                agent_profile.recursion_limit = recursion_limit
             llm_id = llm if llm != "default" else None
             resolved_db_path = _resolve_db_path(db_path, profile=docgraph_profile)
 

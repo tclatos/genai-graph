@@ -367,11 +367,11 @@ def list_bench_profiles(
 def _resolve_agent_llm(agent_profile_name: str, project_root: Path) -> str:
     """Resolve the agent LLM model identifier directly from config/agents.yaml."""
     try:
-        from genai_tk.agents.harness.profiles import load_langchain_profiles
+        from genai_tk.agents.harness.profiles import load_agent_profiles
 
-        profiles = load_langchain_profiles(str(project_root / "config" / "agents.yaml"))
+        profiles, _defaults, _default_key = load_agent_profiles(str(project_root / "config" / "agents.yaml"))
         if agent_profile_name in profiles:
-            return profiles[agent_profile_name].llm
+            return getattr(profiles[agent_profile_name], "llm", "default") or "default"
     except Exception as exc:
         logger.debug("Could not resolve agent LLM for '{}': {}", agent_profile_name, exc)
     return "default"

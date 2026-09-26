@@ -223,14 +223,14 @@ def run_question_task(
     concurrency: int = 10,
 ) -> BenchRunRecord:
     """Run a question through the docgraph agent harness with concurrency gating."""
-    from genai_tk.agents.harness.profiles import load_langchain_profiles
+    from genai_tk.agents.harness.profiles import load_agent_profiles
 
     from genai_graph.agent import create_docgraph_agent
 
     sem = _get_semaphore(_QUESTION_SEMAPHORES, concurrency)
 
     async def _execute() -> BenchRunRecord:
-        profiles = load_langchain_profiles()
+        profiles, _defaults, _default_key = load_agent_profiles()
         if profile_name not in profiles:
             raise KeyError(f"Agent profile '{profile_name}' not found. Available: {sorted(profiles)}")
         profile = profiles[profile_name]

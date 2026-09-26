@@ -300,15 +300,16 @@ def prepare_docgraph_profile(
 
     resolved_skills = _resolve_skill_dirs(deduped)
     if resolved_skills:
-        from genai_tk.agents.langchain.config import BackendConfig
-
         workspace, staged_skills = _stage_skills_workspace(resolved_skills)
         profile.skill_directories = staged_skills
-        profile.backend = BackendConfig(type="filesystem", root_dir=workspace)
+        if hasattr(profile, "backend"):
+            from genai_tk.agents.langchain.config import BackendConfig
+
+            profile.backend = BackendConfig(type="filesystem", root_dir=workspace)
         logger.info(
-            "Document-graph agent skills staged in {} (backend root: {})",
+            "Document-graph agent skills staged in {} (workspace: {})",
             staged_skills,
-            profile.backend.root_dir,
+            workspace,
         )
     else:
         logger.warning("No skill directories resolved for document-graph agent; running without skills.")
@@ -326,15 +327,15 @@ def create_docgraph_agent(
     extra_skill_dirs: list[str] | None = None,
     embeddings_id: str | None = None,
 ) -> Any:
-    """Prepare *profile* and return a ready-to-stream :class:`LangChainHarness`.
+    """Prepare *profile* and return a ready-to-stream :class:`LangChainHarness` or :class:`DeerFlowHarness`.
 
-    The harness lazily compiles the deep agent on first use. The navigation tools
+    The harness lazily compiles the agent on first use. The navigation tools
     are injected as ``extra_tools`` so they reflect the resolved ``db_path`` and
     ``folder_id`` without touching the profile YAML.
 
     Args:
-        profile: A resolved ``AgentProfileConfig`` (``type: deep``), typically from
-            :func:`genai_tk.agents.harness.profiles.load_langchain_profiles`.
+        profile: A resolved ``AgentProfileConfig`` (``type: deep``) or ``DeerFlowProfile``,
+            typically from :func:`genai_tk.agents.harness.profiles.load_agent_profiles`.
         llm: LLM identifier override (e.g. ``"deepseek_v4flash"``).
         db_path: Ladybug database path; resolved from ``docgraph_profiles.<docgraph_profile>.paths.kg_db`` when None.
         docgraph_profile: DocGraph profile name for database resolution (default: 'default').
@@ -345,10 +346,8 @@ def create_docgraph_agent(
             ``search_sections`` mode; None keeps keyword search only.
 
     Returns:
-        A :class:`genai_tk.agents.harness.langchain_harness.LangChainHarness`.
+        A :class:`genai_tk.agents.harness.base.BaseHarness` instance (:class:`LangChainHarness` or :class:`DeerFlowHarness`).
     """
-    from genai_tk.agents.harness.langchain_harness import LangChainHarness
-
     prepare_docgraph_profile(
         profile,
         db_path=db_path,
@@ -357,6 +356,17 @@ def create_docgraph_agent(
         extra_skill_dirs=extra_skill_dirs,
     )
     tools = create_document_graph_tools_from_config(db_path, profile=docgraph_profile, embeddings_id=embeddings_id)
+    if getattr(profile, "harness", "langchain") == "deerflow":
+        from genai_tk.agents.harness.deerflow_harness import DeerFlowHarness
+
+        return DeerFlowHarness(
+            profile,
+            llm_override=llm,
+            extra_tools=tools,
+        )
+
+    from genai_tk.agents.harness.langchain_harness import LangChainHarness
+
     return LangChainHarness(
         profile,
         llm_override=llm,

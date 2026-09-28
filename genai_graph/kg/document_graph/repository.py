@@ -141,12 +141,18 @@ class FolderTree:
         self.folders: dict[str, Folder] = {}
         self._chain_by_file: dict[str, list[str]] = {}
 
-    def build(self, files: list[ResolvedFile], content_hashes: dict[str, str]) -> None:
+    def build(
+        self,
+        files: list[ResolvedFile],
+        content_hashes: dict[str, str],
+        acl_provider: Any = None,
+    ) -> None:
         """Compute all Folder nodes for *files* bottom-up.
 
         Args:
             files: Files already matched by include/exclude under this source.
             content_hashes: Map of `str(abs_path)` -> content hash (precomputed by the caller).
+            acl_provider: Optional BaseAccessControlProvider to populate folder allowed_principals.
         """
         from genai_tk.utils.hashing import buffer_digest
 
@@ -171,12 +177,24 @@ class FolderTree:
             folder_id = f"folder_{buffer_digest(canonical.encode('utf-8'))}"
 
             is_root = not dir_parts
+            folder_uri = self.source.uri if is_root else "/".join(dir_parts)
+            folder_dir = self.source.base_path if is_root else (self.source.base_path / Path(*dir_parts))
+
+            allowed_principals = ["public"]
+            if acl_provider is not None:
+                try:
+                    res = acl_provider.get_folder_acl_sync(folder_path=folder_dir, uri=folder_uri)
+                    allowed_principals = list(res.allowed_principals)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Failed getting ACL for folder {}: {}", folder_uri, exc)
+
             folder = Folder(
                 folder_id=folder_id,
                 parent_folder_id=None,
-                uri=self.source.uri if is_root else "/".join(dir_parts),
+                uri=folder_uri,
                 kind=self.source.kind if is_root else "directory",
                 name=self.source.name if is_root else dir_parts[-1],
+                allowed_principals=allowed_principals,
             )
             self.folders[folder_id] = folder
             for cid in child_ids.values():

@@ -24,11 +24,14 @@ from __future__ import annotations
 import mimetypes
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from genai_tk.extra.nlp import detect_language
 from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr
 
+from genai_graph.kg.access.base import BaseAccessControlProvider
+from genai_graph.kg.access.factory import create_access_control_provider
 from genai_graph.kg.document_graph.images import extract_section_images
 from genai_graph.kg.document_graph.outline_extract import (
     OutlineConfig,
@@ -62,6 +65,27 @@ from genai_graph.kg.nodes.document_section import (
 from genai_graph.kg.schema.core import GraphSchema
 
 
+def _compute_effective_principals(
+    doc_principals: list[str],
+    folder_principals: list[str],
+    mode: str = "intersection",
+) -> list[str]:
+    """Compute effective allowed principals given document and parent folder ACLs."""
+    if mode in ("override", "none"):
+        return list(doc_principals)
+    if mode == "union":
+        return sorted(set(doc_principals) | set(folder_principals))
+    # intersection mode
+    if set(folder_principals) == {"public"}:
+        return list(doc_principals)
+    if set(doc_principals) == {"public"}:
+        return list(folder_principals)
+    inter = set(doc_principals) & set(folder_principals)
+    if inter:
+        return sorted(inter)
+    return sorted(set(doc_principals))
+
+
 class DocumentGraphBundle(BaseModel):
     """A fully parsed Markdown document: its folder ancestor chain, document, sections, and images."""
 
@@ -80,6 +104,7 @@ class DocumentGraphFactory(KgFactory):
     """
 
     TOP_CLASS: type[BaseModel] | None = None
+    model_config = {"arbitrary_types_allowed": True}
 
     sources: list[str] = Field(..., description="Directories, files, or .zip archives to ingest")
     include: list[str] = Field(default_factory=lambda: ["*.md"], description="Glob patterns to include")
@@ -91,15 +116,40 @@ class DocumentGraphFactory(KgFactory):
         description="When set, build each document's sections from an LLM outline (structure + summaries) "
         "instead of the algorithmic heading parser; None keeps the fast algo path",
     )
+    # Access control configuration
+    access_control_provider: BaseAccessControlProvider | None = Field(
+        default=None, description="Optional pre-instantiated access control provider"
+    )
+    access_control_provider_spec: str | None = Field(
+        default=None, description="Qualified Python class name or alias for ACL provider (e.g. 'yaml', 'default')"
+    )
+    access_control_options: dict[str, Any] = Field(
+        default_factory=dict, description="Options passed to the access control provider"
+    )
+    inheritance_mode: str = Field(
+        default="intersection", description="ACL inheritance strategy: intersection | override | union"
+    )
 
     # Per-instance caches
     _files_cache: list[Path] | None = None
     _folder_tree_by_file: dict[str, FolderTree] | None = None
     _content_hash_by_file: dict[str, str] | None = None
+    _acl_provider_cache: BaseAccessControlProvider | None = PrivateAttr(default=None)
     # Soft warnings from on-the-fly outline extraction in `_build_bundle` (cache misses
     # after, or without, the parallel pre-pass). The flow's pre-pass surfaces its own
     # warnings via `OutlineStats`; this list only fills in for the no-pre-pass edge case.
     _outline_warnings: list[str] = PrivateAttr(default_factory=list)
+
+    def _get_acl_provider(self) -> BaseAccessControlProvider:
+        if self._acl_provider_cache is not None:
+            return self._acl_provider_cache
+        if self.access_control_provider is not None:
+            self._acl_provider_cache = self.access_control_provider
+            return self._acl_provider_cache
+        self._acl_provider_cache = create_access_control_provider(
+            self.access_control_provider_spec, self.access_control_options
+        )
+        return self._acl_provider_cache
 
     # ------------------------------------------------------------------
     # KgFactory protocol
@@ -173,7 +223,7 @@ class DocumentGraphFactory(KgFactory):
 
             content_hashes = {str(rf.abs_path): file_digest(rf.abs_path) for rf in new_files}
             tree = FolderTree(folder)
-            tree.build(new_files, content_hashes)
+            tree.build(new_files, content_hashes, acl_provider=self._get_acl_provider())
 
             for rf in new_files:
                 key = str(rf.abs_path)
@@ -300,13 +350,29 @@ class DocumentGraphFactory(KgFactory):
 
         chain = tree.chain_for(path)
         doc_language = detect_language(text) or "en"
+        rel_path = tree.source.relative_path_of(path)
+
+        # Access control resolution
+        acl_provider = self._get_acl_provider()
+        doc_acl = acl_provider.get_document_acl_sync(file_path=path, relative_path=rel_path, folder_chain=chain)
+        leaf_folder = tree.folders.get(chain[-1]) if chain else None
+        folder_principals = (
+            leaf_folder.allowed_principals if (leaf_folder and leaf_folder.allowed_principals) else ["public"]
+        )
+
+        effective_inheritance = doc_acl.inheritance if doc_acl.inheritance != "inherit" else self.inheritance_mode
+        allowed_principals = _compute_effective_principals(
+            doc_principals=doc_acl.allowed_principals,
+            folder_principals=folder_principals,
+            mode=effective_inheritance,
+        )
 
         document = Document(
             content_hash=content_hash,
             markdown_hash=markdown_hash,
             filename=path.name,
             folder_id=chain[-1],
-            relative_path=tree.source.relative_path_of(path),
+            relative_path=rel_path,
             path=str(path),
             file_size=file_size,
             mime_type=mime_type,
@@ -316,6 +382,7 @@ class DocumentGraphFactory(KgFactory):
             language=doc_language,
             description=document_description,
             summary=document_summary,
+            allowed_principals=allowed_principals,
         )
 
         return DocumentGraphBundle(

@@ -43,6 +43,10 @@ class Folder(BaseModel):
         default="directory", description="Folder backend kind"
     )
     name: str = Field(..., description="Human-friendly folder name")
+    allowed_principals: list[str] = Field(
+        default_factory=lambda: ["public"],
+        description="Security principals permitted to read this folder (e.g., 'group:finance', 'user:alice', 'public')",
+    )
 
 
 class Document(BaseModel):
@@ -70,10 +74,14 @@ class Document(BaseModel):
     language: str | None = Field(default="en", description="ISO 639-1 language code of the document (e.g. 'en', 'fr')")
     description: str | None = Field(default=None, description="One-sentence routing description of the document")
     summary: str | None = Field(default=None, description="LLM-generated document abstract (a short paragraph)")
-    # Access control — basic; can be extended in domain-specific projects
+    # Access control — security trimming
+    allowed_principals: list[str] = Field(
+        default_factory=lambda: ["public"],
+        description="Security principals permitted to read this document (e.g. 'group:03d8e370', 'user:5d8a7ca1', 'public')",
+    )
     access_level: str = Field(default="public", description="Access level: public | restricted | confidential")
-    allowed_roles: list[str] = Field(default_factory=list, description="Roles permitted to access this document")
-    allowed_users: list[str] = Field(default_factory=list, description="Users permitted to access this document")
+    allowed_roles: list[str] = Field(default_factory=list, description="Deprecated: use allowed_principals")
+    allowed_users: list[str] = Field(default_factory=list, description="Deprecated: use allowed_principals")
 
 
 # ---------------------------------------------------------------------------

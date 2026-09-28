@@ -1,5 +1,25 @@
-# HTML tables
+# Access Control 
+We want to add access control to the Doc Graph, taking the security triming approach used by many search engine. 
+Here a draft: 
+Build time : 
+- Add a "allowed_principals" field in every "Document" or 'Folder" node. Could be a list of strings = ["group:03d8e370", "group:9e2f7b44", "user:5d8a7ca1"]"
+- Have in the doc graph configuration the qualified name of a Python class that get access control information from the file path. So far it would be a simple one for test, taking information from a YAML file, but later it will be SharePoint access lists (using  Microsoft Graph SDK  or office365-rest-python-client or equivalent) , or simililar for AWS, CGP etc.  => Should be flexible, async, and efficient.
+
+Run-time : 
+- Propagate  a "user_principal" from the CLI commands or other UI down the the tools accessing the graph. In these tools, check that  the user has read access to the doc or folder
+- Consider using LangGraph's `Runtime[ContextT]` (added v0.6.0) and LangChain's
+`create_agent(context_schema=...)` provide first-class support for typed per-invocation
+context. However, check it can be used with Deerflow harness. 
+-  Update the tool result structure so it can inform the caller that some documments were not read due to authentication.  Possibly modify skill accordingly. 
+
+More generaly : 
+- get inspiration from well established practices used by search engines
+- Be critical and investigate weakness in the design that could lead to security issue
+
+Think (critically), suggest alterntaives, ask question, propose a plan
+
  
+
 
 
 

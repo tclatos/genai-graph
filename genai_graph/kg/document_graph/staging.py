@@ -197,9 +197,13 @@ def stage_document_graph_to_parquet(
     if folder_rows:
         node_counts[_FOLDER_TYPE] = _write_node_table(_FOLDER_TYPE, folder_rows, nodes_dir / f"{_FOLDER_TYPE}.parquet")
     if doc_rows:
-        node_counts[_DOCUMENT_TYPE] = _write_node_table(_DOCUMENT_TYPE, doc_rows, nodes_dir / f"{_DOCUMENT_TYPE}.parquet")
+        node_counts[_DOCUMENT_TYPE] = _write_node_table(
+            _DOCUMENT_TYPE, doc_rows, nodes_dir / f"{_DOCUMENT_TYPE}.parquet"
+        )
     if section_rows:
-        node_counts[_SECTION_TYPE] = _write_node_table(_SECTION_TYPE, section_rows, nodes_dir / f"{_SECTION_TYPE}.parquet")
+        node_counts[_SECTION_TYPE] = _write_node_table(
+            _SECTION_TYPE, section_rows, nodes_dir / f"{_SECTION_TYPE}.parquet"
+        )
     if image_rows:
         node_counts[_IMAGE_TYPE] = _write_node_table(_IMAGE_TYPE, image_rows, nodes_dir / f"{_IMAGE_TYPE}.parquet")
     if chunk_rows:

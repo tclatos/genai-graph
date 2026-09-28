@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from genai_tk.config_mgmt.config_mngr import global_config
@@ -87,6 +87,17 @@ class DocGraphBuildConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
 
+class DocGraphAccessControlConfig(BaseModel):
+    """Access control and security trimming configuration."""
+
+    provider: str = "default"
+    inheritance_mode: Literal["intersection", "override", "union"] = "intersection"
+    trimming_feedback: Literal["zero_knowledge", "aggregate_notice", "placeholder"] = "aggregate_notice"
+    options: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
 class DocGraphProfileConfig(BaseModel):
     """Complete profile definition for Document Graph creation."""
 
@@ -97,6 +108,7 @@ class DocGraphProfileConfig(BaseModel):
     llms: DocGraphLlmsConfig = Field(default_factory=DocGraphLlmsConfig)
     images: DocGraphImagesConfig = Field(default_factory=DocGraphImagesConfig)
     build: DocGraphBuildConfig = Field(default_factory=DocGraphBuildConfig)
+    access_control: DocGraphAccessControlConfig = Field(default_factory=DocGraphAccessControlConfig)
     project_root: Path = Field(default_factory=Path.cwd)
 
     model_config = {"arbitrary_types_allowed": True}
@@ -300,6 +312,7 @@ def load_docgraph_profile(
     llms_raw = p_data.get("llms", {}) or {}
     images_raw = p_data.get("images", {}) or {}
     build_raw = p_data.get("build", {}) or {}
+    acl_raw = p_data.get("access_control", {}) or {}
 
     docgraph_cfg = DocGraphProfileConfig(
         profile_name=active_name,
@@ -331,6 +344,12 @@ def load_docgraph_profile(
             workers=int(build_raw.get("workers", 4)),
             skip_ocr=bool(build_raw.get("skip_ocr", False)),
             force=bool(build_raw.get("force", False)),
+        ),
+        access_control=DocGraphAccessControlConfig(
+            provider=str(acl_raw.get("provider", "default")),
+            inheritance_mode=acl_raw.get("inheritance_mode", "intersection"),
+            trimming_feedback=acl_raw.get("trimming_feedback", "aggregate_notice"),
+            options=dict(acl_raw.get("options", {})),
         ),
         project_root=root,
     )

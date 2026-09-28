@@ -52,7 +52,15 @@ _native_index_queries_disabled = os.getenv("GENAI_GRAPH_DISABLE_NATIVE_INDEX_QUE
 # Columns a caller can reasonably expect on each row type. Rows are normalized
 # so every key is present (``None`` when the column does not exist in the DB),
 # which keeps callers and the TUI/CLI from KeyErroing on an older schema.
-_FOLDER_KEYS: tuple[str, ...] = ("folder_id", "parent_folder_id", "name", "kind", "uri", "doc_count")
+_FOLDER_KEYS: tuple[str, ...] = (
+    "folder_id",
+    "parent_folder_id",
+    "name",
+    "kind",
+    "uri",
+    "doc_count",
+    "allowed_principals",
+)
 _DOC_KEYS: tuple[str, ...] = (
     "content_hash",
     "markdown_hash",
@@ -63,6 +71,7 @@ _DOC_KEYS: tuple[str, ...] = (
     "summary",
     "path",
     "folder_id",
+    "allowed_principals",
 )
 _SECTION_TOC_KEYS: tuple[str, ...] = (
     "section_id",
@@ -89,6 +98,72 @@ class DocumentGraphError(Exception):
     Carries a plain-English message suitable for surfacing to an agent or a CLI
     user (e.g. "no Document table — ingest first with `cli docgraph build`").
     """
+
+
+class AccessDeniedError(DocumentGraphError):
+    """Raised when the active user context is unauthorized to access a document or section."""
+
+
+def _get_authorized_markdown_hashes(backend: KgBackend, user_context: Any = None) -> set[str] | None:
+    """Return the set of markdown_hash values the user is authorized to read, or None if unfiltered."""
+    from genai_graph.kg.access.context import UserContext, get_active_user_context
+
+    ctx: UserContext = user_context if isinstance(user_context, UserContext) else get_active_user_context(user_context)
+    if ctx.is_admin:
+        return None
+    if not _has_table(backend, _DOCUMENT_LABEL):
+        return None
+    cols = _table_columns(backend, _DOCUMENT_LABEL)
+    if "allowed_principals" not in cols:
+        return None
+
+    query = f"MATCH (d:{_DOCUMENT_LABEL}) RETURN d.markdown_hash AS mh, d.allowed_principals AS principals"
+    rows, _ = _query_rows(backend, query)
+    authorized: set[str] = set()
+    for r in rows:
+        mh = r.get("mh")
+        principals = r.get("principals")
+        if mh and ctx.has_access(principals):
+            authorized.add(mh)
+    return authorized
+
+
+def _is_document_authorized(backend: KgBackend, document_id: str, user_context: Any = None) -> bool:
+    """Return True if the active user is authorized to access the document."""
+    from genai_graph.kg.access.context import UserContext, get_active_user_context
+
+    ctx: UserContext = user_context if isinstance(user_context, UserContext) else get_active_user_context(user_context)
+    if ctx.is_admin:
+        return True
+    if not _has_table(backend, _DOCUMENT_LABEL):
+        return True
+    cols = _table_columns(backend, _DOCUMENT_LABEL)
+    if "allowed_principals" not in cols:
+        return True
+
+    clean_id = document_id.strip()
+    id_stem = Path(clean_id).stem
+    query = (
+        f"MATCH (d:{_DOCUMENT_LABEL}) "
+        "WHERE d.content_hash = $id OR d.content_hash STARTS WITH $id OR d.markdown_hash = $id "
+        "OR d.markdown_hash STARTS WITH $id OR d.filename = $id OR d.path = $id "
+        "OR d.filename = $id_md OR d.filename = $id_pdf OR d.filename STARTS WITH $stem "
+        "OR d.path STARTS WITH $stem "
+        "RETURN d.allowed_principals AS principals LIMIT 1"
+    )
+    rows, _ = _query_rows(
+        backend,
+        query,
+        {
+            "id": clean_id,
+            "id_md": f"{id_stem}.md",
+            "id_pdf": f"{id_stem}.pdf",
+            "stem": id_stem,
+        },
+    )
+    if not rows:
+        return True
+    return ctx.has_access(rows[0].get("principals"))
 
 
 def _table_columns(backend: KgBackend, table: str) -> set[str]:
@@ -352,13 +427,19 @@ def get_folder_tree(backend: KgBackend, root_folder_id: str | None = None) -> li
     return sorted(by_folder_id.values(), key=lambda r: r["name"] or "")
 
 
-def list_documents(backend: KgBackend, folder_id: str | None = None) -> list[dict[str, Any]]:
+def list_documents(
+    backend: KgBackend,
+    folder_id: str | None = None,
+    user_context: Any = None,
+) -> list[dict[str, Any]]:
     """List ingested documents with their section count and hashes.
 
     Args:
+        backend: KgBackend connection.
         folder_id: When given, only return documents under this folder's subtree
             (the folder itself or any nested subfolder). On a schema without
             ``HAS_SUBFOLDER``, restricted to the folder's direct documents.
+        user_context: Optional UserContext for security trimming.
 
     Returns:
         List of ``{content_hash, markdown_hash, filename, section_count, token_count,
@@ -387,10 +468,17 @@ def list_documents(backend: KgBackend, folder_id: str | None = None) -> list[dic
         """
         params = {"folder_id": folder_id}
 
+    from genai_graph.kg.access.context import UserContext, get_active_user_context
+
+    ctx: UserContext = user_context if isinstance(user_context, UserContext) else get_active_user_context(user_context)
+
     rows, _ = _query_rows(backend, query, params)
     out: list[dict[str, Any]] = []
     for row in rows:
         row = _normalize_row(row, _DOC_KEYS)
+        if not ctx.is_admin and row.get("allowed_principals") is not None:
+            if not ctx.has_access(row.get("allowed_principals")):
+                continue
         row["section_count"] = int(row.get("section_count") or 0)
         row["token_count"] = int(row.get("token_count") or 0)
         out.append(row)
@@ -496,12 +584,14 @@ def get_document_toc(
             for ir in img_rows:
                 sec_id = ir.get("section_id")
                 if sec_id:
-                    imgs_by_sec.setdefault(sec_id, []).append({
-                        "image_id": ir.get("image_id"),
-                        "filename": ir.get("filename"),
-                        "caption": ir.get("caption"),
-                        "description": ir.get("description"),
-                    })
+                    imgs_by_sec.setdefault(sec_id, []).append(
+                        {
+                            "image_id": ir.get("image_id"),
+                            "filename": ir.get("filename"),
+                            "caption": ir.get("caption"),
+                            "description": ir.get("description"),
+                        }
+                    )
             for r in rows:
                 sid = r.get("section_id")
                 if sid in imgs_by_sec:
@@ -586,13 +676,24 @@ def render_toc_outline(toc_rows: list[dict[str, Any]]) -> str:
 
 
 def document_toc_yaml(
-    backend: KgBackend, document_id: str, *, include_summaries: bool = False, max_level: int | None = None
+    backend: KgBackend,
+    document_id: str,
+    *,
+    include_summaries: bool = False,
+    max_level: int | None = None,
+    user_context: Any = None,
 ) -> str:
     """Return one document's table of contents as a YAML string.
 
     Section `description`s are always included (they are the routing signal), and
     the fuller per-section `summary` can be included by passing `include_summaries=True`.
     """
+    if not _is_document_authorized(backend, document_id, user_context):
+        return yaml.safe_dump(
+            {"error": f"Access Denied: You do not have permission to view document '{document_id}'."},
+            sort_keys=False,
+        )
+
     doc = get_document(backend, document_id)
     toc_rows = get_document_toc(backend, document_id)
     if doc is None or not toc_rows:
@@ -620,6 +721,7 @@ def folder_toc_yaml(
     include_sections: bool = False,
     include_summaries: bool = True,
     max_level: int | None = None,
+    user_context: Any = None,
 ) -> str:
     """Return the documents under a folder's subtree as one YAML string.
 
@@ -628,7 +730,7 @@ def folder_toc_yaml(
     the point (and blows the context window on a large corpus). Call
     `document_toc_yaml` for the chosen document, or pass `include_sections=True`.
     """
-    docs = list_documents(backend, folder_id=folder_id)
+    docs = list_documents(backend, folder_id=folder_id, user_context=user_context)
     if not docs:
         return yaml.safe_dump({"documents": []}, sort_keys=False)
     payload: dict[str, Any] = {"documents": []}
@@ -655,18 +757,27 @@ def folder_toc_yaml(
 
 @overload
 def get_section_content(
-    backend: KgBackend, section_ids: list[str], return_query: Literal[False] = False
+    backend: KgBackend,
+    section_ids: list[str],
+    return_query: Literal[False] = False,
+    user_context: Any = None,
 ) -> list[dict[str, Any]]: ...
 
 
 @overload
 def get_section_content(
-    backend: KgBackend, section_ids: list[str], return_query: Literal[True]
+    backend: KgBackend,
+    section_ids: list[str],
+    return_query: Literal[True],
+    user_context: Any = None,
 ) -> tuple[list[dict[str, Any]], str]: ...
 
 
 def get_section_content(
-    backend: KgBackend, section_ids: list[str], return_query: bool = False
+    backend: KgBackend,
+    section_ids: list[str],
+    return_query: bool = False,
+    user_context: Any = None,
 ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], str]:
     """Fetch the raw Markdown text of one or more sections.
 
@@ -683,6 +794,9 @@ def get_section_content(
         ORDER BY markdown_hash, sequence
     """
     rows, _ = _query_rows(backend, query, {"section_ids": section_ids})
+    auth_hashes = _get_authorized_markdown_hashes(backend, user_context)
+    if auth_hashes is not None:
+        rows = [r for r in rows if r.get("markdown_hash") in auth_hashes]
     return (rows, query) if return_query else rows
 
 
@@ -806,14 +920,17 @@ def _scope_markdown_hashes(
     backend: KgBackend,
     folder_id: str | None = None,
     document_id: str | None = None,
+    user_context: Any = None,
 ) -> set[str] | None:
     """Return the markdown_hash set under *folder_id*'s subtree and/or *document_id*, or None (no scope).
 
     Used to filter ranked candidates to one folder/document without folding the traversal
-    into the vector/FTS index calls themselves.
+    into the vector/FTS index calls themselves. Also intersects with user's authorized hashes.
     """
+    auth_hashes = _get_authorized_markdown_hashes(backend, user_context)
+
     if folder_id is None and document_id is None:
-        return None
+        return auth_hashes
 
     doc_hash: str | None = None
     if document_id is not None:
@@ -821,6 +938,7 @@ def _scope_markdown_hashes(
         if doc_hash is None:
             return set()
 
+    scoped: set[str] | None = None
     if folder_id is not None:
         if _has_relationship(backend, "HAS_SUBFOLDER"):
             query = (
@@ -832,10 +950,17 @@ def _scope_markdown_hashes(
         rows, _ = _query_rows(backend, query, {"fid": folder_id})
         folder_hashes = {r["mh"] for r in rows}
         if doc_hash is not None:
-            return {doc_hash} if doc_hash in folder_hashes else set()
-        return folder_hashes
+            scoped = {doc_hash} if doc_hash in folder_hashes else set()
+        else:
+            scoped = folder_hashes
+    elif doc_hash is not None:
+        scoped = {doc_hash}
 
-    return {doc_hash} if doc_hash is not None else set()
+    if scoped is None:
+        return auth_hashes
+    if auth_hashes is None:
+        return scoped
+    return scoped & auth_hashes
 
 
 def _semantic_section_hits(
@@ -1053,10 +1178,12 @@ def search_sections(
     document_id: str | None = None,
     mode: str = "hybrid",
     embeddings_id: str | None = None,
+    user_context: Any = None,
 ) -> list[dict[str, Any]]:
     """Search sections by hybrid (HNSW + BM25/RRF), semantic/vector, BM25/FTS, or native Cypher mode.
 
     Args:
+        backend: KgBackend connection.
         query: Natural-language query (embedded for semantic; used as the BM25/keyword
             term).
         limit: Max sections to return.
@@ -1069,6 +1196,7 @@ def search_sections(
             - "bm25" / "fts": uses only the MarkdownSection FTS (BM25) index.
             - "cypher" / "native" / "keyword" / "contains": uses native Cypher CONTAINS substring search.
         embeddings_id: Model id for query embedding. If omitted, uses configured default embeddings model.
+        user_context: Optional UserContext for security trimming.
 
     Returns:
         Ranked section dicts (best first) with ``section_id``, ``markdown_hash``,
@@ -1076,7 +1204,7 @@ def search_sections(
         ``matched_chunk``.
     """
     mode = mode.lower().strip()
-    allowed = _scope_markdown_hashes(backend, folder_id=folder_id, document_id=document_id)
+    allowed = _scope_markdown_hashes(backend, folder_id=folder_id, document_id=document_id, user_context=user_context)
     if allowed is not None and not allowed:
         return []
 
@@ -1355,6 +1483,7 @@ def execute_image_query(
     image_ref: str,
     question: str,
     model: str | None = None,
+    user_context: Any = None,
 ) -> str:
     """Analyze an image with a vision-language model (VLM) and answer a question."""
     from pathlib import Path
@@ -1385,13 +1514,23 @@ def execute_image_query(
             WHERE i.image_id = $ref OR i.filename = $ref
                OR (i.image_hash IS NOT NULL AND i.image_hash = $ref)
                OR (i.name IS NOT NULL AND i.name = $ref)
-            RETURN {fields_str}
+            OPTIONAL MATCH (d:Document) WHERE d.markdown_hash = i.markdown_hash
+            RETURN {fields_str}, d.allowed_principals AS doc_principals
             LIMIT 1
         """
         try:
             rows, _ = _query_rows(backend, query, {"ref": image_ref})
             if rows:
                 row = rows[0]
+                doc_principals = row.get("doc_principals")
+                from genai_graph.kg.access.context import UserContext, get_active_user_context
+
+                ctx: UserContext = (
+                    user_context if isinstance(user_context, UserContext) else get_active_user_context(user_context)
+                )
+                if not ctx.is_admin and doc_principals is not None and not ctx.has_access(doc_principals):
+                    return f"Access Denied: You do not have permission to access image '{image_ref}'."
+
                 caption_context = row.get("caption") or row.get("description")
                 img_format = row.get("format") or "png"
                 if row.get("base64_data"):
@@ -1598,6 +1737,7 @@ def create_document_graph_tools(
     *,
     embeddings_id: str | None = None,
     max_image_queries: int = 3,
+    trimming_feedback: str = "aggregate_notice",
 ) -> list[BaseTool]:
     """Build the LangChain tools an agent uses to navigate a Document Graph.
 
@@ -1606,11 +1746,16 @@ def create_document_graph_tools(
         embeddings_id: Optional embeddings model id enabling the hybrid (vector +
             BM25) ``search_sections`` mode. None keeps keyword search only.
         max_image_queries: Maximum number of visual VLM queries allowed per turn.
+        trimming_feedback: How security trimming is communicated to the agent:
+            'zero_knowledge' (silent omission), 'aggregate_notice' (summary note),
+            or 'placeholder' (restricted placeholder rows).
 
     Returns:
         ``[get_folder_toc, get_document_toc, get_section_content, search_sections, query_image, list_documents]`` tools.
     """
     from langchain_core.tools import tool
+
+    from genai_graph.kg.access.context import UserContext, get_active_user_context
 
     query_image_count = 0
 
@@ -1618,10 +1763,19 @@ def create_document_graph_tools(
     def _list_documents() -> str:
         """List every ingested document with its section count and one-line description."""
         try:
-            rows = list_documents(_connect(db_path))
+            backend = _connect(db_path)
+            ctx = get_active_user_context()
+            rows = list_documents(backend, user_context=ctx)
+            total_rows = (
+                list_documents(backend, user_context=UserContext(is_admin=True))
+                if trimming_feedback != "zero_knowledge"
+                else rows
+            )
         except Exception as exc:  # noqa: BLE001
             return _tool_error(exc)
         if not rows:
+            if total_rows:
+                return "No accessible documents found (all ingested documents require permissions you do not possess)."
             return "No documents ingested yet. Build the graph first with `cli docgraph build`."
         lines = []
         for r in rows:
@@ -1629,6 +1783,14 @@ def create_document_graph_tools(
             if r.get("description"):
                 line += f"\n  {r['description']}"
             lines.append(line)
+
+        trimmed = max(0, len(total_rows) - len(rows))
+        if trimmed > 0:
+            if trimming_feedback == "aggregate_notice":
+                lines.append(f"\n[Note: {trimmed} document(s) omitted due to access permissions]")
+            elif trimming_feedback == "placeholder":
+                lines.append(f"\n- [restricted] {trimmed} additional document(s) (access restricted)")
+
         return "\n".join(lines)
 
     @tool("get_folder_toc")
@@ -1641,10 +1803,11 @@ def create_document_graph_tools(
         """
         try:
             backend = _connect(db_path)
+            ctx = get_active_user_context()
             resolved = resolve_folder_id(backend, folder_id) if folder_id else None
             if folder_id and resolved is None:
                 return f"No folder found matching {folder_id!r}. Omit folder_id to list every ingested document."
-            return folder_toc_yaml(backend, resolved)
+            return folder_toc_yaml(backend, resolved, user_context=ctx)
         except Exception as exc:  # noqa: BLE001
             return _tool_error(exc)
 
@@ -1659,8 +1822,13 @@ def create_document_graph_tools(
         top-level sections of a very long document.
         """
         try:
+            ctx = get_active_user_context()
             return document_toc_yaml(
-                _connect(db_path), document_id, include_summaries=include_summaries, max_level=max_level
+                _connect(db_path),
+                document_id,
+                include_summaries=include_summaries,
+                max_level=max_level,
+                user_context=ctx,
             )
         except Exception as exc:  # noqa: BLE001
             return _tool_error(exc)
@@ -1677,10 +1845,18 @@ def create_document_graph_tools(
         """
         ids = [s.strip() for s in section_ids.split(",") if s.strip()]
         try:
-            rows = get_section_content(_connect(db_path), ids)
+            backend = _connect(db_path)
+            ctx = get_active_user_context()
+            rows = get_section_content(backend, ids, user_context=ctx)
         except Exception as exc:  # noqa: BLE001
             return _tool_error(exc)
         if not rows:
+            try:
+                unfiltered = get_section_content(backend, ids, user_context=UserContext(is_admin=True))
+                if unfiltered:
+                    return f"Access Denied: You do not have permission to view requested section(s): {section_ids}"
+            except Exception:
+                pass
             return f"No sections found for ids: {section_ids}"
 
         rendered_sections = []
@@ -1720,6 +1896,7 @@ def create_document_graph_tools(
         """
         try:
             backend = _connect(db_path)
+            ctx = get_active_user_context()
             f_id = folder_id
             d_id = document_id
             if node_id:
@@ -1740,6 +1917,7 @@ def create_document_graph_tools(
                 document_id=d_id,
                 mode=mode,
                 embeddings_id=embeddings_id,
+                user_context=ctx,
             )
         except Exception as exc:  # noqa: BLE001
             return _tool_error(exc)
@@ -1763,21 +1941,12 @@ def create_document_graph_tools(
         question: str,
         model: str | None = None,
     ) -> str:
-        """Query or analyze an image using a Vision-Language Model (VLM).
-
-        Use ONLY when answering a visual question (e.g. reading complex chart data points,
-        axis values, legend mappings, line plot coordinates, or schematic diagrams) that cannot
-        be determined from the text or table outline. This is an expensive call and should only
-        be invoked when you have clear evidence that inspecting the image is necessary.
-        Max 3 image query calls are permitted per question.
+        """Inspect an image from the Document Graph using a Vision-Language Model (VLM).
 
         Args:
-            image: Image filename (e.g. '7a8b9c0d.png'), image hash code, or image file path.
-            question: Specific, precise visual question to answer.
-            model: Optional VLM model ID (defaults to the 'default_vlm' config tag).
-
-        Returns:
-            The VLM's detailed analysis, or a clear statement if the question cannot be answered from the image.
+            image: Image reference: filename (e.g. 'figure1.png'), image_id, or path.
+            question: Question to ask about the image (e.g. 'What are the axes and values in the chart?').
+            model: Optional VLM model id override (e.g. 'gpt-4o', 'gemini-1.5-flash').
         """
         nonlocal query_image_count
         if query_image_count >= max_image_queries:
@@ -1788,7 +1957,10 @@ def create_document_graph_tools(
             )
         query_image_count += 1
         try:
-            return execute_image_query(_connect(db_path), image_ref=image, question=question, model=model)
+            ctx = get_active_user_context()
+            return execute_image_query(
+                _connect(db_path), image_ref=image, question=question, model=model, user_context=ctx
+            )
         except Exception as exc:  # noqa: BLE001
             return _tool_error(exc)
 

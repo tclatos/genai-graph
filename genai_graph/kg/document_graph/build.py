@@ -156,6 +156,9 @@ def build_document_graph(
     embeddings_id: str | None = None,
     fts: bool = True,
     chunk_size_tokens: int = 1500,
+    access_control_provider_spec: str | None = None,
+    access_control_options: dict[str, Any] | None = None,
+    inheritance_mode: str = "intersection",
 ) -> dict[str, Any]:
     """Build (or update) a Document Graph at *db_path* from Markdown *sources*.
 
@@ -226,6 +229,9 @@ def build_document_graph(
         exclude=exclude or [],
         recursive=recursive,
         outline_config=outline_config,
+        access_control_provider_spec=access_control_provider_spec,
+        access_control_options=access_control_options or {},
+        inheritance_mode=inheritance_mode,
     )
 
     timings: dict[str, float] = {}

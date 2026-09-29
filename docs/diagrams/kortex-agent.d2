@@ -1,0 +1,97 @@
+# d2 --sketch --layout tala diagrams/kortex-agent.d2 --watch
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+    theme-id: 4
+  }
+}
+
+direction: right
+
+kortex_core: "Kortex Core" {
+  graphdb: "Graph DB" {
+    #icon: ../../../slides/icons/ladybug.png
+    shape: cylinder
+    width: 200
+    height: 150
+
+  }
+
+
+  mcp: "MCP Server" {
+#    icon: ../icons/mcp.svg
+    shape: package
+  }
+  Skills: "Core skills" {
+    shape: document
+  }
+  #near: pipeline.markdownize
+}
+
+agent_system: "Kortex Agent" {
+  direction: down
+
+  mcp_server: "Agent\nMCP Server" {
+#    icon: ../icons/mcp.svg
+    shape: package
+  }
+
+  agent: "AI Agent" {
+    shape : hexagon
+ #   icon: ../icons/langchain.svg
+  }
+
+  middlewares: "Middlewares" {shape: package}
+
+  skills: "Use-case\nSkills" {
+      shape: document 
+  }
+
+  observation: "Agent\n Trajectory" {
+      shape: stored_data
+  }
+
+  tools: "Tools" {
+    direction : down
+    python: "Python\nInterpreter" 
+    search: "Internet\nSearch"
+    sql: "SQL\n Tools"
+  }
+
+  mcp_server -> agent: {style.stroke-dash: 4}
+  agent <-> middlewares
+  #middlewares -> agent
+  agent <-> skills
+  agent -> tools: {style.stroke-dash: 4}
+  agent -> observation
+}
+
+client: "Applications\n& Users" {
+  near: center-left
+  style: {
+    font-size: 22
+    bold: true
+  }
+  width: 200
+  height: 120
+}
+
+sandbox: "Sandbox\n(Docker / OpenSandbox)" {
+  shape: package
+}
+
+ext_database: "External Databases" {
+  shape: cylinder
+}
+
+client -> agent_system.agent: "Requests"
+client -> agent_system.mcp_server: "MCP" {style.stroke-dash: 4}
+client -> kortex_core.mcp: "Direct MCP" {style.stroke-dash: 4}
+
+agent_system.agent <-> kortex_core.mcp
+kortex_core.graphdb <-> kortex_core.mcp
+agent_system.agent <-> kortex_core.skills
+
+agent_system.tools.python <-> sandbox: "Code Execution"
+agent_system.tools.sql <-> ext_database: "SQL Query"

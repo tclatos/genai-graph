@@ -1,0 +1,167 @@
+vars: {
+  d2-config: {
+    layout-engine: tala
+    theme-id: 4
+    # pad: 15
+  }
+}
+
+direction: right
+
+sources: {
+  near: center-left
+  unstructured: "Unstructured" {
+    direction: down
+
+    word: "Word" {
+      icon: ../icons/word.svg
+      shape: document
+    }
+    pdf: "PDF" {
+      icon: ../icons/pdf.svg
+      shape: document
+    }
+    excel: "Excel" {
+      icon: ../icons/excel.svg
+      shape: document
+    }
+    pptx: "PPTX" {
+      icon: ../icons/powerpoint.svg
+      shape: document
+    }
+  }
+
+  structured: "Structured" {
+    direction: down
+    postgres: "PostgreSQL" {
+      icon: ../icons/postgresql.svg
+      shape: cylinder
+    }
+    neo4j: "Neo4j" {
+      icon: ../icons/neo4j.svg
+      shape: cylinder
+    }
+    excel: "Excel" {
+      icon: ../icons/excel.svg
+      shape: document
+    }
+  }
+}
+
+graphs: Graph Factories {
+  # near: top-center
+  direction: right
+
+  doc_subgraph: "Documents" {
+    # style.stroke-dash: 6
+    # style.stroke-width: 1
+    markdownize: "Markdownize &\nImage Extraction (OCR,LLM)" {
+      # icon: ../icons/markdown.svg
+      # icon: ../icons/mistral.svg
+    }
+
+    toc_sections: "Table of Content/\nSections Extraction (LLM)" {
+      #  icon: ../icons/llm.svg
+    }
+
+    tables: "Tables\nNormalisation" {
+      # icon: ../icons/python.svg
+    }
+
+    image_desc: "Image Description\n(VLM)" {
+      #  icon: ../icons/llm.svg
+    }
+
+    summarization: "Doc / Sections\nSummarization (LLM)" {
+      #  icon: ../icons/llm.svg
+    }
+
+    embeddings: "Embeddings\nCalculation" {
+      # icon: ../icons/llm.svg
+    }
+
+    nodes_edges: "Node/Edges Creation" {
+      # icon: ../icons/python.svg
+    }
+
+    toc_sections -> summarization
+    toc_sections -> embeddings
+    tables -> embeddings
+    tables -> nodes_edges: "Tables"
+    toc_sections -> nodes_edges: "Doc structure"
+    summarization -> nodes_edges: "Summaries"
+    embeddings -> nodes_edges: "Embeddings"
+    image_desc -> nodes_edges: {style.stroke-dash: 4}
+  } # doc graph
+
+  entity_subgraph: "Business Entities" {
+    direction: right
+    style.stroke-dash: 6
+    style.stroke-width: 1
+    baml: "Schema" { shape: page}
+    extract: "Extraction" {
+      direction: down
+      llm_extract: "From Text"
+      struct_extract: "From Structured data" 
+    }
+    pydantic: "Object Models" {    shape: hexagon   }
+    mapping: "Entity & Edge\n Mapping" 
+    linking: "Entity Linking" 
+
+    nodes_edges: "Node/Edges Creation" 
+    baml -> extract.llm_extract
+    extract -> pydantic
+    pydantic -> mapping
+    mapping -> linking
+    linking -> nodes_edges
+    }
+}
+result: "" {
+  near: center-right
+  staging: "Staging" {
+    parquet: "Cache\n(Parquet Files)" {
+    #  icon: ../icons/parquet.svg
+      shape: cylinder
+    }
+
+    batch_merge: "Batch Ingestion" {
+    #  icon: ../icons/ladybug.png
+    }
+
+    parquet -> batch_merge
+  }
+
+  kortex_core: "Outcome" {
+    graphdb: "Graph Database\n(Ladybug)\ngraph, vectors, search index" {
+   #   icon: ../icons/ladybug.png
+      shape: cylinder
+    }
+    mcp: "MCP & API Servers" {
+      # icon: ../icons/server.svg
+      shape: package
+      # icon: ../icons/mcp.svg
+    }
+    Skills: "Graph Navigation &\n Schema skills" {
+      shape: document
+    }
+    # near: doc_subgraph.markdownize
+  }
+}
+
+graphs.doc_subgraph.nodes_edges -> result.staging: "Graph of Folders,\nDocuments, Sections, Images, \nTables, ..."
+graphs.entity_subgraph.nodes_edges -> result.staging: "Graph of Business Enties \n(Opportunities, People, Competitors, \nOfferings, Technologies, ..)"
+
+sources.unstructured -> graphs.doc_subgraph.markdownize
+sources -> graphs.doc_subgraph.nodes_edges: "Access Control List"
+sources.structured -> graphs.entity_subgraph.extract.struct_extract: "Tables / Records"
+
+graphs.doc_subgraph.markdownize -> graphs.doc_subgraph.toc_sections: "Markdown"
+graphs.doc_subgraph.markdownize -> graphs.doc_subgraph.tables: "HTML"
+graphs.doc_subgraph.markdownize -> graphs.doc_subgraph.image_desc: {style.stroke-dash: 4}
+
+result.kortex_core.graphdb -> graphs.entity_subgraph.extract.llm_extract: "Document Text\n& Structure"
+result.kortex_core.graphdb -> graphs.entity_subgraph.linking: "Canonical Entities & IDs" {
+  style.stroke-dash: 4
+}
+
+result.staging.batch_merge -> result.kortex_core.graphdb: "Nodes, Relationships,\n Images, Embeddings,\n FTS Index"

@@ -1,0 +1,31 @@
+direction: right
+
+# Main actors and components
+User: User {
+ # near: center-left
+  shape: person
+}
+
+App: Client Application {
+  icon: ../../../slides/icons/fastapi.svg
+}
+
+VectorDB: Vector Database {
+  shape: cylinder
+  icon: ../../../slides/icons/postgresql.svg
+}
+
+LLM: LLM {
+  icon: ../../../slides/icons/llm.svg
+}
+
+# Data flow (workflow)
+User -> App: 1. Sends the query (prompt)
+
+App -> VectorDB: 2. Similarity search (embedding)
+VectorDB -> App: 3. Returns relevant documents
+
+App -> LLM: 4. Sends prompt + augmented context
+LLM -> App: 5. Generates the final answer
+
+App -> User: 6. Displays the answer

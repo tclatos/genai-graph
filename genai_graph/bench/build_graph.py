@@ -181,13 +181,14 @@ def markdownize_targets_batch(
     onedrive_markdown_dir: Path | None = None,
     markdownize_profile: str = "medium",
     vlm_model: str | None = None,
+    workers: int = 4,
 ) -> list[Path]:
     """Batch convert documents to Markdown using the converter's batch API when available.
 
     1. Checks saved_markdown_dir for already converted files.
     2. Collects all missing or forced document PDFs.
     3. If multiple PDFs and converter supports batch_convert, executes batch conversion (e.g. Mistral Batch OCR).
-    4. Falls back to individual conversions with exponential backoff for any missing files.
+    4. Falls back to individual conversions in parallel for any missing files.
     """
     import asyncio
     import inspect
@@ -265,21 +266,37 @@ def markdownize_targets_batch(
                 exc,
             )
 
-    # Convert any remaining missing documents individually
-    for doc_name, _pdf_p, _out_md in to_convert:
-        if doc_name not in result_paths:
+    # Convert any remaining missing documents individually (in parallel when workers > 1)
+    missing = [item for item in to_convert if item[0] not in result_paths]
+    if missing:
+
+        def _convert_one(item: tuple[str, Path, Path]) -> tuple[str, Path | None]:
+            d_name, _, _ = item
             try:
-                out_md = markdownize_target(
-                    doc_name,
+                out = markdownize_target(
+                    d_name,
                     force=force,
                     pdfs_dir=pdf_root,
                     saved_markdown_dir=target_saved_dir,
                     markdownize_profile=markdownize_profile,
                     vlm_model=vlm_model,
                 )
-                result_paths[doc_name] = out_md
+                return d_name, out
             except Exception as exc:
-                logger.error("Failed to convert {}: {}", doc_name, exc)
+                logger.error("Failed to convert {}: {}", d_name, exc)
+                return d_name, None
+
+        if workers > 1 and len(missing) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                conv_results = list(pool.map(_convert_one, missing))
+        else:
+            conv_results = [_convert_one(item) for item in missing]
+
+        for d_name, out_p in conv_results:
+            if out_p is not None:
+                result_paths[d_name] = out_p
 
     return [result_paths[d] for d in doc_names if d in result_paths]
 

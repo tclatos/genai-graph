@@ -191,20 +191,33 @@ def ingest_document_graph(
 
     # --- Phase 1: parse bundles (cheap once the outline cache is warm) -----
     parsed: list[DocumentGraphBundle] = []
-    for key in keys:
-        try:
-            bundle = factory.get_struct_data_by_key(key)
-        except Exception as exc:  # noqa: BLE001
-            msg = f"Failed to parse {key}: {exc}"
-            logger.error(msg)
-            result.warnings.append(msg)
-            result.documents_failed += 1
-            continue
 
-        if bundle is None:
+    def _parse_key(key: str) -> tuple[DocumentGraphBundle | None, str | None]:
+        try:
+            b = factory.get_struct_data_by_key(key)
+            if b is None:
+                return None, None
+            return b, None
+        except Exception as exc:  # noqa: BLE001
+            return None, f"Failed to parse {key}: {exc}"
+
+    if embed_workers > 1 and total_keys > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=embed_workers) as pool:
+            parse_results = list(pool.map(_parse_key, keys))
+    else:
+        parse_results = [_parse_key(k) for k in keys]
+
+    for b, err in parse_results:
+        if err is not None:
+            logger.error(err)
+            result.warnings.append(err)
             result.documents_failed += 1
-            continue
-        parsed.append(bundle)
+        elif b is None:
+            result.documents_failed += 1
+        else:
+            parsed.append(b)
 
     # --- Phase 2: structural nodes + skip/rebuild decisions (DB reads) -----
     pending: list[tuple[DocumentGraphBundle, Document, bool]] = []

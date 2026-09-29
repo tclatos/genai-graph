@@ -96,6 +96,7 @@ def batch_markdownize_task(
     markdown_dir: str,
     skip_ocr: bool,
     vlm_model: str | None = None,
+    workers: int = 4,
 ) -> list[str]:
     """Convert/OCR benchmark documents in batch (using Batch OCR API when available) and stage in markdown_dir."""
     from genai_graph.bench.build_graph import (
@@ -125,6 +126,7 @@ def batch_markdownize_task(
         saved_markdown_dir=saved_p,
         markdownize_profile=markdownize_profile,
         vlm_model=vlm_model,
+        workers=workers,
     )
     results = []
     for md_file in saved_md_files:
@@ -315,6 +317,7 @@ def markdownize_flow(cfg: BenchConfig) -> list[str]:
         markdown_dir=cfg.docgraph.paths.markdown_dir,
         skip_ocr=cfg.docgraph.build.skip_ocr,
         vlm_model=cfg.docgraph.llms.image,
+        workers=cfg.docgraph.build.workers,
     )
 
 

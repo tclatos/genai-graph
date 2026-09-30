@@ -112,7 +112,7 @@ def build_filtered_cypher_query(
     relationship_types: list[str],
     limit: int,
     excluded_node_types: list[str] | None = None,
-) -> str:
+) -> tuple[str, dict[str, str]]:
     """Build a Cypher query based on selected filters.
 
     Args:
@@ -123,7 +123,11 @@ def build_filtered_cypher_query(
         excluded_node_types: Node types to exclude from results (None/empty means no exclusion)
 
     Returns:
-        Cypher query string (comma-separated for union execution)
+        Tuple of (Cypher query string with ``$name``-style placeholders, parameters dict).
+        Node/relationship type names are still interpolated (Cypher doesn't allow
+        parameterizing labels), but ``node_name`` — which can originate from
+        document-derived data ingested into the graph, not just fixed schema
+        labels — is always passed as a bound parameter to avoid Cypher injection.
     """
     # Use multi-hop only when a specific node is selected (explore its neighbourhood).
     # For node-type-only filters, multi-hop causes a path-count explosion that makes
@@ -154,21 +158,24 @@ def build_filtered_cypher_query(
         exclusion_filter = " AND ".join(exclusion_conditions)
 
     # Build query based on filters
+    parameters: dict[str, str] = {}
     if node_types and node_name:
-        # Specific node and type - filter by name (use first selected type for node name filter)
-        name_escaped = node_name.replace("'", "\\'")
+        # Specific node and type - filter by name (use first selected type for node name filter).
+        # node_name is bound as a parameter (never string-interpolated) since it can
+        # originate from document-derived data ingested into the graph.
+        parameters["name"] = node_name
         node_type = node_types[0]  # Use first type for specific node selection
         half_limit = limit // 2
 
         if exclusion_filter:
             query = (
-                f"MATCH (n:{node_type})-{rel_filter}->(m) WHERE n.name = '{name_escaped}' AND {exclusion_filter} RETURN n, r, m LIMIT {half_limit}; "
-                f"MATCH (n)-{rel_filter}->(m:{node_type}) WHERE m.name = '{name_escaped}' AND {exclusion_filter} RETURN n, r, m LIMIT {half_limit}"
+                f"MATCH (n:{node_type})-{rel_filter}->(m) WHERE n.name = $name AND {exclusion_filter} RETURN n, r, m LIMIT {half_limit}; "
+                f"MATCH (n)-{rel_filter}->(m:{node_type}) WHERE m.name = $name AND {exclusion_filter} RETURN n, r, m LIMIT {half_limit}"
             )
         else:
             query = (
-                f"MATCH (n:{node_type})-{rel_filter}->(m) WHERE n.name = '{name_escaped}' RETURN n, r, m LIMIT {half_limit}; "
-                f"MATCH (n)-{rel_filter}->(m:{node_type}) WHERE m.name = '{name_escaped}' RETURN n, r, m LIMIT {half_limit}"
+                f"MATCH (n:{node_type})-{rel_filter}->(m) WHERE n.name = $name RETURN n, r, m LIMIT {half_limit}; "
+                f"MATCH (n)-{rel_filter}->(m:{node_type}) WHERE m.name = $name RETURN n, r, m LIMIT {half_limit}"
             )
     elif node_types:
         # Node type filter - query both directions, allowing connections to any node type
@@ -196,7 +203,7 @@ def build_filtered_cypher_query(
         else:
             query = f"MATCH (n)-{rel_filter}->(m) RETURN n, r, m LIMIT {limit}"
 
-    return query
+    return query, parameters
 
 
 def initialize_session_state() -> None:
@@ -387,7 +394,7 @@ def main() -> None:
             with st.spinner("Generating visualization..."):
                 try:
                     # Build query based on filters
-                    query = build_filtered_cypher_query(
+                    query, query_params = build_filtered_cypher_query(
                         sss.selected_node_types,
                         sss.selected_node_name,
                         sss.selected_rel_types,
@@ -405,6 +412,7 @@ def main() -> None:
                     html_content = generate_html(
                         backend,
                         query=query,
+                        parameters=query_params or None,
                         filter_orphan_nodes=bool(sss.selected_node_types),
                         selected_node_types=sss.selected_node_types or None,
                     )

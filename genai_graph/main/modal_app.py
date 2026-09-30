@@ -157,20 +157,3 @@ def streamlit_server():
     # Use exec to replace the current process with Streamlit
     # This ensures Streamlit runs as the main process and binds to port 8000
     os.execvp("uv", cmd)
-
-
-# @app.local_entrypoint()
-# def main():
-#     """Local entrypoint for Modal deployment."""
-#     import time
-
-#     print("Streamlit app deployed! Access it at.")
-#     print("https://tcaminel--genai-framework-run-dev.modal.run")
-#     print("Press Ctrl+C to stop the app")
-
-#     try:
-#         # Keep the app running indefinitely
-#         while True:
-#             time.sleep(60)
-#     except KeyboardInterrupt:
-#         print("\nStopping app...")

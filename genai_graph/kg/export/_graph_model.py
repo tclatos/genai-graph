@@ -149,6 +149,7 @@ def _fetch_graph_data(
     union: bool = True,
     supplemental_node_types: list[str] | None = None,
     supplemental_limit: int = 2000,
+    parameters: dict[str, Any] | None = None,
 ) -> tuple[list[NodeRecord], list[RelationshipRecord]]:
     """Fetch all nodes and edges from the graph database via the provided connection/backend.
 
@@ -160,6 +161,8 @@ def _fetch_graph_data(
                Can be customized to filter by node types, limit results, etc.
                Must return columns named 'n', 'r', 'm' for source node, relationship, target node.
         union: If True and query contains multiple statements, union the results. Default True.
+        parameters: Optional query parameters bound with ``$name``-style placeholders in *query*.
+            Prefer this over string-interpolating user- or data-derived values into *query*.
         supplemental_node_types: Node type labels to fetch in full regardless of the relationship
             query result (e.g. ``["L3"]``). Prevents nodes from being missed when the LIMIT on
             the relationship query is reached before all instances of the type are seen.
@@ -206,7 +209,7 @@ def _fetch_graph_data(
         kuzu_id_to_node_data: dict[str, dict[str, Any]] = {}
 
         # Execute the relationship query
-        rel_df = connection.execute_get_as_df(query, union=union)
+        rel_df = connection.execute_get_as_df(query, parameters=parameters, union=union)
 
         # Process all nodes and relationships from the query result
         for _, row in rel_df.iterrows():

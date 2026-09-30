@@ -81,6 +81,7 @@ def generate_html(
     union: bool = True,
     filter_orphan_nodes: bool = False,
     selected_node_types: list[str] | None = None,
+    parameters: dict[str, Any] | None = None,
 ) -> str:
     """Generate an HTML graph visualization from a graph connection/backend.
 
@@ -103,6 +104,7 @@ def generate_html(
             of these types are fetched via a supplemental query so that LIMIT constraints on the
             relationship query cannot leave them out.  Nodes of these types are also exempt from
             ``filter_orphan_nodes`` pruning.
+        parameters: Optional query parameters bound with ``$name``-style placeholders in *query*.
 
     Returns:
         The HTML content as a string.
@@ -114,6 +116,7 @@ def generate_html(
         query,
         union,
         supplemental_node_types=selected_node_types,
+        parameters=parameters,
     )
 
     nodes_list, links_list = build_graph_model(

@@ -29,33 +29,18 @@ def display_config_info() -> None:
     st.markdown("**Key Configuration Values:**")
     config_data = []
 
-    # LLM configuration
-    try:
-        llm_model = config.get_str("llm.models.default", "Not set")
-        config_data.append({"Setting": "LLM Default Model", "Value": llm_model})
-    except Exception:
-        config_data.append({"Setting": "LLM Default Model", "Value": "Not available"})
-
-    # Embeddings configuration
-    try:
-        embeddings_model = config.get_str("embeddings.models.default", "Not set")
-        config_data.append({"Setting": "Embeddings Default Model", "Value": embeddings_model})
-    except Exception:
-        config_data.append({"Setting": "Embeddings Default Model", "Value": "Not available"})
-
-    # Vector store configuration
-    try:
-        vector_store = config.get_str("vector_store.default", "Not set")
-        config_data.append({"Setting": "Vector Store Default", "Value": vector_store})
-    except Exception:
-        config_data.append({"Setting": "Vector Store Default", "Value": "Not available"})
-
-    # Cache configuration
-    try:
-        cache_method = config.get_str("llm.cache", "Not set")
-        config_data.append({"Setting": "LLM Cache Method", "Value": cache_method})
-    except Exception:
-        config_data.append({"Setting": "LLM Cache Method", "Value": "Not available"})
+    settings_to_display = [
+        ("LLM Default Model", "llm.models.default"),
+        ("Embeddings Default Model", "embeddings.models.default"),
+        ("Vector Store Default", "vector_store.default"),
+        ("LLM Cache Method", "llm.cache"),
+    ]
+    for label, key in settings_to_display:
+        try:
+            value = config.get_str(key, "Not set")
+        except Exception:
+            value = "Not available"
+        config_data.append({"Setting": label, "Value": value})
 
     if config_data:
         st.table(config_data)

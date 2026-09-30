@@ -115,6 +115,11 @@ def _get_authorized_markdown_hashes(backend: KgBackend, user_context: Any = None
         return None
     cols = _table_columns(backend, _DOCUMENT_LABEL)
     if "allowed_principals" not in cols:
+        logger.warning(
+            "{}.allowed_principals column missing — access control is NOT enforced "
+            "(likely a pre-ACL database; rebuild with `cli docgraph build` to add it)",
+            _DOCUMENT_LABEL,
+        )
         return None
 
     query = f"MATCH (d:{_DOCUMENT_LABEL}) RETURN d.markdown_hash AS mh, d.allowed_principals AS principals"
@@ -139,6 +144,12 @@ def _is_document_authorized(backend: KgBackend, document_id: str, user_context: 
         return True
     cols = _table_columns(backend, _DOCUMENT_LABEL)
     if "allowed_principals" not in cols:
+        logger.warning(
+            "{}.allowed_principals column missing — access control is NOT enforced for {} "
+            "(likely a pre-ACL database; rebuild with `cli docgraph build` to add it)",
+            _DOCUMENT_LABEL,
+            document_id,
+        )
         return True
 
     clean_id = document_id.strip()

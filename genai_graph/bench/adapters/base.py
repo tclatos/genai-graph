@@ -52,18 +52,24 @@ def download_hf_file(
     Returns:
         Path to the downloaded local file.
     """
-    from huggingface_hub import hf_hub_download
+    from huggingface_hub import get_token, hf_hub_download
 
-    auth_token = token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACEHUB_API_TOKEN")
-    local_dir_arg = str(output_dir) if output_dir else None
+    auth_token = token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACEHUB_API_TOKEN") or get_token()
     downloaded = hf_hub_download(
         repo_id=repo_id,
         filename=filename,
         repo_type=repo_type,
         token=auth_token,
-        local_dir=local_dir_arg,
     )
-    return Path(downloaded)
+    res_path = Path(downloaded)
+    if output_dir:
+        out_p = Path(output_dir)
+        out_p.mkdir(parents=True, exist_ok=True)
+        target = out_p / Path(filename).name
+        if target != res_path and not target.exists():
+            shutil.copy2(res_path, target)
+        return target
+    return res_path
 
 
 def download_http_file(

@@ -120,6 +120,7 @@ class BenchScoreRecord(BaseModel):
     verdict: JudgeVerdict
     judge_llm: str
     scored_at: str | None = None
+    reward_score: float | None = None
 
     def to_legacy_dict(self) -> dict[str, Any]:
         """Flatten into the legacy scored JSONL row format."""
@@ -130,6 +131,8 @@ class BenchScoreRecord(BaseModel):
         d["groundedness"] = self.verdict.groundedness
         d["error_category"] = self.verdict.error_category
         d["rationale"] = self.verdict.rationale
+        if self.reward_score is not None:
+            d["reward_score"] = self.reward_score
         if self.scored_at:
             d["scored_at"] = self.scored_at
         return d

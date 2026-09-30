@@ -104,11 +104,23 @@ async def evaluate_single_run(
         )
     )
 
+    # Calculate deterministic reward score if reward function is available (e.g. OfficeQA reward.py)
+    reward_score: float | None = None
+    try:
+        from officeqa.reward import score_answer as officeqa_score_answer
+
+        gt_str = str(r_record.gold_answer or "")
+        pred_str = str(r_record.agent_answer or "")
+        if gt_str and pred_str:
+            reward_score = officeqa_score_answer(gt_str, pred_str, tolerance=0.0)
+    except Exception as exc:
+        logger.debug("[{}] reward scoring skipped or unavailable: {}", r_record.id, exc)
+
     last_exc: Exception | None = None
     for attempt in range(1, max_retries + 1):
         try:
             resp = await model.ainvoke(messages)
-            content = resp.content if hasattr(resp, "content") else str(resp)
+            content = resp.content if hasattr(resp.content, "__iter__") and not isinstance(resp.content, str) else str(resp.content if hasattr(resp, "content") else resp)
             if isinstance(content, list):
                 content = "".join(str(c) for c in content)
 
@@ -119,6 +131,7 @@ async def evaluate_single_run(
                 verdict=verdict,
                 judge_llm=judge_llm,
                 scored_at=datetime.now(timezone.utc).isoformat(),
+                reward_score=reward_score,
             )
         except Exception as exc:
             last_exc = exc
@@ -145,6 +158,7 @@ async def evaluate_single_run(
         ),
         judge_llm=judge_llm,
         scored_at=datetime.now(timezone.utc).isoformat(),
+        reward_score=reward_score,
     )
 
 

@@ -128,9 +128,41 @@ def find_pdf_path(doc_name: str, pdf_root: Path | None = None) -> Path:
             pdf_path = matches[0]
         else:
             raise FileNotFoundError(
-                f"PDF not found for doc {doc_name!r} at {root / f'{clean_doc}.pdf'}. Run fetch step first."
+                f"Source document file not found for doc {doc_name!r} at {root / f'{clean_doc}.pdf'}. Run fetch step first."
             )
     return pdf_path
+
+
+def find_source_file_path(doc_name: str, sources_root: Path | None = None) -> Path:
+    """Resolve the source file (JSON or PDF) for a benchmark doc_name."""
+    clean_doc = doc_name
+    for ext in (".json", ".pdf", ".txt", ".md"):
+        if clean_doc.lower().endswith(ext):
+            clean_doc = clean_doc[: -len(ext)]
+            break
+
+    root = sources_root or (Path.cwd() / "data" / "sources")
+    candidates = [
+        root / f"{clean_doc}.json",
+        root / f"{clean_doc}.pdf",
+        root / doc_name,
+        root / "jsons" / f"{clean_doc}.json",
+        root / "documents" / f"{clean_doc}.pdf",
+        root / "documents" / doc_name,
+    ]
+    path = next(
+        (p for p in candidates if p.exists() and p.is_file() and p.stat().st_size > 50),
+        None,
+    )
+    if path is None:
+        matches = list(root.rglob(f"{clean_doc}.json")) or list(root.rglob(f"{clean_doc}.pdf")) or list(root.rglob(doc_name))
+        if matches:
+            path = matches[0]
+        else:
+            raise FileNotFoundError(
+                f"Source document file not found for doc {doc_name!r} at {root}. Run fetch step first."
+            )
+    return path
 
 
 def markdownize_target(
@@ -164,9 +196,22 @@ def markdownize_target(
         return out_md
 
     pdf_root = pdfs_dir or (Path.cwd() / "data" / "pdfs")
-    pdf_path = find_pdf_path(doc_name, pdf_root)
+    source_path = find_source_file_path(doc_name, pdf_root)
 
-    content = _convert_pdf(pdf_path, markdownize_profile=markdownize_profile, vlm_model=vlm_model)
+    if source_path.suffix.lower() == ".json":
+        # Check if project provides a custom JSON-to-Markdown transformer (e.g. OfficeQA Pro V2)
+        try:
+            from officeqa.json_transformer import parse_json_document_to_markdown
+
+            content = parse_json_document_to_markdown(source_path)
+        except ImportError:
+            import json
+
+            raw_data = json.loads(source_path.read_text(encoding="utf-8"))
+            content = f"# {doc_name}\n\n```json\n{json.dumps(raw_data, indent=2)}\n```\n"
+    else:
+        content = _convert_pdf(source_path, markdownize_profile=markdownize_profile, vlm_model=vlm_model)
+
     out_md.write_text(content, encoding="utf-8")
     logger.success("Wrote Markdown ({} bytes) -> {}", len(content), out_md)
     return out_md
@@ -210,13 +255,16 @@ def markdownize_targets_batch(
             result_paths[doc_name] = out_md
         else:
             try:
-                pdf_p = find_pdf_path(doc_name, pdf_root)
-                to_convert.append((doc_name, pdf_p, out_md))
+                src_p = find_source_file_path(doc_name, pdf_root)
+                to_convert.append((doc_name, src_p, out_md))
             except Exception as exc:
-                logger.error("Could not find PDF for {}: {}", doc_name, exc)
+                logger.error("Could not find source document for {}: {}", doc_name, exc)
 
     if not to_convert:
         return [result_paths[d] for d in doc_names if d in result_paths]
+
+    # If any file is JSON, route through individual conversion rather than batch OCR
+    has_json = any(src_p.suffix.lower() == ".json" for _, src_p, _ in to_convert)
 
     try:
         prof = get_markdownize_profile(markdownize_profile)
@@ -245,8 +293,8 @@ def markdownize_targets_batch(
                 ret = asyncio.run(ret)
         return ret
 
-    # If multiple files and converter has batch_convert, run batch conversion
-    if len(to_convert) > 1:
+    # If multiple files and converter has batch_convert, run batch conversion (for PDFs only)
+    if not has_json and len(to_convert) > 1:
         try:
             converter_kwargs = {"vlm_model": vlm_model} if vlm_model else {}
             conv = ConverterFactory.create(converter_name, **converter_kwargs)

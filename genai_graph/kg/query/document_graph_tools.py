@@ -49,6 +49,20 @@ _native_index_queries_disabled = os.getenv("GENAI_GRAPH_DISABLE_NATIVE_INDEX_QUE
     "yes",
 }
 
+
+def _acl_required() -> bool:
+    """Return True if deployments opted into fail-closed ACL enforcement.
+
+    Deployments that rely on ACL enforcement should set
+    ``GENAI_GRAPH_ACL_REQUIRED=1`` so a missing ``allowed_principals`` column
+    (e.g. a pre-ACL database, or a schema migration gap) fails CLOSED (deny)
+    instead of silently falling back to unfiltered access. Left unset,
+    behavior is unchanged (fail open) for backward compatibility with
+    existing deployments that never configured ACL.
+    """
+    return os.getenv("GENAI_GRAPH_ACL_REQUIRED", "").strip().lower() in {"1", "true", "yes"}
+
+
 # Columns a caller can reasonably expect on each row type. Rows are normalized
 # so every key is present (``None`` when the column does not exist in the DB),
 # which keeps callers and the TUI/CLI from KeyErroing on an older schema.
@@ -115,9 +129,17 @@ def _get_authorized_markdown_hashes(backend: KgBackend, user_context: Any = None
         return None
     cols = _table_columns(backend, _DOCUMENT_LABEL)
     if "allowed_principals" not in cols:
+        if _acl_required():
+            logger.error(
+                "{}.allowed_principals column missing and GENAI_GRAPH_ACL_REQUIRED is set — "
+                "denying all access (rebuild with `cli docgraph build` to add the column)",
+                _DOCUMENT_LABEL,
+            )
+            return set()
         logger.warning(
             "{}.allowed_principals column missing — access control is NOT enforced "
-            "(likely a pre-ACL database; rebuild with `cli docgraph build` to add it)",
+            "(likely a pre-ACL database; rebuild with `cli docgraph build` to add it, "
+            "or set GENAI_GRAPH_ACL_REQUIRED=1 to fail closed instead)",
             _DOCUMENT_LABEL,
         )
         return None
@@ -144,9 +166,18 @@ def _is_document_authorized(backend: KgBackend, document_id: str, user_context: 
         return True
     cols = _table_columns(backend, _DOCUMENT_LABEL)
     if "allowed_principals" not in cols:
+        if _acl_required():
+            logger.error(
+                "{}.allowed_principals column missing and GENAI_GRAPH_ACL_REQUIRED is set — "
+                "denying access to {} (rebuild with `cli docgraph build` to add the column)",
+                _DOCUMENT_LABEL,
+                document_id,
+            )
+            return False
         logger.warning(
             "{}.allowed_principals column missing — access control is NOT enforced for {} "
-            "(likely a pre-ACL database; rebuild with `cli docgraph build` to add it)",
+            "(likely a pre-ACL database; rebuild with `cli docgraph build` to add it, "
+            "or set GENAI_GRAPH_ACL_REQUIRED=1 to fail closed instead)",
             _DOCUMENT_LABEL,
             document_id,
         )

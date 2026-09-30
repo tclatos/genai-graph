@@ -41,7 +41,7 @@ This folder organizes skills for agents working on the **genai-graph** library o
 | `kg-ingest` | `docs/graph_construction.md`, `docs/cache_management.md`, `docs/workflows.md` | `genai_graph/kg/ingest/`, `genai_graph/kg/backend.py` | `core-models` |
 | `kg-neo4j-import` | `docs/graph-authoring-patterns.md` (Pattern 3) | `genai_graph/neo4j_import/` | — |
 | `kg-workflows` | `docs/workflows.md`, `docs/prefect_dag_pipeline.md` | `genai_graph/orchestration/` | `workflow-engine` |
-| `kg-export` | `docs/graph-definition-guide.md`, `docs/kg_create_enhancements.md` | `genai_graph/kg/export/` | — |
+| `kg-export` | `docs/graph-definition-guide.md`, `docs/graph_construction.md` | `genai_graph/kg/export/` | — |
 | `kg-cli` | `docs/workflows.md` (CLI Reference), `docs/document-graph.md` | `genai_graph/core/commands_*.py` | `cli-and-scaffolding` |
 
 ## 3. Governance Skills (`skills/governance/`)
@@ -90,6 +90,8 @@ do not need to wire `skill_directories` at all.
 
 ## Related
 
+- `docs/SKILLS.md` — Skills architecture, scaffolding instructions, and tier overview.
+- `docs/README.md` — Master documentation index.
 - `genai-graph/Agents.md` — coding conventions (Pydantic v2, modern type hints, no
   backward-compat code, Ladybug/Kuzu backend notes).
 - `genai-graph/Agents_Skills.md` — project-specific procedures that `kg-schema-maintenance`

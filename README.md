@@ -354,18 +354,26 @@ bench_profiles:
 
 ## Documentation Index
 
+See [docs/README.md](docs/README.md) for the master topic-by-topic documentation map.
+
 | Documentation | Description |
 |---|---|
+| [docs/README.md](docs/README.md) | **Master Documentation Index**: Complete categorized reading map |
 | [docs/graph-definition-guide.md](docs/graph-definition-guide.md) | **5-Minute Quick Start**: Models → `GraphNode` → Schema → Ingestion → Query |
 | [docs/document-graph.md](docs/document-graph.md) | Comprehensive Document Graph guide: Markdown Knowledge Tree, OCR, and DocGraph agent |
+| [docs/docgraph-agent.md](docs/docgraph-agent.md) | Autonomous DocGraph deep agent: tool definitions and execution flow |
+| [docs/access-control-security-trimming.md](docs/access-control-security-trimming.md) | Enterprise security trimming, document ACLs, and early-binding filtering |
 | [docs/benchmark_framework.md](docs/benchmark_framework.md) | Complete multi-dataset benchmark framework specification (`genai_graph.bench`) |
 | [docs/benchmarks_financebench_officeqa.md](docs/benchmarks_financebench_officeqa.md) | Empirical evaluation and adapter implementations for FinanceBench and OfficeQA |
 | [docs/graph-authoring-patterns.md](docs/graph-authoring-patterns.md) | Pattern catalog: JSON, tables, Neo4j, documents, BAML inline extraction, similarity |
 | [docs/schema-compilation.md](docs/schema-compilation.md) | Schema compilation internals: field-path deduction, primary key rules, exclusions |
 | [docs/graph_construction.md](docs/graph_construction.md) | Factory architecture, canonical types, schema merging, and CLI reference |
 | [docs/workflows.md](docs/workflows.md) | Workflow DSL for KG pipelines; Prefect task orchestration |
+| [docs/prefect_dag_pipeline.md](docs/prefect_dag_pipeline.md) | Prefect DAG internals and task concurrency model |
 | [docs/baml_extraction_guide.md](docs/baml_extraction_guide.md) | Type-safe structured LLM extraction with BAML integration |
 | [docs/kg_explorer.md](docs/kg_explorer.md) | Streamlit KG Explorer, Cypher console, and D3 interactive visualization |
+| [docs/SKILLS.md](docs/SKILLS.md) | Skills architecture guide, scaffolding instructions, and tier overview |
+| [docs/studies/README.md](docs/studies/README.md) | Empirical studies, benchmark surveys, and codebase audit reports |
 | [Agents.md](Agents.md) | Development guidelines and architectural invariants for coding agents |
 | [Agents_Skills.md](Agents_Skills.md) | Step-by-step procedure runbooks for codebase maintenance |
 | [skills/README.md](skills/README.md) | 4-Tier skills catalog and agent loading instructions |
@@ -374,12 +382,15 @@ bench_profiles:
 
 ## Interactive Notebooks
 
+See [notebooks/README.md](notebooks/README.md) for setup instructions and execution progression.
+
 | Notebook | Description |
 |---|---|
-| [notebooks/01_define_graph_from_scratch.ipynb](notebooks/01_define_graph_from_scratch.ipynb) | End-to-end tutorial: defining Pydantic models, schema compilation, ingestion, Cypher querying, and D3 visualization. |
-| [notebooks/cypher_examples.ipynb](notebooks/cypher_examples.ipynb) | Cypher patterns: basic, traversal, aggregation, filtering |
-| [notebooks/document_graph_demo.ipynb](notebooks/document_graph_demo.ipynb) | Document Graph ingestion (`Folder`/`Document`/`MarkdownSection`) from a markdown directory |
-| [notebooks/cypher_query_development.ipynb](notebooks/cypher_query_development.ipynb) | Interactive Cypher development helper |
+| [notebooks/01_define_graph_from_scratch.ipynb](notebooks/01_define_graph_from_scratch.ipynb) | **Start Here:** End-to-end tutorial defining Pydantic models, schema compilation, in-memory Ladybug ingestion, Cypher querying, and D3 visualization. |
+| [notebooks/02_document_graph_full_pipeline.ipynb](notebooks/02_document_graph_full_pipeline.ipynb) | Full Document Graph pipeline: document conversion (PDF/DOCX), HTML table preservation, BAML/LLM outline enrichment, Ladybug DB indexing, and agent navigation tools. |
+| [notebooks/03_access_control_security_trimming.ipynb](notebooks/03_access_control_security_trimming.ipynb) | Enterprise access control, hierarchical security inheritance (Folder → Document), and runtime Cypher security trimming. |
+| [notebooks/cypher_examples.ipynb](notebooks/cypher_examples.ipynb) | Practical Cypher idioms: traversal, aggregations, path expressions, and vector similarity search. |
+| [notebooks/document_graph_demo.ipynb](notebooks/document_graph_demo.ipynb) | Lightweight zero-LLM demo of parsing markdown files into a Document Graph without external models. |
 
 ---
 

@@ -1,5 +1,7 @@
 # Security Trimming for a SharePoint-Based Enterprise Knowledge Graph
 
+> **Superseded & Implemented:** See [docs/access-control-security-trimming.md](../access-control-security-trimming.md) for the active production architecture specification and implementation details.
+
 ## Executive Summary
 
 To preserve SharePoint security within an Enterprise Knowledge Graph, the recommended approach is to implement **security trimming**.

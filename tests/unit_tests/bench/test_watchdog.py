@@ -84,9 +84,18 @@ def _record(run_id: str, tool_results: list[dict]) -> BenchRunRecord:
 
 def test_count_error_tool_results():
     records = [
-        _record("q1", [{"tool": "get_section_content", "content": "Error: buffer pool is full and no memory could be freed"}]),
+        _record(
+            "q1",
+            [{"tool": "get_section_content", "content": "Error: buffer pool is full and no memory could be freed"}],
+        ),
         _record("q2", [{"tool": "get_section_content", "content": "### [s0] Title\n\nNormal text"}]),
-        _record("q3", [{"tool": "query_image", "content": "Error analyzing image"}, {"tool": "search_sections", "content": "Traceback (most recent call last):"}]),
+        _record(
+            "q3",
+            [
+                {"tool": "query_image", "content": "Error analyzing image"},
+                {"tool": "search_sections", "content": "Traceback (most recent call last):"},
+            ],
+        ),
     ]
     stats = count_error_tool_results(records)
     assert stats["runs_with_errors"] == 2

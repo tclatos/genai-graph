@@ -26,7 +26,9 @@ class FakeRequest:
 def _tool_msg(section_ids: str = "s0") -> AIMessage:
     return AIMessage(
         content="",
-        tool_calls=[{"name": "get_section_content", "args": {"section_ids": section_ids}, "id": "t", "type": "tool_call"}],
+        tool_calls=[
+            {"name": "get_section_content", "args": {"section_ids": section_ids}, "id": "t", "type": "tool_call"}
+        ],
     )
 
 
@@ -131,7 +133,10 @@ def test_no_recovery_below_soft_limit():
 
 def test_tool_call_response_never_recovers():
     mw = WrapUpMiddleware(soft_limit=2, hard_limit=100)
-    still_working = AIMessage(content="", tool_calls=[{"name": "get_section_content", "args": {"section_ids": "s1"}, "id": "t", "type": "tool_call"}])
+    still_working = AIMessage(
+        content="",
+        tool_calls=[{"name": "get_section_content", "args": {"section_ids": "s1"}, "id": "t", "type": "tool_call"}],
+    )
     _, captured = _run(mw, _conversation(2), [still_working])
     assert len(captured) == 1
 

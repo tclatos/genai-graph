@@ -154,6 +154,7 @@ class Folder(BaseModel):
     name: str
     allowed_principals: list[str] = Field(default_factory=lambda: ["public"])
 
+
 class Document(BaseModel):
     content_hash: str  # Primary Key (xxHash XXH3-64)
     markdown_hash: str | None = None
@@ -192,6 +193,7 @@ To support both **LangGraph agents** (via typed `ToolRuntime[UserContext]`) and 
 
 ```python
 CURRENT_USER_CONTEXT: ContextVar[UserContext | None] = ContextVar("current_user_context", default=None)
+
 
 def get_active_user_context(runtime: Any = None) -> UserContext:
     if runtime is not None:
@@ -251,15 +253,13 @@ class SharePointAccessControlProvider(BaseAccessControlProvider):
 
     def __init__(self, client_id: str, client_secret: str, tenant_id: str, **kwargs):
         super().__init__(**kwargs)
-        self.client = GraphServiceClient(
-            credentials=ClientSecretCredential(tenant_id, client_id, client_secret)
-        )
+        self.client = GraphServiceClient(credentials=ClientSecretCredential(tenant_id, client_id, client_secret))
 
     async def get_document_acl(self, file_path: Path, relative_path: str, folder_chain=None) -> AccessControlResult:
         # Retrieve drive item permissions from Microsoft Graph
         drive_item = await self.client.drives.by_drive_id(...).items.by_drive_item_id(...).get()
         permissions = await self.client.drives.by_drive_id(...).items.by_drive_item_id(...).permissions.get()
-        
+
         principals = []
         for perm in permissions.value:
             if perm.granted_to_v2:

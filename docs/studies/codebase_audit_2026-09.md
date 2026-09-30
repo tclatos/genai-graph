@@ -108,12 +108,12 @@ should never be.
 ```python
 cols = _table_columns(backend, _DOCUMENT_LABEL)
 if "allowed_principals" not in cols:
-    return None   # _get_authorized_markdown_hashes: None means "unfiltered"
+    return None  # _get_authorized_markdown_hashes: None means "unfiltered"
 ```
 and, a few lines down in `_is_document_authorized` (line 141):
 ```python
 if "allowed_principals" not in cols:
-    return True   # fails OPEN
+    return True  # fails OPEN
 ```
 If the `Document` table predates the `allowed_principals` column being added
 (schema migration, older ingested DB, or a config that doesn't wire up an
@@ -134,7 +134,7 @@ startup, not an implicit per-query column check.
 ```python
 def load_records_from_file(path: str) -> list[CallbackRecord]:
     with open(path, "rb") as file:
-        records = pickle.load(file)   # arbitrary code execution if path is attacker-influenced
+        records = pickle.load(file)  # arbitrary code execution if path is attacker-influenced
 ```
 Same shape and same "developer-controlled file" mitigation as the genai-tk
 finding in the companion report — flagging here too because this file

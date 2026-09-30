@@ -353,7 +353,7 @@ class TestGraphSchemaFingerprint:
 
 class TestKgFactoryConfigFingerprint:
     def test_deterministic(self) -> None:
-        from typing import ClassVar, Type
+        from typing import ClassVar
 
         from pydantic import BaseModel as PydanticBaseModel
 
@@ -364,7 +364,7 @@ class TestKgFactoryConfigFingerprint:
             name: str
 
         class FakeFactory(KgFactory):
-            TOP_CLASS: ClassVar[Type[PydanticBaseModel] | None] = Dummy
+            TOP_CLASS: ClassVar[type[PydanticBaseModel] | None] = Dummy
             data_root: str = "/tmp/data"
             include: list[str] = ["*.json"]
 

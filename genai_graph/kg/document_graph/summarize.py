@@ -347,7 +347,7 @@ def _context_window_for(llm_id: str) -> int | None:
 
     try:
         return get_llm_info(llm_id).effective_context_window
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("Could not resolve context window for {}: {}", llm_id, exc)
         return None
 
@@ -482,7 +482,7 @@ def _call_llm_with_retry(
             if attempt > 0:
                 logger.info("{}: retry succeeded ({:.1f}s)", context, time.monotonic() - started)
             return llm_result
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if attempt == 0 and _is_length_limit_error(exc):
                 max_tokens = max(max_tokens or 0, config.retry_max_tokens)
                 msg = (

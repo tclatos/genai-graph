@@ -158,7 +158,7 @@ def main() -> None:
                     st.success("LLM Response.")
                     st.write(response.content)
                 except Exception as e:
-                    st.error(f"Error running LLM test: {str(e)}")
+                    st.error(f"Error running LLM test: {e!s}")
                     with st.expander("Show full error details"):
                         import traceback
 

@@ -26,7 +26,7 @@ def edit_config_dialog(config_path: str | Path) -> None:
 
     try:
         # Load current configuration
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             current_content = f.read()
 
         # YAML editor
@@ -34,7 +34,7 @@ def edit_config_dialog(config_path: str | Path) -> None:
             value=current_content, height="400px", language="yaml", theme="vs-dark", minimap=False, lineNumbers=True
         )
 
-        col1, col2, col3 = st.columns([1, 1, 2])
+        col1, col2, _col3 = st.columns([1, 1, 2])
 
         if col1.button("💾 Save", width="stretch"):
             try:

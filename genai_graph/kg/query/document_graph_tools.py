@@ -220,7 +220,7 @@ def _table_columns(backend: KgBackend, table: str) -> set[str]:
         return cached
     try:
         df = backend.execute_get_as_df(f"CALL table_info('{table}') RETURN *", None, union=False)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("table_info('{}') failed: {}", table, exc)
         _TABLE_COL_CACHE[key] = set()
         return set()
@@ -241,7 +241,7 @@ def _has_relationship(backend: KgBackend, rel_name: str) -> bool:
         try:
             df = backend.execute_get_as_df("CALL show_tables() RETURN *", None, union=False)
             cached = {str(v) for v in (df.values.flatten() if df is not None else [])}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("show_tables() failed: {}", exc)
             cached = set()
         _REL_CACHE[key] = cached
@@ -284,7 +284,7 @@ def _query_rows(
     """
     try:
         df = backend.execute_get_as_df(query, parameters, union=False)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         if "does not exist" in str(exc):
             logger.debug("Document Graph table not found (not yet ingested?): {}", exc)
             return [], query
@@ -518,9 +518,12 @@ def list_documents(
     out: list[dict[str, Any]] = []
     for row in rows:
         row = _normalize_row(row, _DOC_KEYS)
-        if not ctx.is_admin and row.get("allowed_principals") is not None:
-            if not ctx.has_access(row.get("allowed_principals")):
-                continue
+        if (
+            not ctx.is_admin
+            and row.get("allowed_principals") is not None
+            and not ctx.has_access(row.get("allowed_principals"))
+        ):
+            continue
         row["section_count"] = int(row.get("section_count") or 0)
         row["token_count"] = int(row.get("token_count") or 0)
         out.append(row)
@@ -638,7 +641,7 @@ def get_document_toc(
                 sid = r.get("section_id")
                 if sid in imgs_by_sec:
                     r["images"] = imgs_by_sec[sid]
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("Could not query images for TOC: {}", exc)
 
     return (rows, q) if return_query else rows
@@ -854,7 +857,7 @@ def reconstruct_document(
 
 def reconstruct_document(
     backend: KgBackend, document_id: str, return_query: bool = False
-) -> str | None | tuple[str | None, str]:
+) -> str | tuple[str | None, str] | None:
     """Rebuild a document's full Markdown text by concatenating its sections.
 
     Sections partition the document's lines without overlap, so concatenating
@@ -888,7 +891,7 @@ def _collect_subtree_section_ids(toc_rows: list[dict[str, Any]], root_section_id
 
 def reconstruct_section(
     backend: KgBackend, section_id: str, return_query: bool = False
-) -> str | None | tuple[str | None, str]:
+) -> str | tuple[str | None, str] | None:
     """Rebuild the Markdown text of one section plus all of its nested subsections.
 
     Accepts a full ``section_id`` (``{markdown_hash}::{sequence}``) or a prefix of one.
@@ -943,7 +946,7 @@ def get_available_indexes(backend: KgBackend) -> dict[str, bool]:
                     vector_available = True
                 if (tbl == "Image" and idx == _IMAGE_VECTOR_INDEX) or (tbl == "Image" and itype == "VECTOR"):
                     image_vector_available = True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("CALL SHOW_INDEXES() failed: {}", exc)
     return {"vector": vector_available, "fts": fts_available, "image_vector": image_vector_available}
 
@@ -991,10 +994,7 @@ def _scope_markdown_hashes(
             query = f"MATCH (f:{_FOLDER_LABEL} {{folder_id: $fid}})-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) RETURN DISTINCT d.markdown_hash AS mh"
         rows, _ = _query_rows(backend, query, {"fid": folder_id})
         folder_hashes = {r["mh"] for r in rows}
-        if doc_hash is not None:
-            scoped = {doc_hash} if doc_hash in folder_hashes else set()
-        else:
-            scoped = folder_hashes
+        scoped = ({doc_hash} if doc_hash in folder_hashes else set()) if doc_hash is not None else folder_hashes
     elif doc_hash is not None:
         scoped = {doc_hash}
 
@@ -1189,7 +1189,7 @@ def _keyword_section_hits(
 
             if fts_hits:
                 return fts_hits[:limit]
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("FTS search unavailable or failed, falling back to CONTAINS: {}", exc)
 
     # 3. Fallback to case-insensitive multi-term Cypher CONTAINS
@@ -1284,7 +1284,7 @@ def search_sections(
             handler = EmbeddingsHandler(embeddings_id=effective_embeddings_id)
             query_vec = handler.compute_embeddings(query)
             sem = _semantic_section_hits(backend, query_vec, limit, allowed)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("Semantic search unavailable: {}", exc)
             sem = []
 
@@ -1402,7 +1402,7 @@ def search_images(
                                 "score": round(max(0.0, 1.0 - (dist / 2.0)), 6),
                             }
                         )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("Image vector search error: {}", exc)
 
     params: dict[str, Any] = {"limit": limit}
@@ -1579,7 +1579,7 @@ def execute_image_query(
                     b64_from_db = row.get("base64_data")
                 elif row.get("path"):
                     candidate_path = row.get("path")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("Error looking up image {}: {}", image_ref, exc)
 
     if b64_from_db:
@@ -1813,7 +1813,7 @@ def create_document_graph_tools(
                 if trimming_feedback != "zero_knowledge"
                 else rows
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _tool_error(exc)
         if not rows:
             if total_rows:
@@ -1850,7 +1850,7 @@ def create_document_graph_tools(
             if folder_id and resolved is None:
                 return f"No folder found matching {folder_id!r}. Omit folder_id to list every ingested document."
             return folder_toc_yaml(backend, resolved, user_context=ctx)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _tool_error(exc)
 
     @tool("get_document_toc")
@@ -1872,7 +1872,7 @@ def create_document_graph_tools(
                 max_level=max_level,
                 user_context=ctx,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _tool_error(exc)
 
     @tool("get_section_content")
@@ -1890,7 +1890,7 @@ def create_document_graph_tools(
             backend = _connect(db_path)
             ctx = get_active_user_context()
             rows = get_section_content(backend, ids, user_context=ctx)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _tool_error(exc)
         if not rows:
             try:
@@ -1961,7 +1961,7 @@ def create_document_graph_tools(
                 embeddings_id=embeddings_id,
                 user_context=ctx,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _tool_error(exc)
         if not rows:
             return (
@@ -2003,7 +2003,7 @@ def create_document_graph_tools(
             return execute_image_query(
                 _connect(db_path), image_ref=image, question=question, model=model, user_context=ctx
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return _tool_error(exc)
 
     return [

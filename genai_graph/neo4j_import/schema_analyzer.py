@@ -62,10 +62,9 @@ class PropertyInfo(BaseModel):
         """
         sizes = set()
         for value in self.sample_values:
-            if isinstance(value, list) and value:
-                # Check if all elements are numeric (int or float)
-                if all(isinstance(x, (int, float)) for x in value):
-                    sizes.add(len(value))
+            # Check if all elements are numeric (int or float)
+            if isinstance(value, list) and value and all(isinstance(x, (int, float)) for x in value):
+                sizes.add(len(value))
 
         # Return size only if all samples have the same size
         if len(sizes) == 1:

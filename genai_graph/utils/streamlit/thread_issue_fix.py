@@ -1,7 +1,8 @@
 # Hacks to solve threading issue with Streamlit
 
 import inspect
-from typing import Callable, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 
 from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
 from langchain_core.callbacks.base import BaseCallbackHandler

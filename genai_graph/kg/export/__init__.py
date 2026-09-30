@@ -25,18 +25,18 @@ from genai_graph.kg.export.dag_html import generate_dag_html
 from genai_graph.kg.export.html import generate_html
 
 __all__ = [
-    "generate_html",
-    "generate_dag_html",
-    "export_html",
-    "export_schema",
-    "export_schema_json",
-    "export_schema_html",
-    "export_info",
-    "export_warnings",
+    "CacheFingerprints",
     "HtmlExportResult",
     "ParquetExportResult",
     "ParquetManifest",
-    "CacheFingerprints",
     "compute_fingerprints_for_config",
+    "export_html",
+    "export_info",
+    "export_schema",
+    "export_schema_html",
+    "export_schema_json",
+    "export_warnings",
+    "generate_dag_html",
+    "generate_html",
     "validate_parquet_cache",
 ]

@@ -1139,7 +1139,7 @@ class DocGraphCommands(CliTopCommand):
                 asyncio.run(_run())
             except typer.Exit:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug("docgraph agent error", exc_info=True)
                 console.print(f"[red]Agent error: {exc}[/red]")
                 raise typer.Exit(1) from exc

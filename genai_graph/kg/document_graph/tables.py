@@ -83,7 +83,7 @@ def _find_caption_before_pos(text: str, pos: int) -> str | None:
 
 def extract_section_tables(
     section: MarkdownSection,
-    markdown_file_path: Path | None = None,  # noqa: ARG001
+    markdown_file_path: Path | None = None,
 ) -> list[Table]:
     """Extract all tables (HTML and Markdown) referenced in a MarkdownSection.
 

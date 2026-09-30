@@ -10,7 +10,7 @@ import asyncio
 import json
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -134,7 +134,7 @@ async def evaluate_single_run(
                 run=r_record,
                 verdict=verdict,
                 judge_llm=judge_llm,
-                scored_at=datetime.now(timezone.utc).isoformat(),
+                scored_at=datetime.now(UTC).isoformat(),
                 reward_score=reward_score,
             )
         except Exception as exc:
@@ -161,7 +161,7 @@ async def evaluate_single_run(
             rationale=f"Judge evaluation failed after {max_retries} attempts: {last_exc}",
         ),
         judge_llm=judge_llm,
-        scored_at=datetime.now(timezone.utc).isoformat(),
+        scored_at=datetime.now(UTC).isoformat(),
         reward_score=reward_score,
     )
 

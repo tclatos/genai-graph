@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Optional
 
 import pyarrow as pa
@@ -38,10 +38,10 @@ class TestPydanticAnnotationToArrow:
         assert pydantic_annotation_to_arrow(None) == pa.string()
 
     def test_optional_str(self):
-        assert pydantic_annotation_to_arrow(Optional[str]) == pa.string()
+        assert pydantic_annotation_to_arrow(Optional[str]) == pa.string()  # noqa: UP045
 
     def test_optional_int(self):
-        assert pydantic_annotation_to_arrow(Optional[int]) == pa.int64()
+        assert pydantic_annotation_to_arrow(Optional[int]) == pa.int64()  # noqa: UP045
 
     def test_union_syntax(self):
         # Python 3.10+ X | None syntax
@@ -57,7 +57,7 @@ class TestPydanticAnnotationToArrow:
         assert pydantic_annotation_to_arrow(list[str] | None) == pa.list_(pa.string())
 
     def test_enum(self):
-        class Color(str, Enum):
+        class Color(StrEnum):
             red = "red"
 
         assert pydantic_annotation_to_arrow(Color) == pa.string()

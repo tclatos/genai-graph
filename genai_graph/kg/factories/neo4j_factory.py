@@ -12,6 +12,7 @@ Features:
 """
 
 import json
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -284,7 +285,7 @@ class Neo4jFactory(KgFactory):
         Note: This implementation returns a simplified dict[str, str] mapping
         instead of the base class's dict[str, str] with descriptions.
         """
-        return {label: label for label in self._node_data.keys()}
+        return {label: label for label in self._node_data}
 
     def get_relationship_types(self) -> list[str]:
         """Return all discovered relationship types."""
@@ -531,7 +532,7 @@ class Neo4jImportFactory(Neo4jFactory):
         Returns:
             Tuple of (NodeDataCollection, list[RelationshipRecord])
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from genai_graph.kg.ingest.extract import RelationshipRecord
         from genai_graph.kg.ingest.merge import NodeDataCollection
@@ -550,7 +551,7 @@ class Neo4jImportFactory(Neo4jFactory):
 
         # Track neo4j_id -> (target_type, target_id) for relationship resolution
         id_mapping: dict[str, tuple[str, str]] = {}
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Process nodes
         for neo4j_label, node_list in self._node_data.items():

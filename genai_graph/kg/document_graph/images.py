@@ -65,9 +65,7 @@ def _is_generic_alt(alt: str, filename: str, img_hash: str) -> bool:
         return True
     if cleaned.startswith(("image:", "img_")) or cleaned == filename.lower():
         return True
-    if cleaned == img_hash.lower():
-        return True
-    return False
+    return cleaned == img_hash.lower()
 
 
 def _find_caption_after_pos(text: str, pos: int) -> str | None:
@@ -257,7 +255,7 @@ def _build_image_node(
                 stored_path = str(resolved_path.relative_to(Path.cwd()))
             except ValueError:
                 stored_path = str(resolved_path)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("Could not read image binary {}: {}", resolved_path, exc)
 
     fmt = Path(filename).suffix.lstrip(".").lower() or "png"

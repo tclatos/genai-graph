@@ -100,10 +100,9 @@ class TocPreambleEntry(BaseModel):
     def _coerce_entry(cls, data: Any) -> Any:
         if isinstance(data, str):
             return {"title": data.strip(), "level": 1}
-        if isinstance(data, dict):
+        if isinstance(data, dict) and "page" in data and data["page"] is not None and not isinstance(data["page"], str):
             # If page is int or float, convert to str
-            if "page" in data and data["page"] is not None and not isinstance(data["page"], str):
-                data["page"] = str(data["page"])
+            data["page"] = str(data["page"])
         return data
 
 
@@ -124,12 +123,11 @@ class DocumentTocPreamble(BaseModel):
     def _coerce_input(cls, data: Any) -> Any:
         if isinstance(data, list):
             return {"entries": data}
-        if isinstance(data, dict):
-            if "entries" not in data:
-                for alt_key in ("sections", "toc", "items", "table_of_contents", "content", "tables"):
-                    if alt_key in data and isinstance(data[alt_key], list):
-                        data["entries"] = data[alt_key]
-                        break
+        if isinstance(data, dict) and "entries" not in data:
+            for alt_key in ("sections", "toc", "items", "table_of_contents", "content", "tables"):
+                if alt_key in data and isinstance(data[alt_key], list):
+                    data["entries"] = data[alt_key]
+                    break
         return data
 
 
@@ -266,7 +264,7 @@ def _context_window_for(llm_id: str) -> int | None:
 
     try:
         return get_llm_info(llm_id).effective_context_window
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("Could not resolve context window for {}: {}", llm_id, exc)
         return None
 
@@ -620,7 +618,7 @@ def _call_toc_preamble_llm(
         if isinstance(baml_result, DocumentTocPreamble):
             return baml_result
         return DocumentTocPreamble.model_validate(baml_result.model_dump())
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("BAML preamble TOC extraction unavailable ({}); using LangChain structured output", exc)
         from genai_tk.core.factories.llm_factory import get_llm
 
@@ -673,7 +671,7 @@ def extract_toc_from_preamble(
         )
         anchored = anchor_toc_preamble(raw, toc.entries, toc_end_line=end_line)
         return anchored, toc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         msg = f"{filename}: preamble TOC extraction failed: {exc}"
         warnings.append(msg)
         logger.warning(msg)
@@ -882,7 +880,7 @@ def _call_branch_llm(
             baml_options=baml_options,
         )
         return _baml_result_to_model(BranchOutline, baml_result)  # type: ignore[return-value]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("BAML branch extraction unavailable ({}); using LangChain structured output", exc)
 
     from genai_tk.core.factories.llm_factory import get_llm
@@ -929,7 +927,7 @@ def _call_branch_llm_with_retry(
             if attempt > 0:
                 logger.info("{}: branch retry succeeded ({:.1f}s)", context, time.monotonic() - started)
             return res
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if attempt == 0 and _is_length_limit_error(exc):
                 max_tokens = max(max_tokens or 0, config.retry_max_tokens)
                 msg = f"{context}: completion token limit reached; retrying with max_tokens={max_tokens}."
@@ -973,7 +971,7 @@ def _synthesize_document_summary(
         return _clean_text(res.document_description, config.max_description_chars), _clean_text(
             res.document_summary, config.max_summary_chars
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("BAML summary synthesis unavailable ({}); using LangChain structured output", exc)
 
     system = f"""
@@ -998,7 +996,7 @@ def _synthesize_document_summary(
         return _clean_text(res.document_description, config.max_description_chars), _clean_text(
             res.document_summary, config.max_summary_chars
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("Document summary synthesis failed for {}: {}", filename, exc)
     return f"Document: {filename}", ""
 
@@ -1046,7 +1044,7 @@ def _summarize_branch_one(
                 else:
                     out.append(OutlineEntry(title=h_title, level=h_level, description=None, summary=None))
             return out
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("{}: branch '{}' summarization failed: {}", filename, branch.branch_title, exc)
 
     return [OutlineEntry(title=s.title, level=s.level, description=None, summary=None) for s in branch.sections]
@@ -1205,7 +1203,7 @@ def _call_llm(
             baml_options=baml_options,
         )
         return _baml_result_to_model(DocumentOutline, baml_result)  # type: ignore[return-value]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("BAML outline extraction unavailable ({}); using LangChain structured output", exc)
 
     user = f"""Document: {filename}
@@ -1249,7 +1247,7 @@ def _call_llm_with_retry(
             if attempt > 0:
                 logger.info("{}: outline retry succeeded ({:.1f}s)", context, time.monotonic() - started)
             return _clean_outline(outline, config)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if attempt == 0 and _is_length_limit_error(exc):
                 max_tokens = max(max_tokens or 0, config.retry_max_tokens)
                 msg = f"{context}: hit the completion token limit; retrying with max_tokens={max_tokens}."
@@ -1269,7 +1267,7 @@ def _load_cached(cache_path: Path) -> OutlineResult | None:
         return None
     try:
         return OutlineResult.model_validate_json(cache_path.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Stale/invalid outline cache {} ({}); re-extracting", cache_path, exc)
         return None
 
@@ -1279,7 +1277,7 @@ def _write_cached(cache_path: Path, result: OutlineResult) -> None:
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
-    except OSError as exc:  # noqa: BLE001
+    except OSError as exc:
         logger.warning("Could not write outline cache {}: {}", cache_path, exc)
 
 

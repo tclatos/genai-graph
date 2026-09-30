@@ -42,8 +42,8 @@ class TestGetKuzuType:
     def test_typing_union(self) -> None:
         from typing import Optional, Union
 
-        assert _get_kuzu_type(Optional[int]) == "INT64"
-        assert _get_kuzu_type(Union[str, None]) == "STRING"
+        assert _get_kuzu_type(Optional[int]) == "INT64"  # noqa: UP045
+        assert _get_kuzu_type(Union[str, None]) == "STRING"  # noqa: UP007
 
     def test_unknown_type_falls_back_to_string(self) -> None:
         class Custom:

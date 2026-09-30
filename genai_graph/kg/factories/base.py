@@ -5,7 +5,7 @@ The actual graph is built via extract_graph_data() → merge_nodes_batch().
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Type
+from typing import Any
 
 from pydantic import BaseModel
 from rich.console import Console
@@ -24,7 +24,7 @@ class KgFactory(ABC, BaseModel):
     """
 
     # Optional class constant - set for factories with a single root model type.
-    TOP_CLASS: Type[BaseModel] | None = None
+    TOP_CLASS: type[BaseModel] | None = None
 
     @property
     def name(self) -> str:

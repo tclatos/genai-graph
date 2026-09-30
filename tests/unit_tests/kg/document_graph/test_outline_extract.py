@@ -63,7 +63,7 @@ class TestExtractOutline:
         # parsed as prompt-template variables and crash rendering.
         from genai_graph.kg.document_graph.outline_extract import _build_prompt
 
-        system, user = _build_prompt(filename="doc.md", raw="SHOULD_NOT_APPEAR", config=_config(tmp_path))
+        _system, user = _build_prompt(filename="doc.md", raw="SHOULD_NOT_APPEAR", config=_config(tmp_path))
 
         assert "{filename}" in user
         assert "{raw}" in user

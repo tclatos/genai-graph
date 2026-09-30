@@ -227,7 +227,7 @@ def _fetch_graph_data(
                 path_rels = [_normalize_graph_obj(r) for r in rel_obj.get("_rels", [])]
 
                 # Build list of all nodes in path: src -> intermediates -> dst
-                all_path_nodes = [src_node] + path_nodes + [dst_node]
+                all_path_nodes = [src_node, *path_nodes, dst_node]
 
                 # Process all nodes in the path
                 for node_obj in all_path_nodes:
@@ -249,9 +249,9 @@ def _fetch_graph_data(
                     # Extract node properties (skip internal fields)
                     node_dict = {}
                     for key, val in node_obj.items():
-                        if key in ("_created_at", "_updated_at", "_original_name"):
-                            node_dict[key] = str(val).strip() or str(val)
-                        elif not key.startswith("_") and val is not None:
+                        if key in ("_created_at", "_updated_at", "_original_name") or (
+                            not key.startswith("_") and val is not None
+                        ):
                             node_dict[key] = str(val).strip() or str(val)
 
                     # Generate display name and metadata
@@ -331,9 +331,9 @@ def _fetch_graph_data(
                     # Extract node properties (skip internal fields)
                     node_dict = {}
                     for key, val in node_obj.items():
-                        if key in ("_created_at", "_updated_at", "_original_name"):
-                            node_dict[key] = str(val).strip() or str(val)
-                        elif not key.startswith("_") and val is not None:
+                        if key in ("_created_at", "_updated_at", "_original_name") or (
+                            not key.startswith("_") and val is not None
+                        ):
                             node_dict[key] = str(val).strip() or str(val)
 
                     # Generate display name and metadata
@@ -414,9 +414,9 @@ def _fetch_graph_data(
                 # Extract node properties
                 node_dict = {}
                 for key, val in node_obj.items():
-                    if key in ("_created_at", "_updated_at", "_original_name"):
-                        node_dict[key] = str(val).strip() or str(val)
-                    elif not key.startswith("_") and val is not None:
+                    if key in ("_created_at", "_updated_at", "_original_name") or (
+                        not key.startswith("_") and val is not None
+                    ):
                         node_dict[key] = str(val).strip() or str(val)
 
                 # Generate display name and metadata
@@ -453,9 +453,9 @@ def _fetch_graph_data(
 
                         node_dict = {}
                         for key, val in node_obj.items():
-                            if key in ("_created_at", "_updated_at", "_original_name"):
-                                node_dict[key] = str(val).strip() or str(val)
-                            elif not key.startswith("_") and val is not None:
+                            if key in ("_created_at", "_updated_at", "_original_name") or (
+                                not key.startswith("_") and val is not None
+                            ):
                                 node_dict[key] = str(val).strip() or str(val)
 
                         node_name = _get_node_display_name(node_dict, node_type)

@@ -18,7 +18,8 @@ contextualized string rather than a single field value.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from genai_tk.extra.nlp import (
     get_dominant_language,
@@ -83,7 +84,7 @@ def _column_type(backend: KgBackend, table: str, col: str) -> str | None:
         for row in backend.execute(f"CALL table_info('{table}') RETURN *"):
             if str(row[1]) == col:
                 return str(row[2])
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("table_info('{}') failed: {}", table, exc)
     return None
 
@@ -92,7 +93,7 @@ def _table_columns(backend: KgBackend, table: str) -> set[str]:
     """Return the set of property names on *table* (empty when the table is absent)."""
     try:
         df = backend.execute_get_as_df(f"CALL table_info('{table}') RETURN *", None, union=False)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return set()
     if df is None or df.empty:
         return set()
@@ -108,7 +109,7 @@ def ensure_chunk_embedding_column(backend: KgBackend, dim: int) -> None:
         try:
             backend.execute(f"ALTER TABLE {_CHUNK_TABLE} ADD {_EMBEDDING_FIELD} {want}")
             logger.info("Added {}.{} {}", _CHUNK_TABLE, _EMBEDDING_FIELD, want)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise RetrievalError(f"Could not add {_EMBEDDING_FIELD} {want} to {_CHUNK_TABLE}: {exc}") from exc
         return
     if existing.replace(" ", "") == want.replace(" ", ""):
@@ -138,7 +139,7 @@ def _ensure_stopwords_table(backend: KgBackend, stopwords: set[str], table_name:
             logger.debug("COPY into {} failed ({}); falling back to LOAD FROM ... MERGE", table_name, copy_exc)
             backend.execute(f"LOAD FROM tbl MERGE (s:{table_name} {{word: word}})")
         return True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Could not populate {} table: {}", table_name, exc)
         return False
 
@@ -175,7 +176,7 @@ def ensure_section_fts_index(
         try:
             rows = backend.execute("MATCH (d:Document) RETURN DISTINCT d.language AS lang")
             lang_list = [r[0] for r in rows if r and r[0]]
-        except Exception:  # noqa: BLE001
+        except Exception:
             lang_list = []
     if not lang_list:
         lang_list = ["en"]
@@ -208,7 +209,7 @@ def ensure_section_fts_index(
             effective_stemmer,
             _STOPWORDS_TABLE if has_stopwords else "default",
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         if "already" in str(exc).lower():
             logger.debug("FTS index {} already exists", index_name)
             return index_name
@@ -286,7 +287,7 @@ def build_sections_chunks(
     embed_inputs = [item[6] for item in items]
     try:
         embeddings = handler.compute_embeddings_batch(embed_inputs)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise RetrievalError(f"Batch embedding failed for {len(embed_inputs)} chunks: {exc}") from exc
 
     return attach_chunk_embeddings(items, embeddings)

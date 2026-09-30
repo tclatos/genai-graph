@@ -243,10 +243,7 @@ def query_kg(query: str, llm: str | None = None, kg_config_name: str | None = No
     params = _embed_query_vector(cypher_query, query)
 
     try:
-        if params:
-            result = backend.execute(cypher_query, parameters=params)
-        else:
-            result = backend.execute(cypher_query)
+        result = backend.execute(cypher_query, parameters=params) if params else backend.execute(cypher_query)
         df = result.get_as_df()
     except Exception as e:
         raise RuntimeError(f"Error in Cypher command execution: {cypher_query}\nException:{e}") from e

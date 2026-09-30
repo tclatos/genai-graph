@@ -25,6 +25,7 @@ BAML-extracted data.
 from __future__ import annotations
 
 import mimetypes
+from datetime import UTC
 from pathlib import Path
 from typing import ClassVar
 
@@ -37,9 +38,9 @@ from genai_graph.kg.schema.core import GraphSchema
 
 
 def _mtime_iso(mtime: float) -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(mtime, tz=UTC).isoformat()
 
 
 class DocumentDirectoryFactory(KgFactory):

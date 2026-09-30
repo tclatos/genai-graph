@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +66,7 @@ async def run_one_question(
     input_tokens = 0
     output_tokens = 0
     error: str | None = None
-    started_at = datetime.now(timezone.utc).isoformat()
+    started_at = datetime.now(UTC).isoformat()
 
     try:
         async for event in harness.astream(q_text, thread_id=q_id):

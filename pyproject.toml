@@ -95,6 +95,7 @@ dev = [
     "ipywidgets>=8.1.2", # Jupyter widgets
     "grandalf>=0.8",     # Graph layout algorithms
     "pytest-cov>=7.1.0",
+    "pytest-beartype>=0.2.0", # Runtime type checking for pytest
 ]
 
 [tool.uv]
@@ -133,6 +134,13 @@ exclude = ["genai_graph/skills"]
 [tool.ruff]
 builtins = ["ic", "debug"]
 line-length = 120          # default is 88
+exclude = [
+    "notebooks/", # Jupyter notebooks (may have parse errors / out-of-order cells)
+    ".venv/",
+]
+
+[tool.ruff.format]
+docstring-code-format = true # Formats code blocks in docstrings
 
 [tool.ruff.lint]
 # Lint rule configuration:
@@ -149,6 +157,9 @@ select = [
     "PIE",
     "PD",    # Pandas
     "FURB",  #refurbishing and modernizing
+    "UP",    # pyupgrade - modernize syntax for the target Python version
+    "SIM",   # flake8-simplify - simplifiable conditionals/comprehensions
+    "RUF",   # Ruff-specific rules
 ]
 
 ignore = [ # Ignored linter rules: 
@@ -162,6 +173,28 @@ ignore = [ # Ignored linter rules:
     "ANN003", # Annotate **kwarg
     "ANN201", # Missing return type
     "ANN202", # Missing return info
+    "COM812", # Trailing comma missing — conflicts with the ruff formatter
+    "ISC001", # Implicit string concatenation on one line — conflicts with the ruff formatter
+    "RUF012", # Mutable class attributes should be annotated with `ClassVar` — noisy on Pydantic/SQLModel fields
+    "RUF001", # Ambiguous unicode character (string) — em-dashes/curly quotes are used intentionally throughout docstrings
+    "RUF002", # Ambiguous unicode character (docstring) — same rationale as RUF001
+    "RUF003", # Ambiguous unicode character (comment) — same rationale as RUF001
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: relax annotations, docstrings, magic values, security, and assertion style
+"tests/**" = [
+    "ANN001", # Missing type annotation for function argument
+    "ARG002", # Unused method argument — common for pytest fixtures
+    "D1",     # Missing docstrings
+    "PLR2004",# Magic value used in comparison — fine in test assertions
+    "S101",   # Use of `assert` detected
+    "S311",   # Pseudo-random generator not suitable for security — fine in tests
+]
+# Scripts / notebooks: allow prints, broad exceptions, and standalone modules
+"scripts/**" = [
+    "BLE001", # Blind exception catch — resilience in standalone scripts
+    "INP001", # Missing `__init__.py` — scripts are standalone
 ]
 
 [tool.ruff.lint.pycodestyle]
@@ -178,6 +211,12 @@ reportTypedDictNotRequiredAccess = false # Avoid warnings in LangGraph
 [tool.pytest.ini_options]
 testpaths = ["tests/unit_tests", "tests/integration_tests"]
 python_files = ["test_*.py", "*_test.py"]
+beartype_packages = [
+    # Conservative, mostly-Pydantic package subset — safe to runtime-check.
+    "genai_graph.kg.schema",
+    "genai_graph.orchestration",
+    "genai_graph.utils",
+]
 markers = [
     "unit: unit tests (no external services)",
     "integration: integration tests (local services like Ladybug, no API keys)",

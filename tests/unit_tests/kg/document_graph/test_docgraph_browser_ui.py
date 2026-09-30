@@ -215,7 +215,7 @@ async def test_async_fetch_docgraph_data(sample_docgraph_db: tuple[str, Path]) -
     assert stats["sections"] >= 3
     assert stats["total_tokens"] > 0
 
-    folders, docs = await fetch_folders_and_documents(backend)
+    _folders, docs = await fetch_folders_and_documents(backend)
     assert len(docs) == 1
     doc_hash = docs[0]["markdown_hash"]
 

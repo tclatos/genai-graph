@@ -481,9 +481,8 @@ class BenchViewerApp(App):
                         id="status-select",
                     )
                 yield DataTable(id="questions-table", cursor_type="row")
-            with Vertical(id="right-panel"):
-                with VerticalScroll(id="detail-container"):
-                    yield Markdown(id="detail-markdown")
+            with Vertical(id="right-panel"), VerticalScroll(id="detail-container"):
+                yield Markdown(id="detail-markdown")
         yield Footer()
 
     def on_mount(self) -> None:

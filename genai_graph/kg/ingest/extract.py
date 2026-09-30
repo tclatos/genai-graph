@@ -4,9 +4,10 @@ This module provides functions for extracting graph data from Pydantic models
 and creating the graph schema and nodes/relationships in the database.
 """
 
+import contextlib
 import json
-from datetime import datetime, timezone
-from typing import Any, Dict, NamedTuple, Union
+from datetime import UTC, datetime
+from typing import Any, NamedTuple, Union
 
 from genai_tk.config_mgmt.config_mngr import global_config
 from genai_tk.core.factories.embeddings_factory import EmbeddingsFactory
@@ -299,7 +300,7 @@ def _add_missing_columns(backend: KgBackend, table_name: str, fields: list[str])
     """
     try:
         existing_cols = {str(row[1]) for row in backend.execute(f"CALL table_info('{table_name}') RETURN *")}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug(f"Could not introspect columns for {table_name}: {exc}")
         return
 
@@ -310,7 +311,7 @@ def _add_missing_columns(backend: KgBackend, table_name: str, fields: list[str])
         try:
             backend.execute(f"ALTER TABLE {table_name} ADD {field_decl}")
             logger.info(f"Schema evolution: added missing column '{field_name}' to existing table {table_name}")
-        except Exception as alter_exc:  # noqa: BLE001
+        except Exception as alter_exc:
             logger.warning(f"Could not add missing column '{field_name}' to {table_name}: {alter_exc}")
 
 
@@ -585,8 +586,8 @@ def extract_graph_data(
     """
     nodes_data = NodeDataCollection()
     relationships: list[RelationshipRecord] = []
-    node_registry: Dict[str, set[str]] = {}  # For deduplication: node_type -> set of dedup values
-    id_registry: Dict[str, Dict[str, str]] = {}  # For relationships: node_type -> {dedup_value: _id}
+    node_registry: dict[str, set[str]] = {}  # For deduplication: node_type -> set of dedup values
+    id_registry: dict[str, dict[str, str]] = {}  # For relationships: node_type -> {dedup_value: _id}
 
     # Field paths are already set as _field_path in create_graph
 
@@ -667,11 +668,9 @@ def extract_graph_data(
                 _add_embedded_fields(item_data, model, nodes, node_info)
 
                 # Normalise legacy `metadata` and attach provenance.
-                try:
-                    apply_extra_fields(item_data, node_info, model, item, source_key)
-                except Exception:
+                with contextlib.suppress(Exception):
                     # Defensive: do not break extraction if helper fails
-                    pass
+                    apply_extra_fields(item_data, node_info, model, item, source_key)
 
                 # When persisting to the database, store metadata as a JSON string
                 # so that arbitrary keys/values are supported without schema
@@ -684,7 +683,7 @@ def extract_graph_data(
                     pass
 
                 # Add timestamps
-                now = datetime.now(timezone.utc).isoformat()
+                now = datetime.now(UTC).isoformat()
                 item_data["_created_at"] = now
                 item_data["_updated_at"] = now
 
@@ -765,12 +764,10 @@ def extract_graph_data(
 
             # Get dedup value for from_node to lookup id
             raw_from = from_item.model_dump() if hasattr(from_item, "model_dump") else from_item
-            from_dict: Dict[str, Any]
-            if isinstance(raw_from, dict):
-                from_dict = raw_from
-            else:
-                # Fallback: best-effort conversion for unexpected types
-                from_dict = dict(getattr(raw_from, "__dict__", {}))
+            # Fallback: best-effort conversion for unexpected types
+            from_dict: dict[str, Any] = (
+                raw_from if isinstance(raw_from, dict) else dict(getattr(raw_from, "__dict__", {}))
+            )
 
             # Get lookup key for from_node - use name for AUTO_ID/callable, field value otherwise
             from_key_from = from_node_info.key_from
@@ -790,11 +787,8 @@ def extract_graph_data(
                 if to_item is None:
                     continue
                 raw_to = to_item.model_dump() if hasattr(to_item, "model_dump") else to_item
-                to_dict: Dict[str, Any]
-                if isinstance(raw_to, dict):
-                    to_dict = raw_to
-                else:
-                    to_dict = dict(getattr(raw_to, "__dict__", {}))
+                to_dict: dict[str, Any]
+                to_dict = raw_to if isinstance(raw_to, dict) else dict(getattr(raw_to, "__dict__", {}))
 
                 # Get lookup key for to_node - use name for AUTO_ID/callable, field value otherwise
                 to_key_from = to_node_info.key_from
@@ -810,7 +804,7 @@ def extract_graph_data(
                     # Extract p_*_ properties from to_item for edge properties
                     edge_properties = {}
                     if hasattr(relation_info.to_node.node_class, "model_fields"):
-                        for field_name in relation_info.to_node.node_class.model_fields.keys():
+                        for field_name in relation_info.to_node.node_class.model_fields:
                             if field_name.startswith("p_") and field_name.endswith("_"):
                                 prop_name = field_name[2:-1]  # Remove p_ prefix and _ suffix
                                 prop_value = to_dict.get(field_name)

@@ -214,7 +214,7 @@ async def fetch_document_sections_full(backend: KgBackend, markdown_hash: str) -
             )
             for gr in rel_rows:
                 graph_links_by_sec.setdefault(gr["section_id"], []).append(gr)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("Graph links query skipped: {}", exc)
 
         # Merge and enrich sections
@@ -474,10 +474,7 @@ def format_section_expander_label(section: dict[str, Any]) -> str:
     summary = (section.get("summary") or section.get("description") or "").strip()
     if summary:
         summary_clean = re.sub(r"\s+", " ", summary)
-        if len(summary_clean) > 80:
-            summary_preview = f" — {summary_clean[:77]}..."
-        else:
-            summary_preview = f" — {summary_clean}"
+        summary_preview = f" — {summary_clean[:77]}..." if len(summary_clean) > 80 else f" — {summary_clean}"
     else:
         summary_preview = ""
 

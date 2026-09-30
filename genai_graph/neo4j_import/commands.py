@@ -488,7 +488,7 @@ class Neo4jCommands(CliTopCommand):
                 table = Table(title=f"Query Results (showing up to {limit})")
 
                 # Add columns
-                for col in results[0].keys():
+                for col in results[0]:
                     table.add_column(col, style="cyan")
 
                 # Add rows

@@ -105,7 +105,7 @@ def _select_configuration() -> None:
         try:
             cfg = global_config()
             chunker_names = list(cfg.get_dict("chunkers", {}).keys())
-            chunker_options = ["auto"] + chunker_names
+            chunker_options = ["auto", *chunker_names]
         except Exception:
             chunker_options = ["auto", "markdown", "recursive"]
 
@@ -118,12 +118,12 @@ def _select_configuration() -> None:
 
 
 def _group_lineage_by_directory(
-    lineage: list["MarkdownLineage"],
+    lineage: list[MarkdownLineage],
     data_roots: list[Path],
-) -> dict[str, list["MarkdownLineage"]]:
+) -> dict[str, list[MarkdownLineage]]:
     """Group lineage entries by their markdown parent directory (relative to data_root)."""
 
-    grouped: dict[str, list["MarkdownLineage"]] = defaultdict(list)
+    grouped: dict[str, list[MarkdownLineage]] = defaultdict(list)
     for entry in lineage:
         relative_dir = _make_relative_path(entry.markdown_path.parent, data_roots)
         grouped[relative_dir].append(entry)
@@ -133,8 +133,8 @@ def _group_lineage_by_directory(
 
 
 def _select_markdown_entry(
-    grouped: dict[str, list["MarkdownLineage"]],
-) -> "MarkdownLineage | None":
+    grouped: dict[str, list[MarkdownLineage]],
+) -> MarkdownLineage | None:
     """Render directory + markdown selectors and return the chosen entry."""
 
     if not grouped:
@@ -176,7 +176,7 @@ def _select_markdown_entry(
     return entries[0]
 
 
-def _render_markdown_tab(entry: "MarkdownLineage", data_roots: list[Path]) -> None:
+def _render_markdown_tab(entry: MarkdownLineage, data_roots: list[Path]) -> None:
     """Render the Markdown content tab."""
 
     st.subheader("Markdown Document")
@@ -192,7 +192,7 @@ def _render_markdown_tab(entry: "MarkdownLineage", data_roots: list[Path]) -> No
         st.error(f"Failed to read markdown file: {exc}")
 
 
-def _render_source_tab(entry: "MarkdownLineage", data_roots: list[Path]) -> None:
+def _render_source_tab(entry: MarkdownLineage, data_roots: list[Path]) -> None:
     """Render the source (PDF or other) tab."""
 
     st.subheader("Source Document (PDF or original)")
@@ -214,7 +214,7 @@ def _render_source_tab(entry: "MarkdownLineage", data_roots: list[Path]) -> None
         )
 
 
-def _render_json_tab(entry: "MarkdownLineage", data_roots: list[Path]) -> None:
+def _render_json_tab(entry: MarkdownLineage, data_roots: list[Path]) -> None:
     """Render the JSON content tab with optional per-file selector."""
 
     st.subheader("BAML Generated Files")
@@ -370,7 +370,7 @@ def _increase_markdown_header_levels(content: str) -> str:
     return re.sub(r"^(#+)(\s+.*)$", replace_header, content, flags=re.MULTILINE)
 
 
-def _render_chunks_tab(entry: "MarkdownLineage", data_roots: list[Path]) -> None:
+def _render_chunks_tab(entry: MarkdownLineage, data_roots: list[Path]) -> None:
     """Render the Markdown chunks tab showing how the file is chunked for RAG."""
 
     st.subheader("Markdown Chunks")

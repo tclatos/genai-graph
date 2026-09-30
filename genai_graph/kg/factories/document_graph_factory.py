@@ -22,7 +22,7 @@ elsewhere in genai-graph.
 from __future__ import annotations
 
 import mimetypes
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -300,8 +300,8 @@ class DocumentGraphFactory(KgFactory):
         try:
             stat = path.stat()
             file_size: int | None = stat.st_size
-            modified_at: str | None = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
-        except Exception as exc:  # noqa: BLE001
+            modified_at: str | None = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
+        except Exception as exc:
             logger.warning("Could not stat {}: {}", path, exc)
             file_size = None
             modified_at = None

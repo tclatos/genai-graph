@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from genai_tk.utils.pydantic_utils.common import get_class_description as _get_class_description
@@ -113,7 +113,7 @@ class SchemaMeta(BaseModel):
 
     format: str = "genai_graph.resolved_schema"
     format_version: int = 1
-    generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    generated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     graphs: list[str] = Field(default_factory=list)
     root_model: str | None = None
 
@@ -147,7 +147,7 @@ class ResolvedSchema(BaseModel):
         graph_names: list[str] | None = None,
         print_enums: bool = True,
         descriptions: dict[str, Any] | None = None,
-    ) -> "ResolvedSchema":
+    ) -> ResolvedSchema:
         """Build a ``ResolvedSchema`` from a ``GraphSchema`` and optional descriptions.
 
         Args:
@@ -355,7 +355,7 @@ class ResolvedSchema(BaseModel):
         cls,
         graph_names: list[str] | None = None,
         print_enums: bool = True,
-    ) -> "ResolvedSchema":
+    ) -> ResolvedSchema:
         """Build from the global GraphRegistry.
 
         Args:
@@ -545,7 +545,7 @@ class ResolvedSchema(BaseModel):
         return json.dumps(self.to_d3_json(), indent=indent)
 
     @classmethod
-    def from_json_file(cls, path: str) -> "ResolvedSchema":
+    def from_json_file(cls, path: str) -> ResolvedSchema:
         """Load a ``ResolvedSchema`` from a saved canonical JSON file.
 
         The file must have been written by ``to_json_str()`` / ``export_schema_json()``.
@@ -558,7 +558,7 @@ class ResolvedSchema(BaseModel):
         meta = SchemaMeta(
             format=meta_data.get("format", "genai_graph.resolved_schema"),
             format_version=meta_data.get("format_version", 1),
-            generated_at=meta_data.get("generated_at", datetime.now(timezone.utc).isoformat()),
+            generated_at=meta_data.get("generated_at", datetime.now(UTC).isoformat()),
             graphs=meta_data.get("graphs", []),
             root_model=meta_data.get("root_model"),
         )

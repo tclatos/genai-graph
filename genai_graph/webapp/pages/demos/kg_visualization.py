@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 DEFAULT_VIZ_LIMIT = 2000
 
 
-def get_node_types(backend: "KgBackend") -> list[str]:
+def get_node_types(backend: KgBackend) -> list[str]:
     """Get all node types (labels) in the graph.
 
     Args:
@@ -50,7 +50,7 @@ def get_node_types(backend: "KgBackend") -> list[str]:
         return []
 
 
-def get_relationship_types(backend: "KgBackend") -> list[str]:
+def get_relationship_types(backend: KgBackend) -> list[str]:
     """Get all relationship types in the graph.
 
     Args:
@@ -69,7 +69,7 @@ def get_relationship_types(backend: "KgBackend") -> list[str]:
         return []
 
 
-def get_nodes_of_type(backend: "KgBackend", node_type: str, limit: int = 200) -> list[str]:
+def get_nodes_of_type(backend: KgBackend, node_type: str, limit: int = 200) -> list[str]:
     """Get list of nodes of a specific type with their display names.
 
     Args:
@@ -138,15 +138,9 @@ def build_filtered_cypher_query(
     # Build relationship filter
     if relationship_types:
         rel_patterns = "|".join(relationship_types)
-        if use_multi_hop:
-            rel_filter = f"[r:{rel_patterns}*1..{HOPS}]"
-        else:
-            rel_filter = f"[r:{rel_patterns}]"
+        rel_filter = f"[r:{rel_patterns}*1..{HOPS}]" if use_multi_hop else f"[r:{rel_patterns}]"
     else:
-        if use_multi_hop:
-            rel_filter = f"[r*1..{HOPS}]"
-        else:
-            rel_filter = "[r]"
+        rel_filter = f"[r*1..{HOPS}]" if use_multi_hop else "[r]"
 
     # Build exclusion filter for WHERE clause
     exclusion_filter = ""
@@ -334,7 +328,7 @@ def main() -> None:
             node_type = sss.selected_node_types[0]
             available_nodes = get_nodes_of_type(backend, node_type)
             if available_nodes:
-                node_options = ["(All)"] + available_nodes
+                node_options = ["(All)", *available_nodes]
                 selected_node_display = st.selectbox(
                     f"{node_type} Nodes",
                     options=node_options,
@@ -436,7 +430,7 @@ def main() -> None:
             filter_info.append(f"Relationships: {', '.join(sss.selected_rel_types)}")
         filter_info.append(f"Limit: {sss.viz_limit}")
 
-        col1, col2 = st.columns([1, 2])
+        _col1, _col2 = st.columns([1, 2])
         with st.sidebar:
             st.caption("Filters: " + " | ".join(filter_info))
             if sss.current_query:

@@ -76,7 +76,7 @@ def _fake_call_branch_llm(**kwargs: Any) -> BranchOutline:
     return BranchOutline(sections=entries)
 
 
-def _fake_synthesize_doc_summary(**kwargs: Any) -> tuple[str, str]:  # noqa: ARG001
+def _fake_synthesize_doc_summary(**kwargs: Any) -> tuple[str, str]:
     return (
         "A sample business report on project objectives.",
         "Full summary of sample PDF report covering objectives, findings, and results.",

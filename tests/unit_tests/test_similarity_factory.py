@@ -80,7 +80,7 @@ class TestResolveField:
         assert field == "my_field"
 
     def test_raises_on_missing_dot(self) -> None:
-        with pytest.raises(ValueError, match="NodeClass.field_name"):
+        with pytest.raises(ValueError, match=r"NodeClass\.field_name"):
             SimilarityFactory._resolve_field("no_dot_here")
 
 

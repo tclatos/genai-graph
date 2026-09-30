@@ -132,13 +132,13 @@ class MarkdownBamlFactory(DocumentMixin, KgFactory):
         if cache_path is not None and self._cache_fresh(cache_path, md_path):
             try:
                 return model_cls.model_validate_json(cache_path.read_text(encoding="utf-8"))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("Stale/invalid extraction cache {} ({}); re-extracting", cache_path, exc)
 
         md_text = md_path.read_text(encoding="utf-8", errors="replace")
         try:
             model = self.extract_from_markdown(md_text)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("BAML extraction failed for {}: {}", md_path, exc)
             return None
 

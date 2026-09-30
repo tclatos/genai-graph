@@ -160,7 +160,7 @@ def document_graph_build_step(
     )
 
 
-def make_source_already_ingested(db_path: str) -> "Callable[[str], bool]":
+def make_source_already_ingested(db_path: str) -> Callable[[str], bool]:
     """Return a callback usable as ``markdownize_flow(already_processed=...)``.
 
     The returned callable takes a source file's content hash and reports whether
@@ -180,7 +180,7 @@ def make_source_already_ingested(db_path: str) -> "Callable[[str], bool]":
                 {"h": source_hash},
                 union=False,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if "does not exist" in str(exc):
                 return False
             raise

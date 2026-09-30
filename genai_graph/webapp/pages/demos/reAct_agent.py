@@ -418,16 +418,15 @@ async def process_user_input(user_input: str, chat_container: Any) -> None:
                         for node, update in step.items():
                             status.write(f"📍 Processing: `{node}`")
 
-                            if "messages" in update and update["messages"]:
+                            if update.get("messages"):
                                 latest_message = update["messages"][-1]
 
-                                if isinstance(latest_message, AIMessage):
-                                    if latest_message.content:
-                                        response_content = latest_message.content
-                                        final_response = latest_message
+                                if isinstance(latest_message, AIMessage) and latest_message.content:
+                                    response_content = latest_message.content
+                                    final_response = latest_message
 
-                                        # Add LLM call to trace middleware (will trigger real-time render)
-                                        sss.trace_middleware.add_llm_call(node, response_content)
+                                    # Add LLM call to trace middleware (will trigger real-time render)
+                                    sss.trace_middleware.add_llm_call(node, response_content)
             finally:
                 # Always clear the callback after execution
                 sss.trace_middleware.set_callback(None)
@@ -454,9 +453,9 @@ async def process_user_input(user_input: str, chat_container: Any) -> None:
                 st.chat_message("ai").write(error_msg)
 
     except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
+        st.error(f"An error occurred: {e!s}")
         logger.exception("Agent execution failed")
-        error_msg = f"I encountered an error: {str(e)}"
+        error_msg = f"I encountered an error: {e!s}"
         sss.messages.append(AIMessage(content=error_msg))
         # Display error message
         with chat_container:

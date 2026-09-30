@@ -73,9 +73,7 @@ def _get_configured_profiles() -> list[str]:
 
         cfg = global_config()
         p_dict = cfg.get("docgraph_profiles", None)
-        if isinstance(p_dict, dict):
-            profiles.extend(p_dict.keys())
-        elif hasattr(p_dict, "keys"):
+        if isinstance(p_dict, dict) or hasattr(p_dict, "keys"):
             profiles.extend(p_dict.keys())
     except Exception as exc:
         logger.debug("Could not load docgraph_profiles from global config: {}", exc)

@@ -355,7 +355,7 @@ def build_graph_flow(cfg: BenchConfig) -> dict[str, Any]:
     for doc, fut in zip(docs, outline_futures, strict=True):
         try:
             fut.result()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error(
                 "Outline extraction failed for {}: {}; merge will degrade it to algorithmic parsing",
                 doc,
@@ -449,7 +449,7 @@ def run_questions_flow(
         for future in futures:
             try:
                 new_records.append(future.result())
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.error("Question run failed (recorded nowhere, will retry on re-launch): {}", exc)
     finally:
         watchdog.stop()

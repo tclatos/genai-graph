@@ -141,7 +141,7 @@ class KgManager(BaseModel):
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_global_config(cls) -> "KgManager":
+    def from_global_config(cls) -> KgManager:
         """Build a manager instance from the current global configuration."""
 
         cfg = global_config()
@@ -555,7 +555,7 @@ class KgManager(BaseModel):
 
         return info
 
-    def get_data_lineage(self) -> "tuple[list[MarkdownLineage], list[LineageImportError]]":  # noqa: F821
+    def get_data_lineage(self) -> tuple[list[MarkdownLineage], list[LineageImportError]]:  # noqa: F821
         """Return data lineage entries for JSON/Markdown/source artifacts.
 
         This delegates to :mod:`genai_graph.kg.ingest.lineage` so that

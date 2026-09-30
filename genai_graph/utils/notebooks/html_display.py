@@ -14,7 +14,7 @@ def show_html_in_notebook(html: str, stem: str = "viz", height: int = 600) -> Pa
     path.write_text(html, encoding="utf-8")
 
     if "ipykernel" in sys.modules:
-        from IPython.display import HTML, display  # noqa: PLC0415
+        from IPython.display import HTML, display
 
         encoded = base64.b64encode(html.encode("utf-8")).decode("ascii")
         data_uri = f"data:text/html;base64,{encoded}"

@@ -22,6 +22,7 @@ Usage::
 from __future__ import annotations
 
 import mimetypes
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,7 +41,7 @@ class DocumentMixin:
     ``GraphRelation`` that should be registered in the schema.
     """
 
-    def create_document_node(self, file_path: Path) -> "Document":
+    def create_document_node(self, file_path: Path) -> Document:
         """Build a :class:`Document` from a file's on-disk metadata.
 
         Args:
@@ -83,8 +84,8 @@ class DocumentMixin:
 
     def get_document_schema_elements(
         self,
-        root_node: "GraphNode",
-    ) -> tuple[list["GraphNode"], list["GraphRelation"]]:
+        root_node: GraphNode,
+    ) -> tuple[list[GraphNode], list[GraphRelation]]:
         """Return the schema elements required to support Document nodes.
 
         Adds the canonical :data:`DocumentNode` to the node list and a
@@ -110,6 +111,6 @@ class DocumentMixin:
 
 def _mtime_iso(mtime: float) -> str:
     """Convert a POSIX mtime float to an ISO-8601 UTC string."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(mtime, tz=UTC).isoformat()

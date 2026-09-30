@@ -94,10 +94,11 @@ def _is_spurious_heading(title: str, line_idx: int | None = None) -> bool:
     if not words or set(words) <= _SPURIOUS_WORDS:
         return True
     # Near the very top of document (lines 1-40), reject library stamps / room numbers
-    if line_idx is not None and line_idx <= 40:
-        if any(tok in s.upper() for tok in ("LIBRARY", "ROOM 5030", "CIRCULAR NO", "WASHINGTON :", "PRINTING OFFICE")):
-            return True
-    return False
+    return bool(
+        line_idx is not None
+        and line_idx <= 40
+        and any(tok in s.upper() for tok in ("LIBRARY", "ROOM 5030", "CIRCULAR NO", "WASHINGTON :", "PRINTING OFFICE"))
+    )
 
 
 # Multilingual Table of Contents (TOC) header pattern:
@@ -399,19 +400,26 @@ def _detect_heuristic_headings(raw: str) -> list[tuple[str, int, int]]:
 
         # Rule 2: Standalone multi-word uppercase titles surrounded by blank lines
         words = s.split()
-        if s.isupper() and prev_blank and next_blank and not s.isdigit() and not s.startswith("<!--"):
-            if 2 <= len(words) <= 10 and 6 <= len(s) <= 80:
-                # If this uppercase title is near a page marker AND has already been seen as a heading, skip it (it is a recurring running header)
-                if is_near_page_marker and s.lower() in seen_titles:
-                    continue
-                # Also skip library stamps / cover page stamps if near line 1-35
-                if i < 35 and any(tok in s for tok in ("LIBRARY", "JUN ", "JUL ", "AUG ", "SEP ", "ROOM 5030")):
-                    continue
-                if not any(token in s for token in _NON_HEADING_UPPERCASE_TOKENS):
-                    title = _strip_surrounding_emphasis(s)
-                    if not _is_spurious_heading(title, i + 1):
-                        headings.append((title, 2, i + 1))
-                        seen_titles.add(s.lower())
+        if (
+            s.isupper()
+            and prev_blank
+            and next_blank
+            and not s.isdigit()
+            and not s.startswith("<!--")
+            and 2 <= len(words) <= 10
+            and 6 <= len(s) <= 80
+        ):
+            # If this uppercase title is near a page marker AND has already been seen as a heading, skip it (it is a recurring running header)
+            if is_near_page_marker and s.lower() in seen_titles:
+                continue
+            # Also skip library stamps / cover page stamps if near line 1-35
+            if i < 35 and any(tok in s for tok in ("LIBRARY", "JUN ", "JUL ", "AUG ", "SEP ", "ROOM 5030")):
+                continue
+            if not any(token in s for token in _NON_HEADING_UPPERCASE_TOKENS):
+                title = _strip_surrounding_emphasis(s)
+                if not _is_spurious_heading(title, i + 1):
+                    headings.append((title, 2, i + 1))
+                    seen_titles.add(s.lower())
 
     return headings
 

@@ -53,10 +53,7 @@ def build_all_decks() -> None:
         # e.g., slides-executive.md -> executive
         # e.g., slides.md -> default
         raw_slug = md_file.stem.replace("slides-", "")
-        if raw_slug == "slides":
-            slug = "default"
-        else:
-            slug = raw_slug
+        slug = "default" if raw_slug == "slides" else raw_slug
 
         deck_title = extract_title(md_file)
         deck_dist = DIST_DIR / slug

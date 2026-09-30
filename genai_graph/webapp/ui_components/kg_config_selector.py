@@ -17,7 +17,7 @@ Usage::
 
     # In your sidebar rendering:
     render_kg_config_selector(help="Select a KG profile to inspect.")
-    render_schema_status()   # optional — shows schema path + status
+    render_schema_status()  # optional — shows schema path + status
 
     # If you need page-specific reset logic on config change, pass a callback:
     render_kg_config_selector(on_change=lambda: setattr(sss, "my_cache", None))

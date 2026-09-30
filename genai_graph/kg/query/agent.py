@@ -184,12 +184,9 @@ def create_kg_cypher_tool(
         params = _embed_query_vector(cypher_query, question) if question else None
 
         try:
-            if params:
-                result = backend.execute(cypher_query, parameters=params)
-            else:
-                result = backend.execute(cypher_query)
+            result = backend.execute(cypher_query, parameters=params) if params else backend.execute(cypher_query)
             df = result.get_as_df()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return f"Error executing Cypher query: {exc}"
 
         if df.empty:

@@ -6,6 +6,7 @@ implementations for different backends (Kuzu, Neo4j, etc.).
 
 from __future__ import annotations
 
+import contextlib
 import re
 import threading
 from abc import ABC, abstractmethod
@@ -329,19 +330,14 @@ class LadybugBackend(KgBackend):
         properties: dict[str, str] | None = None,
     ) -> None:
         """Create a relationship table in Ladybug (idempotent)."""
-        if properties:
-            props_str = ", " + ", ".join([f"{name} {type_}" for name, type_ in properties.items()])
-        else:
-            props_str = ""
+        props_str = ", " + ", ".join([f"{name} {type_}" for name, type_ in properties.items()]) if properties else ""
         create_rel_sql = f"CREATE REL TABLE IF NOT EXISTS {rel_name}(FROM {from_table} TO {to_table}{props_str})"
         self.execute(create_rel_sql)
 
     def drop_table(self, table_name: str) -> None:
         """Drop a table in Ladybug."""
-        try:
+        with contextlib.suppress(Exception):
             self.execute(f"DROP TABLE {table_name};")
-        except Exception:
-            pass
 
     def insert_node(self, table_name: str, data: dict[str, Any]) -> None:
         """Insert a node in Ladybug.
@@ -416,7 +412,7 @@ class LadybugBackend(KgBackend):
                 # Row layout: [column_id, name, type, default, is_primary_key]
                 if row[4]:
                     return str(row[1])
-        except Exception:  # noqa: BLE001 - fall back to convention
+        except Exception:
             pass
         return "id"
 
@@ -646,10 +642,8 @@ class LadybugBackend(KgBackend):
         if conn is not None:
             close = getattr(conn, "close", None)
             if callable(close):
-                try:
+                with contextlib.suppress(Exception):
                     close()
-                except Exception:  # noqa: BLE001 - connection may already be closed
-                    pass
 
     def get_query_language(self) -> str:
         """Get query language."""

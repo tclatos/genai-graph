@@ -9,6 +9,8 @@ were incorrectly mapped to STRING instead of STRUCT types.
 
 from __future__ import annotations
 
+import enum
+
 from pydantic import BaseModel
 
 from genai_graph.kg.ingest import _get_kuzu_type
@@ -60,9 +62,8 @@ class TestGetKuzuType:
 
     def test_enum_fallback(self) -> None:
         """Test that enum types fall back to STRING."""
-        from enum import Enum
 
-        class Status(str, Enum):
+        class Status(enum.StrEnum):
             ACTIVE = "active"
             INACTIVE = "inactive"
 

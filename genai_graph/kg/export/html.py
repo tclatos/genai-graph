@@ -60,10 +60,7 @@ def _generate_html_content(nodes_list: list[dict[str, Any]], links_list: list[di
     """
     _d3_cdn_tag = '    <script src="https://d3js.org/d3.v5.min.js"></script>'
     _d3_bundle = Path(__file__).parent.parent / "schema" / "d3.v5.min.js"
-    if _d3_bundle.exists():
-        _d3_script = f"<script>{_d3_bundle.read_text(encoding='utf-8')}</script>"
-    else:
-        _d3_script = _d3_cdn_tag
+    _d3_script = f"<script>{_d3_bundle.read_text(encoding='utf-8')}</script>" if _d3_bundle.exists() else _d3_cdn_tag
     html_content = HTML_TEMPLATE.replace("{nodes}", json.dumps(nodes_list))
     html_content = html_content.replace("{links}", json.dumps(links_list))
     html_content = html_content.replace(_d3_cdn_tag, _d3_script)

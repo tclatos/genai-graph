@@ -91,7 +91,7 @@ def _document_exists(backend: KgBackend, markdown_hash: str) -> bool:
             {"h": markdown_hash},
             union=False,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         if "does not exist" in str(exc):
             return False
         raise
@@ -111,7 +111,7 @@ def _sections_described(backend: KgBackend, markdown_hash: str) -> bool:
             {"h": markdown_hash},
             union=False,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         if "does not exist" in str(exc):
             return False
         raise
@@ -172,7 +172,7 @@ def ingest_document_graph(
             embeddings_dim = resolve_embedding_dimension(retrieval_config.embeddings_id)
             ensure_chunk_embedding_column(backend, embeddings_dim)
             embeddings_handler = EmbeddingsHandler(embeddings_id=retrieval_config.embeddings_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             msg = f"Embeddings disabled for this build: {exc}"
             logger.warning(msg)
             result.warnings.append(msg)
@@ -198,7 +198,7 @@ def ingest_document_graph(
             if b is None:
                 return None, None
             return b, None
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return None, f"Failed to parse {key}: {exc}"
 
     if embed_workers > 1 and total_keys > 1:
@@ -306,7 +306,7 @@ def ingest_document_graph(
 
         try:
             chunk_lists = asyncio.run(_embed_all())
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise RetrievalError(f"Parallel embedding failed for {len(pending)} documents: {exc}") from exc
 
     # --- Phase 4: accumulate section/chunk rows serially, then merge -------
@@ -399,7 +399,7 @@ def ingest_document_graph(
                 chunk_lists=chunk_lists if chunks_enabled else None,
                 source_files=keys,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("Could not stage Document Graph to Parquet: {}", exc)
 
     merge_result = merge_nodes_batch(backend, nodes, registry)
@@ -411,7 +411,7 @@ def ingest_document_graph(
     if chunks_enabled and isinstance(backend, KuzuBackend):
         try:
             backend.create_vector_index(_CHUNK_TYPE, "chunk_embedding", "chunk_embedding_index", metric="cosine")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             msg = f"Could not create HNSW index on {_CHUNK_TYPE}.chunk_embedding: {exc}"
             logger.warning(msg)
             result.warnings.append(msg)
@@ -419,7 +419,7 @@ def ingest_document_graph(
         try:
             doc_languages = [doc.language for _, doc, _ in pending if doc and getattr(doc, "language", None)]
             result.fts_index = ensure_section_fts_index(backend, languages=doc_languages)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             msg = f"Could not create FTS index: {exc}"
             logger.warning(msg)
             result.warnings.append(msg)
@@ -446,15 +446,15 @@ def _delete_document_sections(backend: KgBackend, markdown_hash: str) -> None:
             f"MATCH (s:{_SECTION_TYPE} {{markdown_hash: $h}})-[:{HAS_IMAGE.name}]->(i:{_IMAGE_TYPE}) DETACH DELETE i",
             {"h": markdown_hash},
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("Could not clear stale {} for {}: {}", _IMAGE_TYPE, markdown_hash, exc)
     try:
         backend.execute(f"MATCH (c:{_CHUNK_TYPE} {{markdown_hash: $h}}) DETACH DELETE c", {"h": markdown_hash})
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("Could not clear stale {} for {}: {}", _CHUNK_TYPE, markdown_hash, exc)
     try:
         backend.execute(f"MATCH (n:{_SECTION_TYPE} {{markdown_hash: $h}}) DETACH DELETE n", {"h": markdown_hash})
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Could not clear stale {} for {}: {}", _SECTION_TYPE, markdown_hash, exc)
 
 

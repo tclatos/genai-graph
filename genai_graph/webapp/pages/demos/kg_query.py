@@ -70,7 +70,7 @@ def initialize_session_state() -> None:
         sss.generated_cypher = None
 
 
-def execute_cypher_query(cypher: str, backend: "KgBackend") -> tuple[pd.DataFrame | None, str | None]:
+def execute_cypher_query(cypher: str, backend: KgBackend) -> tuple[pd.DataFrame | None, str | None]:
     """Execute a Cypher query and return results.
 
     Args:
@@ -84,7 +84,7 @@ def execute_cypher_query(cypher: str, backend: "KgBackend") -> tuple[pd.DataFram
         df = backend.execute_get_as_df(cypher, union=True)
         return df, None
     except Exception as e:
-        error_msg = f"Query execution error: {str(e)}"
+        error_msg = f"Query execution error: {e!s}"
         logger.error(error_msg)
         return None, error_msg
 
@@ -135,17 +135,16 @@ def main() -> None:
     with tab1:
         # Compact header with example query button
         col1, col2, col3 = st.columns([1, 4, 1])
-        with col1:
-            with st.popover("📋 Examples"):
-                st.markdown("**Example Queries**")
-                for example in examples:
-                    st.markdown(f"**{example['name']}**")
-                    st.caption(example["description"])
-                    st.code(example["cypher"], language="cypher")
-                    if st.button("⬆️ Load", key=f"load_{example['name']}"):
-                        sss.cypher_query = example["cypher"]
-                        st.rerun()
-                    st.markdown("---")
+        with col1, st.popover("📋 Examples"):
+            st.markdown("**Example Queries**")
+            for example in examples:
+                st.markdown(f"**{example['name']}**")
+                st.caption(example["description"])
+                st.code(example["cypher"], language="cypher")
+                if st.button("⬆️ Load", key=f"load_{example['name']}"):
+                    sss.cypher_query = example["cypher"]
+                    st.rerun()
+                st.markdown("---")
 
         with col2:
             st.markdown("**Cypher Query**")

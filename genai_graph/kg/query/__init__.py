@@ -20,10 +20,10 @@ _EXPORTS = {
 
 __all__ = [
     "SYSTEM_PROMPT",
-    "text2cypher_chain",
-    "query_kg",
     "build_kg_agent_system_prompt",
     "create_kg_cypher_tool",
+    "query_kg",
+    "text2cypher_chain",
 ]
 
 

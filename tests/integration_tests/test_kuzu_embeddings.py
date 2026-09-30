@@ -473,7 +473,7 @@ class TestEmbeddingFieldDimensions:
         # Inspect table columns
         result = backend.execute("CALL table_info('SimpleNode') RETURN *;")
         df = result.get_as_df()
-        col_types = dict(zip(df["name"].tolist(), df["type"].tolist()))
+        col_types = dict(zip(df["name"].tolist(), df["type"].tolist(), strict=True))
         # test_embedding is already in the model — dimension should be FLOAT[768]
         assert col_types.get("test_embedding") == "FLOAT[768]"
 
@@ -494,7 +494,7 @@ class TestEmbeddingFieldDimensions:
 
         result = backend.execute("CALL table_info('SimpleNode') RETURN *;")
         df = result.get_as_df()
-        col_types = dict(zip(df["name"].tolist(), df["type"].tolist()))
+        col_types = dict(zip(df["name"].tolist(), df["type"].tolist(), strict=True))
         assert col_types.get("test_embedding") == "FLOAT[]"
 
     def test_create_schema_float_n_allows_vector_index(self, temp_kuzu_db):
@@ -627,7 +627,7 @@ class TestNeo4jNodeMappingIndexFields:
 
         schema = factory.build_schema()
         concept_node = next(n for n in schema.nodes if n.node_class.__name__ == "Concept")
-        specs = {field: model for field, model in concept_node.index_field_specs}
+        specs = dict(concept_node.index_field_specs)
         assert specs.get("description") == "ada_002@openai"
 
 
@@ -755,7 +755,7 @@ class TestEmbeddingDeserialization:
         object.__setattr__(factory, "_rel_data", {})
 
         nodes_data, _ = factory.build_nodes_and_relationships()
-        emb = list(nodes_data.get("ServiceItem"))[0].get("description_embedding")
+        emb = next(iter(nodes_data.get("ServiceItem"))).get("description_embedding")
         assert emb == pytest.approx(embedding_values)
 
 

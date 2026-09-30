@@ -25,7 +25,6 @@ Provides functions to display agent steps and stream agent outputs in Streamlit 
 # Modify smolagents_streamlit.py to make it works with new version
 
 import re
-from typing import Dict, List, Optional
 
 import streamlit as st
 from devtools import debug  # ignore
@@ -165,15 +164,15 @@ def _display_step_content(step_log: MemoryStep, display_details: bool = True) ->
         elif isinstance(final_answer, AgentAudio):
             st.audio(final_answer.to_raw())
         else:
-            st.markdown(f"**Final answer:** {str(final_answer)}")
+            st.markdown(f"**Final answer:** {final_answer!s}")
 
 
 def stream_to_streamlit(
     agent: MultiStepAgent,
     task: str,
-    task_images: Optional[List[Image.Image]] = None,
+    task_images: list[Image.Image] | None = None,
     reset_agent_memory: bool = False,
-    additional_args: Optional[Dict] = None,
+    additional_args: dict | None = None,
     display_details: bool = True,
 ) -> None:
     """Runs an agent with the given task and streams the messages to Streamlit components.

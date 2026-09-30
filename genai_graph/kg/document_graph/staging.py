@@ -10,7 +10,7 @@ Image) into columnar Parquet files with an accompanying manifest.json, enabling:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -237,7 +237,7 @@ def stage_document_graph_to_parquet(
     # Manifest
     manifest = ParquetManifest(
         config_name=config_name,
-        exported_at=datetime.now(timezone.utc).isoformat(),
+        exported_at=datetime.now(UTC).isoformat(),
         node_tables=list(node_counts.keys()),
         rel_tables=list(rel_counts.keys()),
         node_count=sum(node_counts.values()),
@@ -377,20 +377,24 @@ def ingest_document_graph_from_staging(
         logger.debug("Ingested {} {} relationships from Parquet", raw_rel_table.num_rows, rel_name)
 
     # Post-load indexing
-    if _CHUNK_TYPE in manifest.node_tables and retrieval_config and retrieval_config.embeddings_id:
-        if isinstance(backend, KuzuBackend):
-            try:
-                backend.create_vector_index(_CHUNK_TYPE, "chunk_embedding", "chunk_embedding_index", metric="cosine")
-                logger.info("Created HNSW vector index on {}.chunk_embedding", _CHUNK_TYPE)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Could not create HNSW index: {}", exc)
+    if (
+        _CHUNK_TYPE in manifest.node_tables
+        and retrieval_config
+        and retrieval_config.embeddings_id
+        and isinstance(backend, KuzuBackend)
+    ):
+        try:
+            backend.create_vector_index(_CHUNK_TYPE, "chunk_embedding", "chunk_embedding_index", metric="cosine")
+            logger.info("Created HNSW vector index on {}.chunk_embedding", _CHUNK_TYPE)
+        except Exception as exc:
+            logger.warning("Could not create HNSW index: {}", exc)
 
     fts_name = None
     if retrieval_config and retrieval_config.fts:
         try:
             fts_name = ensure_section_fts_index(backend)
             logger.info("Created FTS index {} on MarkdownSection", fts_name)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("Could not create FTS index: {}", exc)
 
     return {

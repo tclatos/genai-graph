@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +27,7 @@ def compute_bench_summary(
         return BenchSummary(
             profile=profile_name,
             total_questions=0,
-            generated_at=datetime.now(timezone.utc).isoformat(),
+            generated_at=datetime.now(UTC).isoformat(),
         )
 
     correct = 0
@@ -108,7 +108,7 @@ def compute_bench_summary(
         total_output_tokens=total_out_tokens,
         agent_llm=agent_llm,
         judge_llm=judge_llm,
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=datetime.now(UTC).isoformat(),
     )
 
 

@@ -43,7 +43,7 @@ class SourceFolder:
         self.base_path = base_path
 
     @classmethod
-    def from_source(cls, source: str, *, cache_dir: str | None = None) -> "SourceFolder":
+    def from_source(cls, source: str, *, cache_dir: str | None = None) -> SourceFolder:
         """Build a folder from a directory path or a ``.zip`` archive path.
 
         Args:
@@ -185,7 +185,7 @@ class FolderTree:
                 try:
                     res = acl_provider.get_folder_acl_sync(folder_path=folder_dir, uri=folder_uri)
                     allowed_principals = list(res.allowed_principals)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.debug("Failed getting ACL for folder {}: {}", folder_uri, exc)
 
             folder = Folder(

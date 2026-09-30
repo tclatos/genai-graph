@@ -15,10 +15,10 @@ from genai_graph.kg.access.factory import create_access_control_provider
 from genai_graph.kg.access.yaml_provider import AclRule, YamlAccessControlProvider
 
 __all__ = [
+    "CURRENT_USER_CONTEXT",
     "AccessControlResult",
     "AclRule",
     "BaseAccessControlProvider",
-    "CURRENT_USER_CONTEXT",
     "DefaultPublicAccessControlProvider",
     "UserContext",
     "YamlAccessControlProvider",

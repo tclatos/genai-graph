@@ -117,7 +117,7 @@ class TestDeduceNodeFieldPaths:
 
         class Parent(BaseModel):
             name: str
-            child: "Child"
+            child: Child
 
         class Child(BaseModel):
             value: str

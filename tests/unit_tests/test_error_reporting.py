@@ -174,11 +174,13 @@ class TestMergeNodesBatchErrorHandler:
         config = registry.get("_SchemaNode")
 
         # Simulate a future regression: field_names is deleted/broken
-        with patch.object(
-            type(config),
-            "field_names",
-            new_callable=lambda: property(lambda self: (_ for _ in ()).throw(AttributeError("field_names gone"))),
-        ):
+        with (
+            patch.object(
+                type(config),
+                "field_names",
+                new_callable=lambda: property(lambda self: (_ for _ in ()).throw(AttributeError("field_names gone"))),
+            ),
             # The ORIGINAL RuntimeError must still propagate, NOT AttributeError from formatter
-            with pytest.raises(RuntimeError, match="Cannot find property"):
-                merge_nodes_batch(graph_backend, self._nodes(), registry)
+            pytest.raises(RuntimeError, match="Cannot find property"),
+        ):
+            merge_nodes_batch(graph_backend, self._nodes(), registry)

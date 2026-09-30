@@ -55,10 +55,7 @@ def resolve_import_dag(
         cfg = kg_configs.get(name)
         if cfg is None:
             return []
-        if hasattr(cfg, "model_dump"):
-            d = cfg.model_dump()
-        else:
-            d = cfg  # type: ignore[assignment]
+        d = cfg.model_dump() if hasattr(cfg, "model_dump") else cfg  # type: ignore[assignment]
         return d.get("imports", []) or d.get("import", []) or []
 
     def _visit(name: str) -> None:

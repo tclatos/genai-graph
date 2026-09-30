@@ -33,19 +33,19 @@ from genai_graph.kg.factories.similarity import (
 from genai_graph.kg.factories.table_factory import TableBackedFactory
 
 __all__ = [
-    "KgFactory",
-    "DocumentMixin",
     "DocumentDirectoryFactory",
-    "DocumentGraphFactory",
     "DocumentGraphBundle",
+    "DocumentGraphFactory",
+    "DocumentMixin",
     "JsonFileBackedFactory",
+    "KgFactory",
     "MarkdownBamlFactory",
-    "TableBackedFactory",
     "Neo4jFactory",
     "Neo4jImportFactory",
     "Neo4jNodeMapping",
     "Neo4jRelationMapping",
     "SimilarityFactory",
-    "SimilaritySpec",
     "SimilarityResult",
+    "SimilaritySpec",
+    "TableBackedFactory",
 ]

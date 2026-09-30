@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -579,7 +579,7 @@ def _prepare_node_arrow_table(
         return pa.table({}) if schema is None else pa.table({f.name: pa.array([], type=f.type) for f in schema})
 
     excluded = {"created_at", "updated_at", "dedup_key"}
-    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
     # Clean all rows
     cleaned_nodes: list[dict[str, Any]] = []
@@ -599,9 +599,7 @@ def _prepare_node_arrow_table(
     if schema is not None:
         # Schema-driven path: iterate schema fields in order; include only schema fields
         # plus any extra *_embedding columns added dynamically (not in the Pydantic model).
-        extra_embedding_cols = [
-            k for k in cleaned_nodes[0].keys() if k.endswith("_embedding") and k not in schema.names
-        ]
+        extra_embedding_cols = [k for k in cleaned_nodes[0] if k.endswith("_embedding") and k not in schema.names]
 
         arrays: list[pa.Array] = []
         names: list[str] = []
@@ -719,7 +717,7 @@ def merge_nodes_batch(
             on_match_set = ", ".join([f"n.{c} = {c}" for c in on_match_cols])
 
             # Update the timestamp for ON MATCH
-            timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             if "_updated_at" in on_match_cols:
                 col_idx = arrow_table.column_names.index("_updated_at")
                 arrow_table = arrow_table.set_column(
@@ -777,7 +775,7 @@ def merge_nodes_batch(
                         )
                 else:
                     logger.error(f"Error in batch merge for {node_type}: {e}")
-            except Exception as fmt_exc:  # noqa: BLE001
+            except Exception as fmt_exc:
                 # Error-formatting failure: log it separately, then re-raise the original
                 logger.error(f"Error in batch merge for {node_type}: {e}")
                 logger.warning(f"(Error formatter also failed: {fmt_exc})")
@@ -793,7 +791,7 @@ def _count_relationships(conn: KgBackend, rel_name: str) -> int:
     """Return the current row count of a relationship table (0 on a fresh/absent table)."""
     try:
         df = conn.execute_get_as_df(f"MATCH ()-[r:{rel_name}]->() RETURN count(r) AS c", None, union=False)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("count({}) failed: {}", rel_name, exc)
         return 0
     if df is None or df.empty:

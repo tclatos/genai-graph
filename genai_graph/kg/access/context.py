@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from contextvars import ContextVar
-from typing import Any, Iterable
+from typing import Any
 
 from pydantic import BaseModel, Field
 

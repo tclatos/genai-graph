@@ -19,6 +19,7 @@ The tasks are designed as DAG building blocks:
 
 from __future__ import annotations
 
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -584,9 +585,9 @@ def create_document_nodes_task(bundles: list[GraphBundle], backend: KgBackend) -
 
             # ── 3. MERGE Document node into the graph ──────────────────────
             try:
-                from datetime import datetime, timezone
+                from datetime import datetime
 
-                now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
                 def _v(val: object) -> str:
                     return _format_value_for_cypher(val)

@@ -14,7 +14,7 @@ For Neo4j imports:
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from pydantic import BaseModel
@@ -102,7 +102,7 @@ def add_neo4j_data_to_graph(
 
 
 def add_documents_to_graph(
-    keys: List[str],
+    keys: list[str],
     graph_impl: KgFactory,
     backend: KgBackend,
     schema: GraphSchema,

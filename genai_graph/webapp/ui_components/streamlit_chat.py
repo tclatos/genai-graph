@@ -1,5 +1,5 @@
 import textwrap
-from typing import Any, Dict, List
+from typing import Any
 
 import streamlit as st
 from langchain_core.callbacks.base import BaseCallbackHandler
@@ -15,11 +15,11 @@ class StreamlitStatusCallbackHandler(BaseCallbackHandler):
         self.status_widget = status_widget
         self.current_steps = []
 
-    def on_llm_start(self, serialized: Dict[str, Any], prompts: List[str], **kwargs: Any) -> None:
+    def on_llm_start(self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any) -> None:
         llm_name = serialized["kwargs"].get("model_name", "LLM")
         self.status_widget.write(f"Call {llm_name}...")
 
-    def on_tool_start(self, serialized: Dict[str, Any], input_str: str, **kwargs: Any) -> None:
+    def on_tool_start(self, serialized: dict[str, Any], input_str: str, **kwargs: Any) -> None:
         tool_name = serialized.get("name", "Tool")
         self.status_widget.write(f"Call tool: {tool_name} args: {textwrap.shorten(input_str, 20, placeholder='...}')}")
 

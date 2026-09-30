@@ -9,6 +9,7 @@ This module provides functions to export various KG artifacts:
 
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -846,10 +847,8 @@ def compute_fingerprints_for_config(config_name: str) -> CacheFingerprints:
 
             if isinstance(factory, JsonFileBackedFactory):
                 for fp in factory.get_all_file_paths():
-                    try:
+                    with contextlib.suppress(Exception):
                         content_parts.append(file_digest(fp))
-                    except Exception:
-                        pass
             elif isinstance(factory, Neo4jFactory):
                 for key in factory.get_all_keys():
                     content_parts.append(buffer_digest(key.encode()))
@@ -1232,7 +1231,7 @@ def import_from_parquet(
             # Use struct_col_types so struct columns preserve schema-defined field order
             # (pa.Table.from_pandas alphabetises struct dict keys).
             # NOTE: arrow_df is read by name from this frame by Ladybug's LOAD FROM scanner.
-            arrow_df = _pandas_to_arrow_with_structs(df, struct_field_types=struct_col_types or None)  # noqa: F841
+            arrow_df = _pandas_to_arrow_with_structs(df, struct_field_types=struct_col_types or None)
 
             if on_create_set:
                 merge_query = f"""
@@ -1279,9 +1278,7 @@ def import_from_parquet(
                     retry_on_create = ", ".join([f"n.{c} = {c}" for c in retry_other_cols]) if retry_other_cols else ""
                     retry_on_match = ", ".join([f"n.{c} = {c}" for c in retry_other_cols]) if retry_other_cols else ""
                     # NOTE: retry_arrow is read by name from this frame by Ladybug's LOAD FROM scanner.
-                    retry_arrow = _pandas_to_arrow_with_structs(  # noqa: F841
-                        df, struct_field_types=struct_col_types or None
-                    )
+                    retry_arrow = _pandas_to_arrow_with_structs(df, struct_field_types=struct_col_types or None)
                     if retry_on_create:
                         retry_query = f"""
                             LOAD FROM retry_arrow
@@ -1333,10 +1330,7 @@ def import_from_parquet(
 
                     # Build property columns (excluding from_id, to_id)
                     prop_cols = [c for c in merge_df.columns if c not in ("from_id", "to_id")]
-                    if prop_cols:
-                        props_str = " {" + ", ".join([f"{c}: {c}" for c in prop_cols]) + "}"
-                    else:
-                        props_str = ""
+                    props_str = " {" + ", ".join([f"{c}: {c}" for c in prop_cols]) + "}" if prop_cols else ""
 
                     # Create relationships using MATCH + CREATE
                     # NOTE: arrow_merge_df is read by name from this frame by Ladybug's LOAD FROM scanner.

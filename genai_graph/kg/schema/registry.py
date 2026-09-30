@@ -35,7 +35,7 @@ class GraphRegistry(BaseModel):
     operate on a logical union of several graphs.
     """
 
-    graphs: dict[str, "KgFactory"] = Field(default_factory=dict)
+    graphs: dict[str, KgFactory] = Field(default_factory=dict)
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -108,7 +108,7 @@ class GraphRegistry(BaseModel):
 
     @staticmethod
     @once
-    def get_instance() -> "GraphRegistry":
+    def get_instance() -> GraphRegistry:
         """Get the global GraphRegistry instance."""
         # Rebuild model to resolve forward reference to KgFactory
         # This must happen before instantiation, and after factories are importable
@@ -117,7 +117,7 @@ class GraphRegistry(BaseModel):
         GraphRegistry.model_rebuild(_types_namespace={"KgFactory": KgFactory})
         return GraphRegistry()
 
-    def register_graph(self, name: str, graph: "KgFactory") -> None:
+    def register_graph(self, name: str, graph: KgFactory) -> None:
         """Register a graph factory under the given name."""
         self.graphs[name] = graph
 
@@ -211,7 +211,7 @@ class GraphRegistry(BaseModel):
             merged_root_classes=merged_root_classes,
         )
 
-    def get_graph(self, name: str) -> "KgFactory":
+    def get_graph(self, name: str) -> KgFactory:
         """Get a graph factory by name.
 
         Args:
@@ -238,7 +238,7 @@ def get_graph_registry() -> GraphRegistry:
     return GraphRegistry.get_instance()
 
 
-def register_graph(name: str, graph: "KgFactory", registry: Any = None) -> None:
+def register_graph(name: str, graph: KgFactory, registry: Any = None) -> None:
     """Convenience wrapper to register a graph on the global registry.
 
     The optional ``registry`` argument allows explicit control over
@@ -250,6 +250,6 @@ def register_graph(name: str, graph: "KgFactory", registry: Any = None) -> None:
     target.register_graph(name, graph)
 
 
-def get_graph(name: str) -> "KgFactory":
+def get_graph(name: str) -> KgFactory:
     """Convenience wrapper to retrieve a graph from the global registry."""
     return GraphRegistry.get_instance().get_graph(name)

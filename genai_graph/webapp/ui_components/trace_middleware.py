@@ -41,8 +41,10 @@ Design Notes:
     - The UI component handles long results with truncation and expandable sections
 """
 
+import contextlib
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 import streamlit as st
 from langchain.agents.middleware import AgentMiddleware
@@ -209,10 +211,9 @@ class TraceMiddleware(AgentMiddleware):
     def _notify(self, event_type: str, data: Any) -> None:
         """Notify the callback of a trace event if registered."""
         if self._on_event is not None:
-            try:
+            with contextlib.suppress(Exception):
+                # Don't let callback errors disrupt agent execution
                 self._on_event(event_type, data)
-            except Exception:
-                pass  # Don't let callback errors disrupt agent execution
 
     def add_llm_call(self, node: str, content: str) -> None:
         """Record a single LLM message associated with a graph node.
@@ -622,7 +623,7 @@ def display_interleaved_traces(
 
     # Optional clear button
     if show_clear_button:
-        col1, col2 = ctx.columns([3, 1])
+        _col1, col2 = ctx.columns([3, 1])
         with col2:
             if ctx.button("🗑️ Clear Traces", key=f"{unique_prefix}_clear_btn", width="stretch"):
                 middleware.clear()

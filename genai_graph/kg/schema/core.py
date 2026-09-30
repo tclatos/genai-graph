@@ -16,11 +16,11 @@ import types
 import unicodedata
 import uuid
 import warnings
+from collections.abc import Callable
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Union,
     get_args,
     get_origin,
@@ -95,7 +95,7 @@ def _find_embedded_field_for_class(parent_cls: type[BaseModel], embedded_cls: ty
                 candidate_types = [inner]
         elif origin is Union or origin is types.UnionType:
             # Handle both typing.Union and types.UnionType (Python 3.10+)
-            non_none_args = [t for t in args if t is not type(None)]  # noqa: E721
+            non_none_args = [t for t in args if t is not type(None)]
             for t in non_none_args:
                 t_origin = get_origin(t)
                 t_args = get_args(t)
@@ -173,7 +173,7 @@ class GraphNode(BaseModel):
     _excluded_fields: set[str] = PrivateAttr(default_factory=set)
     _embedding_field_dimensions: dict[str, int] = PrivateAttr(default_factory=dict)
 
-    def model_post_init(self, __context: Any) -> None:  # noqa: D401
+    def model_post_init(self, __context: Any) -> None:
         """Hook for future post-init logic (currently unused)."""
         # Kept for forwards-compatibility; no-op for now.
         return None
@@ -251,11 +251,7 @@ class GraphNode(BaseModel):
             Node name value as string
         """
 
-        if isinstance(self.name_from, str):
-            value = data.get(self.name_from)
-        else:
-            # name_from is a callable
-            value = self.name_from(data, node_type)
+        value = data.get(self.name_from) if isinstance(self.name_from, str) else self.name_from(data, node_type)
         if not value:
             return f"{node_type}_unnamed"
         if isinstance(value, Enum):
@@ -263,7 +259,7 @@ class GraphNode(BaseModel):
         else:
             return _normalize_key(str(value))
 
-    def get_key_value(self, data: dict[str, Any], node_type: str) -> str:
+    def get_key_value(self, data: dict[str, Any], node_type: str) -> str | None:
         """Get the primary key value for a node instance.
 
         This computes the primary key based on the ``key_from`` configuration.
@@ -275,7 +271,8 @@ class GraphNode(BaseModel):
             node_type: Name of the node type
 
         Returns:
-            Primary key value as string
+            Primary key value as string, or None when a callable ``key_from``
+            signals that this item should be skipped (no node created).
         """
         if self.key_from == "AUTO_ID":
             # AUTO_ID generates a unique UUID for each node
@@ -300,7 +297,7 @@ class GraphNode(BaseModel):
             # Return None to signal "skip this item" (no node should be created)
             value = self.key_from(data, node_type)
             if value is None:
-                return None  # type: ignore[return-value]
+                return None
             if not value:
                 raise ValueError(f"Computed key is empty for {node_type}")
             if isinstance(value, Enum):
@@ -344,8 +341,8 @@ class GraphRelation(BaseModel):
     All field paths are automatically deduced from the Pydantic model structure.
     """
 
-    from_node: "GraphNode"
-    to_node: "GraphNode"
+    from_node: GraphNode
+    to_node: GraphNode
     name: str
     description: str = ""
     properties: dict[str, Any] | None = None  # Property name -> annotation/type
@@ -394,7 +391,7 @@ class GraphSchema(BaseModel):
     _warnings: list[str] = PrivateAttr(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_and_deduce_schema(self) -> "GraphSchema":
+    def validate_and_deduce_schema(self) -> GraphSchema:
         """Validate schema coherence and auto-deduce missing information."""
         self._build_model_field_map()
         self._deduce_node_field_paths()
@@ -730,10 +727,7 @@ class GraphSchema(BaseModel):
             return True
 
         # Both are direct children of root (siblings at root level)
-        if len(from_parts) == 1 and len(to_parts) == 1:
-            return True
-
-        return False
+        return bool(len(from_parts) == 1 and len(to_parts) == 1)
 
     def _compute_excluded_fields(self) -> None:
         """Compute which fields should be excluded from each node based on relationships.
@@ -747,7 +741,7 @@ class GraphSchema(BaseModel):
 
             # Exclude fields with p_*_ pattern (these become edge properties)
             if hasattr(node_config.node_class, "model_fields"):
-                for field_name in node_config.node_class.model_fields.keys():
+                for field_name in node_config.node_class.model_fields:
                     if field_name.startswith("p_") and field_name.endswith("_"):
                         excluded_fields.add(field_name)
 
@@ -760,23 +754,22 @@ class GraphSchema(BaseModel):
                         # Only exclude if this relationship applies to this node's field_path
                         for node_field_path in node_config.field_paths:
                             if to_path and "." in to_path:
-                                if from_path == "":
-                                    # Root node excluding direct field
-                                    if node_field_path == "":
-                                        field_name = to_path.split(".")[0]
-                                        excluded_fields.add(field_name)
-                                elif from_path == node_field_path:
-                                    # from_path matches this node's field path
-                                    if to_path.startswith(from_path + "."):
-                                        relative_path = to_path[len(from_path) + 1 :]
-                                        field_name = relative_path.split(".")[0]
-                                        excluded_fields.add(field_name)
-                            elif to_path and "." not in to_path:
-                                # Direct field reference
                                 if from_path == "" and node_field_path == "":
-                                    excluded_fields.add(to_path)
-                                elif from_path == node_field_path:
-                                    excluded_fields.add(to_path)
+                                    # Root node excluding direct field
+                                    field_name = to_path.split(".")[0]
+                                    excluded_fields.add(field_name)
+                                elif from_path == node_field_path and to_path.startswith(from_path + "."):
+                                    # from_path matches this node's field path
+                                    relative_path = to_path[len(from_path) + 1 :]
+                                    field_name = relative_path.split(".")[0]
+                                    excluded_fields.add(field_name)
+                            elif (
+                                to_path
+                                and "." not in to_path
+                                and ((from_path == "" and node_field_path == "") or from_path == node_field_path)
+                            ):
+                                # Direct field reference
+                                excluded_fields.add(to_path)
 
             # Note: legacy `embed_in_parent` behaviour has been removed. All
             # additional structured data should now be modelled via
@@ -907,7 +900,7 @@ class GraphSchema(BaseModel):
                     if inner is not None:
                         candidate_types = [inner]
                 elif origin is Union or origin is types.UnionType:
-                    candidate_types = [t for t in args if t is not type(None)]  # noqa: E721
+                    candidate_types = [t for t in args if t is not type(None)]
 
                 if embedded_class not in candidate_types:
                     warnings_list.append(

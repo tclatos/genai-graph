@@ -92,19 +92,13 @@ class KuzuImporter:
                     # Extract table name
                     parts = stmt.split()
                     idx = parts.index("TABLE") + 3  # Skip IF NOT EXISTS
-                    if "IF" in parts and "NOT" in parts:
-                        idx = parts.index("EXISTS") + 1
-                    else:
-                        idx = parts.index("TABLE") + 1
+                    idx = parts.index("EXISTS") + 1 if "IF" in parts and "NOT" in parts else parts.index("TABLE") + 1
                     table_name = parts[idx].split("(")[0].strip()
                     stats.node_tables.append(table_name)
                 elif "CREATE REL TABLE" in stmt:
                     parts = stmt.split()
                     idx = parts.index("TABLE") + 3  # Skip IF NOT EXISTS
-                    if "IF" in parts and "NOT" in parts:
-                        idx = parts.index("EXISTS") + 1
-                    else:
-                        idx = parts.index("TABLE") + 1
+                    idx = parts.index("EXISTS") + 1 if "IF" in parts and "NOT" in parts else parts.index("TABLE") + 1
                     table_name = parts[idx].split("(")[0].strip()
                     stats.rel_tables.append(table_name)
 

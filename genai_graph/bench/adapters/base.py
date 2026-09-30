@@ -8,7 +8,7 @@ import shutil
 import urllib.request
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Type
+from typing import Any
 
 import pathspec
 from loguru import logger
@@ -172,7 +172,7 @@ class BaseBenchmarkAdapter(ABC):
 
 
 def resolve_benchmark_adapter(
-    adapter_spec: str | Type[BaseBenchmarkAdapter] | BaseBenchmarkAdapter | None = None,
+    adapter_spec: str | type[BaseBenchmarkAdapter] | BaseBenchmarkAdapter | None = None,
     project_root: Path | None = None,
 ) -> BaseBenchmarkAdapter:
     """Resolve and return an instantiated benchmark adapter.

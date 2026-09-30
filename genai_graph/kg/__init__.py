@@ -30,14 +30,14 @@ from genai_graph.kg.manager import KgManager, get_kg_manager
 from genai_graph.kg.parallel import SharedKuzuParallel, SharedLadybugParallel
 
 __all__ = [
-    "KgManager",
-    "get_kg_manager",
     "KgBackend",
+    "KgManager",
     "KuzuBackend",
     "LadybugBackend",
+    "SharedKuzuParallel",
+    "SharedLadybugParallel",
     "create_backend",
     "create_backend_from_config",
     "create_in_memory_backend",
-    "SharedKuzuParallel",
-    "SharedLadybugParallel",
+    "get_kg_manager",
 ]

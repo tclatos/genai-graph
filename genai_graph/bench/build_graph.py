@@ -155,7 +155,9 @@ def find_source_file_path(doc_name: str, sources_root: Path | None = None) -> Pa
         None,
     )
     if path is None:
-        matches = list(root.rglob(f"{clean_doc}.json")) or list(root.rglob(f"{clean_doc}.pdf")) or list(root.rglob(doc_name))
+        matches = (
+            list(root.rglob(f"{clean_doc}.json")) or list(root.rglob(f"{clean_doc}.pdf")) or list(root.rglob(doc_name))
+        )
         if matches:
             path = matches[0]
         else:

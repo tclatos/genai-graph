@@ -120,7 +120,11 @@ async def evaluate_single_run(
     for attempt in range(1, max_retries + 1):
         try:
             resp = await model.ainvoke(messages)
-            content = resp.content if hasattr(resp.content, "__iter__") and not isinstance(resp.content, str) else str(resp.content if hasattr(resp, "content") else resp)
+            content = (
+                resp.content
+                if hasattr(resp.content, "__iter__") and not isinstance(resp.content, str)
+                else str(resp.content if hasattr(resp, "content") else resp)
+            )
             if isinstance(content, list):
                 content = "".join(str(c) for c in content)
 

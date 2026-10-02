@@ -10,6 +10,7 @@ vars: {
 direction: right
 
 kortex_core: "Kortex Core" {
+  #near: center-right
   graphdb: "Graph DB" {
     #icon: ../../../slides/icons/ladybug.png
     shape: cylinder
@@ -48,9 +49,6 @@ agent_system: "Kortex Agent" {
       shape: document 
   }
 
-  observation: "Agent\n Trajectory" {
-      shape: stored_data
-  }
 
   tools: "Tools" {
     direction : down
@@ -63,12 +61,17 @@ agent_system: "Kortex Agent" {
   agent <-> middlewares
   #middlewares -> agent
   agent <-> skills
-  agent -> tools: {style.stroke-dash: 4}
-  agent -> observation
+  agent -> tools
+
 }
 
+observation: "Agent\n Trajectory" {
+  # near : top-right
+      shape: stored_data
+  }
+
 client: "Applications\n& Users" {
-  near: center-left
+  #near: center-left
   style: {
     font-size: 22
     bold: true
@@ -82,16 +85,18 @@ sandbox: "Sandbox\n(Docker / OpenSandbox)" {
 }
 
 ext_database: "External Databases" {
+  #near: center-right
   shape: cylinder
 }
 
 client -> agent_system.agent: "Requests"
 client -> agent_system.mcp_server: "MCP" {style.stroke-dash: 4}
-client -> kortex_core.mcp: "Direct MCP" {style.stroke-dash: 4}
+#client -> kortex_core.mcp: "Direct MCP" {style.stroke-dash: 4}
 
 agent_system.agent <-> kortex_core.mcp
 kortex_core.graphdb <-> kortex_core.mcp
 agent_system.agent <-> kortex_core.skills
+agent_system.agent -> observation: "Onservations" {style.stroke-dash: 4}
 
 agent_system.tools.python <-> sandbox: "Code Execution"
 agent_system.tools.sql <-> ext_database: "SQL Query"

@@ -14,19 +14,19 @@ sources: {
     direction: down
 
     word: "Word" {
-      icon: ../icons/word.svg
+      icon: icons/word.svg
       shape: document
     }
     pdf: "PDF" {
-      icon: ../icons/pdf.svg
+      icon: icons/pdf.svg
       shape: document
     }
     excel: "Excel" {
-      icon: ../icons/excel.svg
+      icon: icons/excel.svg
       shape: document
     }
     pptx: "PPTX" {
-      icon: ../icons/powerpoint.svg
+      icon: icons/powerpoint.svg
       shape: document
     }
   }
@@ -34,15 +34,15 @@ sources: {
   structured: "Structured" {
     direction: down
     postgres: "PostgreSQL" {
-      icon: ../icons/postgresql.svg
+      icon: icons/postgresql.svg
       shape: cylinder
     }
     neo4j: "Neo4j" {
-      icon: ../icons/neo4j.svg
+      icon: icons/neo4j.svg
       shape: cylinder
     }
     excel: "Excel" {
-      icon: ../icons/excel.svg
+      icon: icons/excel.svg
       shape: document
     }
   }
@@ -56,32 +56,32 @@ graphs: Graph Factories {
     # style.stroke-dash: 6
     # style.stroke-width: 1
     markdownize: "Markdownize &\nImage Extraction (OCR,LLM)" {
-      # icon: ../icons/markdown.svg
-      # icon: ../icons/mistral.svg
+      # icon: icons/markdown.svg
+      # icon: icons/mistral.svg
     }
 
     toc_sections: "Table of Content/\nSections Extraction (LLM)" {
-      #  icon: ../icons/llm.svg
+      #  icon: icons/llm.svg
     }
 
     tables: "Tables\nNormalisation" {
-      # icon: ../icons/python.svg
+      # icon: icons/python.svg
     }
 
     image_desc: "Image Description\n(VLM)" {
-      #  icon: ../icons/llm.svg
+      #  icon: icons/llm.svg
     }
 
     summarization: "Doc / Sections\nSummarization (LLM)" {
-      #  icon: ../icons/llm.svg
+      #  icon: icons/llm.svg
     }
 
     embeddings: "Embeddings\nCalculation" {
-      # icon: ../icons/llm.svg
+      # icon: icons/llm.svg
     }
 
     nodes_edges: "Node/Edges Creation" {
-      # icon: ../icons/python.svg
+      # icon: icons/python.svg
     }
 
     toc_sections -> summarization
@@ -120,12 +120,12 @@ result: "" {
   near: center-right
   staging: "Staging" {
     parquet: "Cache\n(Parquet Files)" {
-    #  icon: ../icons/parquet.svg
+    #  icon: icons/parquet.svg
       shape: cylinder
     }
 
     batch_merge: "Batch Ingestion" {
-    #  icon: ../icons/ladybug.png
+    #  icon: icons/ladybug.png
     }
 
     parquet -> batch_merge
@@ -133,13 +133,13 @@ result: "" {
 
   kortex_core: "Outcome" {
     graphdb: "Graph Database\n(Ladybug)\ngraph, vectors, search index" {
-   #   icon: ../icons/ladybug.png
+   #   icon: icons/ladybug.png
       shape: cylinder
     }
     mcp: "MCP & API Servers" {
-      # icon: ../icons/server.svg
+      # icon: icons/server.svg
       shape: package
-      # icon: ../icons/mcp.svg
+      # icon: icons/mcp.svg
     }
     Skills: "Graph Navigation &\n Schema skills" {
       shape: document

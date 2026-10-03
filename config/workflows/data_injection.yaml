@@ -1,13 +1,14 @@
 # ---------------------------------------------------------------------------
 # Generic data-injection workflows  (DSL v2)
 # ---------------------------------------------------------------------------
-# Domain-agnostic document -> Markdown -> KG pipeline. `markdownize_documents`
-# handles directories, .zip archives, and files (raw Office/PDF/images or
-# pre-existing Markdown) in one step -- no separate Office->PDF conversion step
-# is needed, `markdownize_flow` does that internally.
+# Domain-agnostic ingestion pipeline built on the ingest router: route-table
+# rules (config/ingest_routes.yaml) map each source item — file path or URL —
+# to a workflow (markdownize, web-page fetcher, …); matched groups run in
+# parallel and converge to Markdown under md_output_dir.
 #
 # Projects that import genai-graph (e.g. ekg-atos, rfq_pricing) define their
-# own presets (data paths, KG factory configs) in their own config/workflows/.
+# own route tables and presets (data paths, KG factory configs) in their own
+# config/.
 #
 # Usage:
 #   cli workflow run markdownize_documents --set sources=./docs --set md_output_dir=./md
@@ -39,20 +40,19 @@ workflows:
       md_output_dir: {required: true}
 
   document_to_kg:
-    description: "End-to-end pipeline: documents (zip/dir/files) -> Markdown -> single-factory KG build"
+    description: "End-to-end pipeline: sources (files/dirs/zips/URLs) routed to workflows -> Markdown -> single-factory KG build"
     pipeline:
-      - id: markdownize
-        run: markdownize_documents
+      - id: ingest_dispatch
+        run: genai_tk.workflow.routing.dispatcher.ingest_dispatch_step
         with:
           sources: '${values.sources}'
           md_output_dir: '${values.md_output_dir}'
-          cache_dir: '${values.cache_dir}'
-          profile: '${values.profile}'
+          routes: '${values.routes}'
           force_stage: '${values.force_stage}'
 
       - id: create_kg
         run: kg_build
-        after: [markdownize]
+        after: [ingest_dispatch]
         with:
           graph: '${values.graph}'
           kg_name: '${values.kg_name}'
@@ -60,9 +60,7 @@ workflows:
           export_html: '${values.export_html}'
           force_stage: '${values.force_stage}'
     defaults:
-      batch_size: 5
-      cache_dir: null
-      profile: default
+      routes: default
       kg_name: inline
       delete_first: false
       export_html: true

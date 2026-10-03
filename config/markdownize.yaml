@@ -1,0 +1,104 @@
+# Document converter definitions and pathspec-driven profiles
+markdownize_converters:
+  markitdown:
+    class: genai_tk.extra.markdownize.markitdown_converter.MarkItDownConverter
+    params: {}
+  messy_xls: &messy_xls
+    class: genai_tk.extra.markdownize.excel_converter.MessyExcelConverter
+    params: {}
+  # Alias of messy_xls
+  messy_xls_parser: *messy_xls
+  edgeparse:
+    class: genai_tk.extra.markdownize.edgeparse_converter.EdgeParseConverter
+    params: {}
+  mistral_ocr: &mistral_ocr
+    class: genai_tk.extra.markdownize.mistral_ocr_converter.MistralOCRConverter
+    params:
+      model: mistral-ocr-latest
+      batch_size: 100
+      use_batch_api: true
+      include_image_base64: false
+      image_min_size: 150
+      images_dir: images
+  # Alias of mistral_ocr
+  mistral: *mistral_ocr
+  docling:
+    class: genai_tk.extra.markdownize.docling_converter.DoclingConverter
+    params:
+      ocr_engine: easyocr
+      tableformer_mode: fast
+      extract_images: true
+      image_min_size: 150
+      images_dir: images
+  lighton_ocr: &lighton_ocr
+    class: genai_tk.extra.markdownize.lighton_ocr_converter.LightOnOCRConverter
+    params:
+      async_mode: false
+  # Alias of lighton_ocr
+  lighton: *lighton_ocr
+  anydoc:
+    class: genai_tk.extra.markdownize.anydoc_converter.AnyDocConverter
+    params:
+      ocr: null
+  llm:
+    class: genai_tk.extra.markdownize.llm_converter.LLMConverter
+    params:
+      llm: default
+      max_concurrency: 5
+
+# Built-in markdownize profiles (packaged with genai_tk, loaded via importlib.resources).
+# Projects may add or override profiles under a top-level `markdownize_profiles` config key;
+# those entries take precedence over the built-ins of the same name.
+markdownize_profiles:
+  fast:
+    rules:
+      - pathspec: "**/*.{xlsx,xls,ods}"
+        converter: messy_xls
+      - pathspec: "**/*"
+        converter: markitdown
+
+  medium:
+    rules:
+      - pathspec: "**/*.{xlsx,xls,ods}"
+        converter: messy_xls
+      - pathspec: "**/*.{ppt,pptx,odp,doc,docx,odt,rtf}"
+        converter: via_pdf
+      - pathspec: "**/*.pdf"
+        converter: mistral_ocr
+      - pathspec: "**/*"
+        converter: markitdown
+
+  best:
+    rules:
+      - pathspec: "**/*.{ppt,pptx,odp,doc,docx,odt,rtf,xlsx,xls,ods}"
+        converter: via_pdf
+      - pathspec: "**/*.pdf"
+        converter: mistral_ocr
+      - pathspec: "**/*"
+        converter: markitdown
+
+  lighton:
+    rules:
+      - pathspec: "**/*.{pdf,png,jpg,jpeg,pptx,ppt,odp,docx,odt,doc,html}"
+        converter: lighton_ocr
+      - pathspec: "**/*"
+        converter: markitdown
+
+  anydoc:
+    rules:
+      - pathspec: "**/*"
+        converter: anydoc
+
+  llm:
+    rules:
+      - pathspec: "**/*"
+        converter: llm
+
+  docling:
+    rules:
+      - pathspec: "**/*.{xlsx,xls,ods}"
+        converter: messy_xls
+      - pathspec: "**/*.{doc,ppt}"
+        converter: via_pdf
+      - pathspec: "**/*"
+        converter: docling

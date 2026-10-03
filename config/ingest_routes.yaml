@@ -1,0 +1,48 @@
+# ---------------------------------------------------------------------------
+# Ingest route tables — rule-selected workflows for document ingestion
+# ---------------------------------------------------------------------------
+#
+# Each table maps source items (file paths or URLs) to workflows.
+#
+# !! FIRST MATCH WINS: rules are evaluated top-down and the first rule whose
+# pathspec matches the item routes it. Order IS priority — put specific
+# patterns (youtube.com, *.pdf) before catch-alls ('**/*'). Reordering rules
+# silently re-routes sources (the table fingerprint feeds the caches).
+#
+# Targets are workflow references: YAML workflow names (config/workflows/*.yaml)
+# or dotted Python paths, optionally 'workflow/preset'. Rules pass parameters
+# via 'with:'. Routed workflows must accept the ingestion contract:
+#   sources: list[str]   # the matched items (paths or URLs)
+#   md_output_dir: str   # common Markdown staging directory
+#
+ingest_routes:
+
+  default:
+    description: >
+      PDFs go through the markdownize flow (Mistral OCR via the default
+      profile), web pages through the Tavily fetcher, and everything else —
+      including pre-existing Markdown — through the markdownize flow, which
+      copies Markdown files unchanged.
+    default: markdownize_documents
+    routes:
+      - pathspec: "https://**"
+        workflow: genai_tk.workflow.prefect.flows.web_page_flow.web_page_flow
+        with:
+          fetcher: tavily
+      - pathspec: "http://**"
+        workflow: genai_tk.workflow.prefect.flows.web_page_flow.web_page_flow
+        with:
+          fetcher: tavily
+
+  web_bs:
+    description: "Same as 'default' but web pages are fetched locally (httpx + BeautifulSoup) instead of via the Tavily API"
+    default: markdownize_documents
+    routes:
+      - pathspec: "https://**"
+        workflow: genai_tk.workflow.prefect.flows.web_page_flow.web_page_flow
+      - pathspec: "http://**"
+        workflow: genai_tk.workflow.prefect.flows.web_page_flow.web_page_flow
+
+  files_only:
+    description: "Local files only — no URL fetching; everything goes through markdownize"
+    default: markdownize_documents

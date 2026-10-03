@@ -181,7 +181,7 @@ class DocGraphCommands(CliTopCommand):
         def build(
             source: Annotated[
                 list[str],
-                typer.Argument(help="Directories, files, or .zip archives to ingest (raw docs or Markdown)."),
+                typer.Argument(help="Directories, files, .zip archives, or http(s) URLs to ingest."),
             ],
             db_path: Annotated[
                 str | None,
@@ -197,16 +197,19 @@ class DocGraphCommands(CliTopCommand):
                     help="Where converted Markdown is written. Defaults to '<db_path stem>_markdown'.",
                 ),
             ] = None,
-            cache_dir: Annotated[
-                str | None,
-                typer.Option("--cache-dir", help="Intermediates directory (unzipped/pdf/manifest)."),
-            ] = None,
+            routes: Annotated[
+                str,
+                typer.Option(
+                    "--routes",
+                    help="Ingest route table name (config/ingest_routes.yaml) mapping file paths / URLs to workflows.",
+                ),
+            ] = "default",
             profile: Annotated[
                 str,
                 typer.Option(
                     "--profile",
                     "-p",
-                    help="DocGraph profile name (or markdownize profile: fast, medium, best, default).",
+                    help="DocGraph profile name (resolves the default database path).",
                 ),
             ] = "default",
             include: Annotated[
@@ -277,18 +280,23 @@ class DocGraphCommands(CliTopCommand):
                 ),
             ] = 0.9,
         ) -> None:
-            """Markdownize sources, then build (or update) a Document Graph.
+            """Ingest sources, then build (or update) a Document Graph.
 
-            Without `--llm`, the build is algorithmic and fast (heading hierarchy
-            only). With `--llm`, a flash model discovers each document's real
-            structure (from its table of contents / style changes) AND summarizes
-            each section in one call, producing descriptions + summaries in the
-            graph. Documents over the model's context window degrade to the
-            algorithmic path (no summaries) and are still ingested.
+            Sources are routed through the ingest router: route-table rules
+            (config/ingest_routes.yaml) map each file path or URL to a workflow —
+            markdownize for documents, web-page fetching for URLs — running in
+            parallel and converging to Markdown. Without `--llm`, the graph build
+            is algorithmic and fast (heading hierarchy only). With `--llm`, a
+            flash model discovers each document's real structure (from its table
+            of contents / style changes) AND summarizes each section in one call,
+            producing descriptions + summaries in the graph. Documents over the
+            model's context window degrade to the algorithmic path (no summaries)
+            and are still ingested.
 
             Examples:
                 cli docgraph build ./docs --db ./data/kg/tree.db
                 cli docgraph build ./Alko.zip --db ./data/kg/tree.db --force md
+                cli docgraph build https://example.com/article --db ./data/kg/tree.db
                 cli docgraph build ./docs --llm default --workers 8
                 cli docgraph build ./docs --db ./data/kg/tree.db --llm-max-tokens 32000
             """
@@ -296,38 +304,25 @@ class DocGraphCommands(CliTopCommand):
             db_path = _resolve_db_path(db_path, profile=profile)
 
             from genai_tk.config_mgmt.file_patterns import resolve_config_path
-            from genai_tk.workflow.markdownize import markdownize_flow
+            from genai_tk.workflow.routing.dispatcher import ingest_dispatch_flow
 
             from genai_graph.orchestration.document_graph_flow import document_graph_flow
 
             resolved_md_output_dir = md_output_dir or str(Path(db_path).with_suffix("")) + "_markdown"
 
-            # Determine markdownize profile: if the profile name corresponds to a docgraph profile,
-            # extract markdownize_profile from it if present; otherwise use profile directly.
-            md_profile = "default"
-            try:
-                from genai_tk.config_mgmt.config_mngr import global_config
-
-                cfg = global_config()
-                md_profile = cfg.get(f"docgraph_profiles.{profile}.markdownize_profile", None) or profile
-            except Exception:
-                md_profile = profile
-
-            # Markdownize each source into its own subdirectory (named after the source's
+            # Ingest each source into its own subdirectory (named after the source's
             # stem) so the Document Graph's top-level Folder is named after the original
-            # zip/directory instead of the shared markdownize output directory.
+            # zip/directory instead of the shared staging output directory.
             per_source_dirs: list[str] = []
             for src in source:
-                stem = Path(resolve_config_path(src)).stem
+                stem = Path(resolve_config_path(src)).stem or "page"
                 src_output_dir = str(Path(resolved_md_output_dir) / stem)
-                src_cache_dir = str(Path(cache_dir) / stem) if cache_dir else None
 
-                console.print(f"[dim]Markdownizing {src} -> {src_output_dir}[/dim]")
-                markdownize_flow(
+                console.print(f"[dim]Ingesting {src} -> {src_output_dir} (routes={routes})[/dim]")
+                ingest_dispatch_flow(
                     sources=[src],
                     md_output_dir=src_output_dir,
-                    cache_dir=src_cache_dir,
-                    profile=md_profile,
+                    routes=routes,
                     force_stage=force,
                 )
                 per_source_dirs.append(src_output_dir)

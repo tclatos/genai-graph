@@ -10,6 +10,7 @@ This directory contains research studies, comparative benchmark evaluations, and
 |---|---|---|
 | [other_agentic_search_frameworks.md](other_agentic_search_frameworks.md) | **MMLongBench-Doc Agentic Survey** | Synthesis and comparative landscape of agentic frameworks (DocAtlas, MDocAgent, VLD-RAG, DocLens, MAGE-RAG) on multimodal long documents |
 | [codebase_audit_2026-09.md](codebase_audit_2026-09.md) | **Codebase Quality & Security Audit** | Static analysis review across `genai_graph/` covering security, schema validation, and maintainability |
+| [rule_selected_ingest_workflows.md](rule_selected_ingest_workflows.md) | **Orthogonal Document Ingestion (Design Study)** | Rule-selected YAML workflows for doc-graph creation: pathspec rules dispatch per-source workflows (PDF/Office/web/YouTube) run in parallel, with a single-writer fan-in into Kuzu |
 
 ---
 

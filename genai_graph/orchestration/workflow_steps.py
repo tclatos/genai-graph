@@ -135,7 +135,7 @@ def kg_build_step(
 
 @workflow(
     name="docgraph_build",
-    description="Markdownize documents, then build a document graph + entity sub-graphs into one KG",
+    description="Ingest sources through route-selected workflows, then build a document graph + entity sub-graphs into one KG",
     hidden=True,
 )
 def docgraph_build_step(
@@ -143,9 +143,8 @@ def docgraph_build_step(
     kg_name: str,
     sources: list[str] | str,
     factories: list[dict[str, Any]] | None = None,
-    markdownize_profile: str | None = None,
+    routes: str | None = None,
     md_output_dir: str | None = None,
-    cache_dir: str | None = None,
     build_document_graph: bool = True,
     include: list[str] | None = None,
     exclude: list[str] | None = None,
@@ -156,8 +155,9 @@ def docgraph_build_step(
     """Build a Document Graph + entity sub-graphs from a set of documents.
 
     Pipeline:
-    1. Optionally markdownize *sources* (PPT/PDF/… or pre-existing Markdown) into
-       *md_output_dir* (already-Markdown files are copied through).
+    1. Optionally ingest *sources* through the ingest router: route-table rules
+       (pathspec → workflow, first match wins) dispatch each file or URL to a
+       workflow — markdownize, web-page fetching, … — all running in parallel.
     2. Run each entity *factory* (e.g. a `MarkdownBamlFactory` subclass) into a
        single KG named *kg_name* via the standard extraction flow.
     3. Optionally ingest the Folder → Document → Section document graph over the
@@ -165,12 +165,12 @@ def docgraph_build_step(
 
     Args:
         kg_name: Name used for the database directory and profile identity.
-        sources: Directories/files/zip archives to ingest.
+        sources: Directories/files/zip archives/URLs to ingest.
         factories: Entity factory configs (dicts with a ``factory`` key).
-        markdownize_profile: When set, markdownize *sources* first with this profile.
+        routes: Ingest route-table name (see ``config/ingest_routes.yaml``); when
+            set, sources are dispatched through it first.
         md_output_dir: Where converted Markdown is written (required when
-            markdownizing or building the document graph).
-        cache_dir: Markdownize intermediates directory.
+            routing or building the document graph).
         build_document_graph: Ingest the Folder/Document/Section graph.
         include: Glob patterns for document-graph ingestion (default ``['*.md']``).
         exclude: Glob patterns to exclude.
@@ -179,6 +179,7 @@ def docgraph_build_step(
         force_stage: Cache-invalidation stage (see `genai_tk.workflow.force`).
     """
     from genai_tk.workflow.force import ForceStage, stage_active
+    from genai_tk.workflow.routing.dispatcher import ingest_dispatch_flow
 
     from genai_graph.kg.manager import KgGraphConfig, KgProfileConfig, get_kg_manager
     from genai_graph.orchestration.flows import create_kg_flow
@@ -190,17 +191,14 @@ def docgraph_build_step(
         delete_first = True
 
     md_dir = md_output_dir
-    if markdownize_profile:
+    if routes:
         if not md_output_dir:
-            raise ValueError("docgraph_build_step: md_output_dir is required when markdownize_profile is set")
-        from genai_tk.workflow.markdownize import markdownize_flow
-
-        logger.info("Markdownizing {} source(s) -> {}", len(source_list), md_output_dir)
-        markdownize_flow(
+            raise ValueError("docgraph_build_step: md_output_dir is required when routes is set")
+        logger.info("Dispatching {} source(s) through route table '{}'", len(source_list), routes)
+        ingest_dispatch_flow(
             sources=source_list,
             md_output_dir=md_output_dir,
-            cache_dir=cache_dir,
-            profile=markdownize_profile,
+            routes=routes,
             force_stage=force_stage,
         )
         md_dir = md_output_dir

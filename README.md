@@ -105,7 +105,9 @@ uv add "genai-tk @ git+https://github.com/tclatos/genai-tk@main"
 uv add "genai_graph @ git+https://github.com/tclatos/genai-graph@main"
 
 # 3. Bootstrap configuration, merged skills, benchmark tools, and starter files
-uv run cli init --name "My Knowledge Graph App" --with-graph
+# (--extra harnessing installs the `deepagents` dependency required by
+# `cli docgraph agent` and any `type: deep` agent profile)
+uv run cli init --name "My Knowledge Graph App" --with-graph --extra harnessing
 
 # Optional: for active development with a local editable checkout of genai-graph:
 # uv run cli init --name "My Benchmark Suite" --with-graph --graph-path /path/to/genai-graph

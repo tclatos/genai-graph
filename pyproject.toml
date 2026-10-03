@@ -98,9 +98,16 @@ dev = [
     "pytest-beartype>=0.2.0", # Runtime type checking for pytest
 ]
 
+# git-only genai-tk reference for this repo's own `uv sync` (the published
+# requirement is bare — see the NOTE above [build-system]). Root-only: consumers
+# choose their own genai-tk source and are never affected by this pin.
+toolkit = [
+    "genai-tk @ git+https://github.com/tclatos/genai-tk@main",
+]
+
 [tool.uv]
 package = true
-default-groups = ["ui", "demos", "extra", "dev"]
+default-groups = ["ui", "demos", "extra", "dev", "toolkit"]
 constraint-dependencies = [
     "ipython<9",      # 9.x has circular import (ultratb → from IPython import get_ipython during __init__)
     "requests<2.34",  # 2.34.x has broken compat.py (missing JSONDecodeError export)
@@ -109,13 +116,14 @@ constraint-dependencies = [
     "openai<2.44",    # 2.44.0 has circular import in _utils/_files
 ]
 
-[tool.uv.sources]
-# Keep in sync with any downstream project (e.g. rfq_pricing, mmlongbench) that
-# pulls in genai-graph as a path dependency — uv requires a single resolved
-# source for genai-tk across the whole dependency graph. The local path source
-# is for development with unpushed genai-tk changes (requires the sibling
-# checkout ../genai-tk); switch back to the git source for CI/other machines.
-genai-tk = { path = "../genai-tk", editable = true }
+# NOTE: genai-tk is a bare requirement in [project.dependencies] on purpose.
+# Do NOT add a [tool.uv.sources] entry for it here: uv applies a dependency
+# package's sources to consumers resolving it from a path/git checkout, and a
+# baked URL (git or relative path) then CONFLICTS with whatever source the
+# consumer chooses (sibling editable checkouts, git pin, ...). The `toolkit`
+# group below carries the git reference for this repo's own `uv sync` instead —
+# dependency-groups are root-only, so consumers never inherit it. The README
+# quick start also works unchanged because it `uv add`s genai-tk explicitly.
 
 [build-system]
 requires = ["hatchling"]

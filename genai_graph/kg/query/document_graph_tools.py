@@ -1658,28 +1658,6 @@ def execute_image_query(
 
         data_url = f"data:{mime_type};base64,{b64_str}"
 
-    from genai_tk.extra.markdownize.image_describer import upscale_small_image
-
-    # Small OCR-extracted chart images are illegible to VLMs at native size;
-    # upscaling restores data-label readability (validated on STEPBACK Figure 1).
-    raw_bytes = upscale_small_image(resolved_path)
-    if len(raw_bytes) > 20 * 1024 * 1024:
-        return f"Error: Image file too large ({len(raw_bytes)} bytes). Ask about a smaller image or crop."
-    b64_str = base64.b64encode(raw_bytes).decode("utf-8")
-    mime_type, _ = mimetypes.guess_type(str(resolved_path))
-    if not mime_type or not mime_type.startswith("image/"):
-        ext = resolved_path.suffix.lower()
-        if ext in (".jpg", ".jpeg"):
-            mime_type = "image/jpeg"
-        elif ext == ".webp":
-            mime_type = "image/webp"
-        elif ext == ".gif":
-            mime_type = "image/gif"
-        else:
-            mime_type = "image/png"
-
-    data_url = f"data:{mime_type};base64,{b64_str}"
-
     from genai_tk.core.factories.llm_factory import get_llm
     from langchain_core.messages import HumanMessage, SystemMessage
 

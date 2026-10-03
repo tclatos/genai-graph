@@ -133,6 +133,18 @@ uv sync
 uv run cli --help
 ```
 
+### Offline / firewalled networks
+
+- If a corporate proxy whitelists only package hosts, LLM API calls (openrouter, deepinfra, etc.) time out through the proxy. Ensure `localhost` and the API hosts you use are in `NO_PROXY` (e.g. `export NO_PROXY="localhost,127.0.0.1,openrouter.ai,api.deepinfra.com"`); `cli info doctor` (genai-tk) diagnoses and fixes this programmatically.
+- The models.dev catalogue fetch (`data/models_dev.json`) is non-fatal offline: a warning is logged and model resolution continues from explicit entries — so declare every model your profiles reference explicitly in `config/providers/llm.yaml`.
+- For fully offline ingestion, build a vectorless graph with `wiki add --embeddings none` (or the docgraph equivalent) — BM25 search still works.
+
+### What a deep agent needs
+
+- The harnessing extra installed: `uv sync --extra harnessing` (`deepagents` is required by `type: deep` profiles).
+- Every model referenced by agent/docgraph profiles declared explicitly in `config/providers/llm.yaml` — never rely on models.dev fuzzy resolution.
+- Every middleware class: path verified against the real module layout (`genai_tk.agents.langchain.middleware.*`, `genai_graph.agent.middleware.map_before_search`) instead of copied from another project's YAML.
+
 ---
 
 ## CLI Reference

@@ -121,6 +121,25 @@ workflow profiles consumed via `cli kg create <name>` — see
 [docs/workflows.md](workflows.md) for the full workflow-engine reference and force-stage
 semantics.
 
+## Managed Prefect server for programmatic flows
+
+When invoking document-graph flows directly from Python (e.g. `document_graph_flow`)
+rather than through the CLI, Prefect would otherwise start its fragile ephemeral
+server, whose `/health` checks can time out behind corporate proxies (`NO_PROXY`
+missing `localhost`). Before calling any flow programmatically, run:
+
+```python
+from genai_tk.utils.prefect_server import prefect_server
+
+server = prefect_server()
+server.ensure_running()  # starts the managed server unless prefect.auto_start is false
+server.configure_api_url()  # sets PREFECT_API_URL and bypasses proxies for localhost
+```
+
+Note that the CLI paths (`cli docgraph run`, project commands like the wiki
+project's `wiki add`) already do this bootstrap; this requirement applies only to
+direct library use.
+
 ## Summarization
 
 Every section carries a one-sentence `description` (the *routing* signal an agent

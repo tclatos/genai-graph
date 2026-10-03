@@ -216,9 +216,16 @@ for both libraries.
 
 - [ ] Push genai-tk + genai-graph; then on a clean machine re-run the README
       quick start verbatim to confirm the git-based flow resolves.
-- [ ] First `wiki ask` against a real LLM on an open network (validate
-      `query_image` on the seeded chart too).
-- [ ] Fix officeqa's stale middleware path; add the uv-sources skill;
-      implement `cli doctor`.
+- [x] First `wiki ask` against a real LLM — validated after
+      `cli info doctor --fix` persisted the proxy bypass into the project
+      `.env` (grounded answer with citation; `query_image` validated on the
+      seeded revenue chart, which also surfaced and fixed an
+      `UnboundLocalError` in `execute_image_query` when the image came from
+      the DB base64 column).
+- [x] Fix officeqa's stale middleware path; add the `uv-sources`
+      sibling-checkouts skill; implement `cli info doctor` (pre-flight checks
+      for features, profile models/middleware, Prefect, models.dev cache and
+      proxy bypass, with `--fix` persisting `NO_PROXY` into the project
+      `.env`).
 - [ ] Consider `mistral_ocr` / document-size defaults for the `wiki` profile —
       only docling has been exercised so far.

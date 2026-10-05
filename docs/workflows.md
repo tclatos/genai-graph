@@ -143,8 +143,9 @@ the same `kg_name` — so all factories MERGE into one database (see ekg-atos's
 for document-driven KGs — markdownize sources, run entity-extraction factories, and
 build the [Document Graph](document-graph.md) into one database:
 
-1. Optionally markdownizes `sources` (raw docs *or* pre-existing Markdown) into
-   `md_output_dir` when `markdownize_profile` is set.
+1. Optionally dispatches `sources` through the ingest route table into
+   `md_output_dir` when `routes` is set (rule-selected workflows: markdownize,
+   web-page fetching, …).
 2. Runs each configured entity `factories` (e.g. a `MarkdownBamlFactory` subclass)
    into a single KG named `kg_name`.
 3. Optionally ingests the `Folder → Document → MarkdownSection` graph over the same
@@ -161,7 +162,7 @@ workflows:
     run: genai_graph.orchestration.workflow_steps.docgraph_build_step
     hidden: true
     defaults:
-      markdownize_profile: fast
+      routes: default            # ingest route table (config/ingest_routes.yaml)
       build_document_graph: true
       delete_first: false
       export_html: true
@@ -344,7 +345,7 @@ Always markdownizes its sources first, then ingests into the graph database:
 
 ```bash
 cli docgraph build ./docs --db ./data/kg/tree.db
-cli docgraph build ./RFQ.zip --db ./data/kg/tree.db --profile fast
+cli docgraph build ./RFQ.zip --db ./data/kg/tree.db --routes default   # ingest route table
 cli docgraph build ./RFQ.zip --db ./data/kg/tree.db --md-output-dir ./out/md --cache-dir ./out/.cache
 cli docgraph build ./RFQ.zip --db ./data/kg/tree.db --force md      # re-run markdown conversion
 cli docgraph build ./RFQ.zip --db ./data/kg/tree.db --force graph   # re-ingest, reuse markdown cache

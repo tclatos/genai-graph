@@ -52,8 +52,7 @@ from genai_graph.bench.flows import (
     markdownize_doc_task,
     markdownize_flow,
     merge_graph_task,
-    run_question_task,
-    run_questions_flow,
+    route_markdownize_task,
 )
 from genai_graph.bench.judge import evaluate_single_run, load_existing_scores
 from genai_graph.bench.models import (
@@ -140,6 +139,7 @@ __all__ = [
     "match_docs_by_pathspecs",
     "merge_graph_task",
     "resolve_benchmark_adapter",
+    "route_markdownize_task",
     "run_bench_tui",
     "run_one_question",
     "run_question_task",

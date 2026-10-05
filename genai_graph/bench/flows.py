@@ -7,6 +7,7 @@ and pipeline stages: fetch -> markdownize -> build -> run -> grade.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,79 @@ def batch_markdownize_task(
     for md_file in saved_md_files:
         dest = copy_markdown_to_project(md_file, markdown_dir=md_p)
         results.append(str(dest))
+    return results
+
+
+@task(task_run_name="route-markdownize")
+def route_markdownize_task(
+    docs: list[str],
+    *,
+    force: bool,
+    sources_dir: str,
+    saved_markdown_dir: str,
+    markdown_dir: str,
+    routes: str,
+    skip_ocr: bool = False,
+) -> list[str]:
+    """Convert benchmark documents through an ingest route table and stage them in markdown_dir.
+
+    Route-table-driven replacement for `batch_markdownize_task` (migration Phase 4
+    in docs/studies/rule_selected_ingest_workflows.md): each doc's source file is
+    dispatched through the named route table (config/ingest_routes.yaml),
+    converging to Markdown under saved_markdown_dir (the persistent mirror), then
+    staged as `<doc>_pdf.md` in markdown_dir — the same contract as the legacy
+    batch path, so the graph-build tasks are unchanged.
+    """
+    from genai_tk.workflow.routing.dispatcher import ingest_dispatch_flow
+
+    from genai_graph.bench.build_graph import MD_FILENAME_SUFFIX, copy_markdown_to_project, find_source_file_path
+
+    saved_p = Path(saved_markdown_dir)
+    md_p = Path(markdown_dir)
+    md_p.mkdir(parents=True, exist_ok=True)
+
+    if skip_ocr:
+        results = []
+        for doc in docs:
+            source_md = saved_p / f"{doc}{MD_FILENAME_SUFFIX}"
+            if not source_md.exists():
+                raise FileNotFoundError(f"--skip-ocr requested but markdown file missing: {source_md}")
+            dest = copy_markdown_to_project(source_md, markdown_dir=md_p)
+            results.append(str(dest))
+        return results
+
+    source_paths: dict[str, Path] = {}
+    for doc in docs:
+        try:
+            source_paths[doc] = find_source_file_path(doc, Path(sources_dir))
+        except Exception as exc:
+            logger.error("Could not find source document for {}: {}", doc, exc)
+
+    if source_paths:
+        ingest_dispatch_flow(
+            sources=[str(p) for p in source_paths.values()],
+            md_output_dir=str(saved_p),
+            routes=routes,
+            force_stage="md" if force else None,
+        )
+
+    # The generic ingestion workflows write `<stem>_<suffix>.md` (e.g.
+    # `report_pdf.md`); restage each doc's output under the bench naming
+    # contract (`<doc>_pdf.md`) expected by the graph-build tasks.
+    results: list[str] = []
+    missing: list[str] = []
+    for doc, src_p in source_paths.items():
+        produced = saved_p / f"{src_p.stem}_{src_p.suffix.lstrip('.')}.md"
+        if not produced.exists():
+            missing.append(doc)
+            continue
+        dest = md_p / f"{doc}{MD_FILENAME_SUFFIX}"
+        shutil.copy2(produced, dest)
+        results.append(str(dest))
+    if missing:
+        raise RuntimeError(
+            f"Routed ingestion (routes='{routes}') produced no Markdown for {len(missing)} doc(s): {missing[:5]}"
+        )
     return results
 
 
@@ -303,11 +377,22 @@ def fetch_flow(cfg: BenchConfig) -> list[str]:
 
 @flow(name="bench-markdownize")
 def markdownize_flow(cfg: BenchConfig) -> list[str]:
-    """Convert/OCR documents to Markdown in batch."""
+    """Convert/OCR documents to Markdown in batch (routed through the ingest
+    router when the docgraph profile sets `ingest_routes`)."""
     docs = cfg.files.docs
     logger.info("Markdownizing {} document(s)...", len(docs))
     if not docs:
         return []
+    if cfg.docgraph.ingest_routes:
+        return route_markdownize_task(
+            docs,
+            force=cfg.docgraph.build.force,
+            sources_dir=cfg.docgraph.paths.sources_dir,
+            saved_markdown_dir=cfg.docgraph.paths.saved_markdown_dir,
+            markdown_dir=cfg.docgraph.paths.markdown_dir,
+            routes=cfg.docgraph.ingest_routes,
+            skip_ocr=cfg.docgraph.build.skip_ocr,
+        )
     return batch_markdownize_task(
         docs,
         force=cfg.docgraph.build.force,

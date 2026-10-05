@@ -53,7 +53,7 @@ the main flags (see `kg-workflows` for force stages).
 
 ```bash
 cli docgraph build ./docs --db ./data/kg/tree.db            # markdownize + document graph
-cli docgraph build ./RFQ.zip --db ./data/kg/tree.db --profile fast
+cli docgraph build ./RFQ.zip --db ./data/kg/tree.db --routes default   # ingest route table
 cli docgraph build ./docs --db ./data/kg/tree.db --force md # re-run markdown conversion
 
 cli docgraph run --workflow rainbow_extract                # project entity-extraction workflow

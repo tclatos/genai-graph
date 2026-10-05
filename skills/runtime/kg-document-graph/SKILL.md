@@ -83,8 +83,9 @@ already in the graph (e.g. after a heading edit).
 `docgraph_build_step` (in `genai_graph/orchestration/workflow_steps.py`) ties
 markdownization, entity extraction, and the document graph into **one** database:
 
-1. Optionally markdownize `sources` (PPT/PDF/… or pre-existing Markdown) via
-   `genai_tk.workflow.markdownize.markdownize_flow`.
+1. Optionally dispatch `sources` through the ingest route table (`routes=`):
+   rule-selected workflows (markdownize for documents, web-page fetching for
+   URLs, …) run in parallel and converge to Markdown.
 2. Run each configured entity `factories` (e.g. a `MarkdownBamlFactory` subclass) into one
    KG named `kg_name`.
 3. Optionally ingest the `Folder → Document → MarkdownSection` graph over the same Markdown
@@ -124,7 +125,7 @@ retrieval — the agent reads exactly the section text it navigated to.
 
 ```bash
 cli docgraph build ./docs --db ./data/kg/tree.db           # markdownize + build document graph
-cli docgraph build ./RFQ.zip --db ./data/kg/tree.db --profile fast
+cli docgraph build ./RFQ.zip --db ./data/kg/tree.db --routes default
 cli docgraph run --workflow rainbow_extract -s ./some_file.pptx   # project entity-extraction workflow
 cli docgraph list --db ./data/kg/tree.db
 cli docgraph toc <filename-or-hash> --db ./data/kg/tree.db
@@ -170,4 +171,4 @@ uv run just test
 - `kg-factories` — `DocumentGraphFactory`/`MarkdownBamlFactory`/`DocumentDirectoryFactory`.
 - `kg-query` — `create_document_graph_tools` and the broader Cypher/Text-to-Cypher story.
 - `kg-workflows` — `docgraph_build_step` and `cli docgraph run`.
-- `genai-tk/workflow-engine` — `markdownize_flow` used in step 1.
+- `genai-tk/workflow-engine` — the ingest route table and `markdownize_flow` used in step 1.

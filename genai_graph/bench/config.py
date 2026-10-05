@@ -104,6 +104,7 @@ class DocGraphProfileConfig(BaseModel):
     profile_name: str = "default"
     description: str = ""
     markdownize_profile: str = "best"
+    ingest_routes: str | None = None
     paths: DocGraphPathsConfig = Field(default_factory=DocGraphPathsConfig)
     llms: DocGraphLlmsConfig = Field(default_factory=DocGraphLlmsConfig)
     images: DocGraphImagesConfig = Field(default_factory=DocGraphImagesConfig)
@@ -318,6 +319,7 @@ def load_docgraph_profile(
         profile_name=active_name,
         description=p_data.get("description", ""),
         markdownize_profile=p_data.get("markdownize_profile", "best"),
+        ingest_routes=p_data.get("ingest_routes"),
         paths=DocGraphPathsConfig(
             sources_dir=str(paths_raw.get("sources_dir") or paths_raw.get("pdfs_dir", "data/pdfs")),
             markdown_dir=str(paths_raw.get("markdown_dir", "data/markdown_multi")),

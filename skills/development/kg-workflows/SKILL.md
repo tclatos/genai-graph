@@ -112,7 +112,7 @@ workflows:
     run: genai_graph.orchestration.workflow_steps.docgraph_build_step
     hidden: true
     defaults:
-      markdownize_profile: fast
+      routes: default            # ingest route table (config/ingest_routes.yaml)
       build_document_graph: true
       delete_first: false
       export_html: true
@@ -139,8 +139,8 @@ workflows:
       sources: '${paths.rainbow_ppt}'
 ```
 
-`docgraph_build_step` markdownizes (if `markdownize_profile` set), runs entity `factories`
-into `kg_name`, then ingests the `Folder → Document → MarkdownSection` graph into the same
+`docgraph_build_step` dispatches sources through the ingest route table (if `routes` set),
+runs entity `factories` into `kg_name`, then ingests the `Folder → Document → MarkdownSection` graph into the same
 DB (`build_document_graph`, default true) — `Document` nodes MERGE by content hash. See
 `kg-document-graph`.
 

@@ -38,6 +38,15 @@ workflows:
     params:
       sources: {required: true}
       md_output_dir: {required: true}
+      force_stage: {required: false}
+
+  json_document:
+    description: "Convert structured JSON documents (benchmark corpora) to Markdown"
+    run: genai_graph.orchestration.ingest_flows.json_document_flow
+    params:
+      sources: {required: true}
+      md_output_dir: {required: true}
+      force_stage: {required: false}
 
   document_to_kg:
     description: "End-to-end pipeline: sources (files/dirs/zips/URLs) routed to workflows -> Markdown -> single-factory KG build"

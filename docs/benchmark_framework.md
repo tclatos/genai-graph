@@ -345,7 +345,7 @@ default_profile: default
 docgraph_profiles:
   default:
     description: "Ladybug Document Graph with Mistral OCR"
-    markdownize_profile: best
+    ingest_routes: default   # ingest route table (config/ingest_routes.yaml); legacy: markdownize_profile
     paths:
       sources_dir: ${paths.data_root}/pdfs
       markdown_dir: ${paths.data_root}/markdown_multi

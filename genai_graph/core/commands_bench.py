@@ -34,6 +34,19 @@ from genai_graph.bench.tui import (
 console = Console()
 
 
+def _ensure_managed_prefect_server() -> None:
+    """Ensure the managed Prefect server is running and point the client at it.
+
+    Bench flows submit tasks to a Prefect API; without this, a project venv
+    would spin up a broken ephemeral server (or fail on a stale local DB).
+    """
+    from genai_tk.utils.prefect_server import prefect_server
+
+    server = prefect_server()
+    server.ensure_running()
+    server.configure_api_url()
+
+
 class BenchCommands(CliTopCommand):
     """Benchmark commands for graph agent evaluation."""
 
@@ -217,6 +230,7 @@ class BenchCommands(CliTopCommand):
                 f"(markdownize={cfg.docgraph.markdownize_profile}, vlm={cfg.docgraph.llms.image or 'none'})"
             )
 
+            _ensure_managed_prefect_server()
             full_bench_flow(cfg, step=step, skip=skip)
 
         @cli_app.command("grade")
@@ -236,6 +250,7 @@ class BenchCommands(CliTopCommand):
             cfg = load_bench_profile(profile_name=profile, config_path=cfg_p)
             from genai_graph.bench.flows import grade_flow
 
+            _ensure_managed_prefect_server()
             scores = grade_flow(cfg)
             summary = compute_bench_summary(
                 scores,

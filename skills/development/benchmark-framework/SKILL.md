@@ -64,7 +64,7 @@ uv run cli bench questions -p mistral_glm -t --trajectory             # TUI with
 [1. Fetch Dataset & Documents]
          │
          ▼
-[2. Markdownize & OCR Ladder] (Mistral OCR with base64 images -> Docling -> MarkItDown)
+[2. Route-Selected Ingestion] (ingest route table -> Mistral OCR / Docling / MarkItDown)
          │
          ▼
 [3. Hierarchical Graph Ingestion] (Ladybug DB + Sections + Image nodes + BM25 & FTS)
@@ -80,7 +80,7 @@ uv run cli bench questions -p mistral_glm -t --trajectory             # TUI with
 ```
 
 1. **Fetch**: Retrieves questions from HuggingFace, CSV, or local files; caches raw PDFs.
-2. **Markdownize**: Converts documents using profile-configured strategy (`fast`, `medium`, `best`). For multimodal documents, `MistralOCRConverter` extracts images with xxHash32 hex names into `images_dir`, detects and converts lossless HTML tables (`table_processor.py`), and describes uncaptioned images via VLM with KV-store caching (`image_describer.py`).
+2. **Markdownize**: Converts documents by dispatching each source through the profile's ingest route table when `ingest_routes` is set (config/ingest_routes.yaml), else the profile-configured strategy (`fast`, `medium`, `best`). For multimodal documents, `MistralOCRConverter` extracts images with xxHash32 hex names into `images_dir`, detects and converts lossless HTML tables (`table_processor.py`), and describes uncaptioned images via VLM with KV-store caching (`image_describer.py`).
 3. **Build Graph**: Parses markdown into `Folder ──CONTAINS──▶ Document ──HAS_SECTION──▶ MarkdownSection (──HAS_CHUNK──▶ SectionChunk)` inside Ladybug DB, extracting section `keywords` via BAML and truncating large tables (>30 lines) in prompt context.
 4. **Run Agent**: Dispatches questions to the agent harness with graph tools (`get_folder_toc`, `get_document_toc`, `get_section_content`, `search_sections`, `query_image`). Records tool calls, thinking traces, and token usage into `runs.jsonl`.
 5. **Judge**: Evaluates outputs against `gold_answer` and `evidence` using domain rubrics, outputting `scores.jsonl`.
@@ -189,7 +189,9 @@ default_profile: default
 docgraph_profiles:
   default:
     description: "Ladybug Document Graph with Mistral OCR & LLM outline extraction"
-    markdownize_profile: best
+    # Preferred: dispatch corpus conversion through an ingest route table
+    # (config/ingest_routes.yaml); legacy profile-driven path otherwise.
+    ingest_routes: default
 
     paths:
       sources_dir: ${paths.data_root}/pdfs

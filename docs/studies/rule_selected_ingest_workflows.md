@@ -80,16 +80,17 @@ Rule model (Pydantic, mirroring `ConverterRule`):
 
 ```python
 class IngestRule(BaseModel):
-    pathspec: str                  # gitwildmatch pattern, matched against path or URL string
-    workflow: str                  # workflow name or "name/preset"
-    with_params: dict[str, Any] = Field(default_factory=dict)   # forwarded as workflow params
+    pathspec: str  # gitwildmatch pattern, matched against path or URL string
+    workflow: str  # workflow name or "name/preset"
+    with_params: dict[str, Any] = Field(default_factory=dict)  # forwarded as workflow params
+
 
 class IngestRouteTable(BaseModel):
     default: str | None = None
     routes: list[IngestRule]
 
-    def select(self, item: str) -> str: ...      # first match, else default
-    def fingerprint(self) -> str: ...            # cache-code-version, like MarkdownizeProfile.fingerprint()
+    def select(self, item: str) -> str: ...  # first match, else default
+    def fingerprint(self) -> str: ...  # cache-code-version, like MarkdownizeProfile.fingerprint()
 ```
 
 Notes:

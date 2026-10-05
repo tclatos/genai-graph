@@ -114,6 +114,9 @@ constraint-dependencies = [
 #    "langsmith<0.9",  # 0.9.x has circular import in _openapi_client
     "alembic<1.18",   # 1.18.x has missing PriorityDispatcher (breaks Prefect)
     "openai<2.44",    # 2.44.0 has circular import in _utils/_files
+    # genai-tk[harnessing] carries deerflow-harness as a direct URL requirement; uv requires
+    # consumers resolving genai-tk from git to express transitive URL dependencies in constraints
+    "deerflow-harness @ git+https://github.com/bytedance/deer-flow@795af20a6b79b22fd9e95f674554605c5bfb6cdc#subdirectory=backend/packages/harness",
 ]
 
 # NOTE: genai-tk is a bare requirement in [project.dependencies] on purpose.

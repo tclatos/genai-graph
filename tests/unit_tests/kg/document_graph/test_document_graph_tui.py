@@ -139,7 +139,7 @@ async def test_document_graph_tui_rapid_navigation(sample_tui_db: str) -> None:
 @pytest.mark.anyio
 async def test_document_graph_tui_mouse_click_and_allow_select(sample_tui_db: str) -> None:
     app = DocumentGraphApp(sample_tui_db)
-    assert app.ALLOW_SELECT is False
+    assert app.ALLOW_SELECT is True
     async with app.run_test() as pilot:
         tree = app.query_one(Tree)
         tree.root.expand()
@@ -158,6 +158,12 @@ async def test_document_graph_tui_mouse_click_and_allow_select(sample_tui_db: st
         # Click on the Markdown content area — should not raise AttributeError
         await pilot.click("#content")
         await pilot.pause(0.05)
+
+        # Selecting text works: selecting all on the content registers a selection
+        content = app.query_one("#content", Markdown)
+        content.text_select_all()
+        await pilot.pause()
+        assert app.screen.selections
 
 
 @pytest.mark.anyio

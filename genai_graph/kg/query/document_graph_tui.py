@@ -85,9 +85,11 @@ def _dedupe_documents(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class DocumentGraphApp(App[None]):
-    """Browse a Document Graph: folders → documents → sections."""
+    """Browse a Document Graph: folders → documents → sections.
 
-    ALLOW_SELECT = False
+    Text in the info panel is selectable with the mouse (double-click selects a
+    widget's whole text; `Ctrl+C` copies the selection to the system clipboard).
+    """
 
     CSS = """
     Horizontal {

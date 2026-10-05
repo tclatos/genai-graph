@@ -234,7 +234,7 @@ class LadybugBackend(KgBackend):
         # Extensions already loaded on ``self.conn`` (per-connection cache).
         self._loaded_extensions: set[str] = set()
 
-    def connect(self, connection_string: str, *, enable_multi_writes: bool = False) -> None:
+    def connect(self, connection_string: str, *, enable_multi_writes: bool = False, read_only: bool = False) -> None:
         """Connect to a Ladybug database file, owning the underlying ``Database``.
 
         Opens a fresh ``ladybug.Database`` plus one ``Connection`` and loads the
@@ -249,10 +249,13 @@ class LadybugBackend(KgBackend):
                 same ``Database`` object (e.g. a shared-DB worker pool); with the
                 default ``False`` Ladybug rejects concurrent write transactions
                 with "Only one write transaction at a time is allowed".
+            read_only: Open the database read-only — no WAL, no checkpointing,
+                and several handles may coexist for the same file. Use for
+                display-only commands; write attempts fail cleanly.
         """
         import ladybug
 
-        self.db = ladybug.Database(connection_string, enable_multi_writes=enable_multi_writes)
+        self.db = ladybug.Database(connection_string, enable_multi_writes=enable_multi_writes, read_only=read_only)
         self.conn = ladybug.Connection(self.db)
         # Ensure the vector and FTS extensions are loaded so tables with vector
         # or full-text search indexes can accept deletes/inserts without a

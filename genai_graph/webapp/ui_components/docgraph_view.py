@@ -56,9 +56,9 @@ def read_origin_path(md_path: str | None) -> str | None:
 
 
 def get_docgraph_backend(db_path: str) -> KgBackend:
-    """Connect to a Ladybug/Kuzu database and return the backend instance."""
+    """Connect read-only to a Ladybug/Kuzu database and return the backend instance."""
     backend = KuzuBackend()
-    backend.connect(db_path)
+    backend.connect(db_path, read_only=Path(db_path).exists())
     return backend
 
 

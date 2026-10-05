@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Footer, Header, LoadingIndicator, Markdown, Static, Tree
+from textual.widgets import Footer, Header, Markdown, Static, Tree
 from textual.widgets.tree import TreeNode
 
 from genai_graph.kg.backend import KgBackend, KuzuBackend
@@ -92,9 +92,6 @@ class DocumentGraphApp(App[None]):
     """
 
     CSS = """
-    Horizontal {
-        height: 1fr;
-    }
     #tree-panel {
         width: 38%;
         border-right: solid $accent;
@@ -108,14 +105,6 @@ class DocumentGraphApp(App[None]):
         border-bottom: solid $accent;
         padding-bottom: 1;
         margin-bottom: 1;
-    }
-    #loading {
-        height: 3;
-        display: none;
-        margin: 1 0;
-    }
-    #loading.active {
-        display: block;
     }
     #content {
         height: auto;
@@ -133,7 +122,8 @@ class DocumentGraphApp(App[None]):
         super().__init__()
         self.db_path = db_path
         self.backend: KgBackend = KuzuBackend()
-        self.backend.connect(db_path)
+        # Display-only app: open read-only when the DB exists (no WAL/checkpointing)
+        self.backend.connect(db_path, read_only=Path(db_path).exists())
         self._doc_rows: list[dict[str, Any]] = []
         self._active_node_key: tuple[str, str | None] | None = None
         self._current_md_path: str | None = None  # Converted Markdown file, for "m"
@@ -145,7 +135,6 @@ class DocumentGraphApp(App[None]):
             yield Tree("Folder", id="tree-panel")
             with VerticalScroll(id="info-panel"):
                 yield Static("Select a node to see details.", id="meta")
-                yield LoadingIndicator(id="loading")
                 yield Markdown("", id="content")
         yield Footer()
 
@@ -239,14 +228,9 @@ class DocumentGraphApp(App[None]):
         self._show_node(event.node)
 
     def _set_loading(self, loading: bool) -> None:
-        indicator = self.query_one("#loading", LoadingIndicator)
-        content = self.query_one("#content", Markdown)
-        if loading:
-            indicator.add_class("active")
-            content.display = False
-        else:
-            indicator.remove_class("active")
-            content.display = True
+        # Do NOT use a LoadingIndicator here: its animation breaks the layout of
+        # Markdown tables (cells get arranged off-content and never render).
+        self.query_one("#content", Markdown).display = not loading
 
     def _show_node(self, node: TreeNode) -> None:
         data: NodeData | None = node.data

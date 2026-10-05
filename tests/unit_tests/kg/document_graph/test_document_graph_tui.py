@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from textual.widgets import Markdown, Tree
+from textual.widgets._markdown import MarkdownTable
 
 from genai_graph.kg.backend import KuzuBackend
 from genai_graph.kg.document_graph.ingest import ingest_document_graph
@@ -28,6 +29,13 @@ Content of section 2.
 ### Subsection 2.1
 
 Content of subsection 2.1.
+
+## Sheet: Table
+
+| Assignment | Supplier | Alko |
+| --- | --- | --- |
+| Planning work | R,A | C,I |
+| Test plan | R,A | C,I |
 """
 
 
@@ -84,11 +92,17 @@ async def test_document_graph_tui_navigation(sample_tui_db: str) -> None:
         # Allow worker to finish loading content
         for _ in range(50):
             await pilot.pause(0.02)
-            if not app.query_one("#loading").has_class("active"):
+            if content.display:
                 break
 
         assert "Guide Title" in content._markdown
         assert "Introduction paragraph" in content._markdown
+
+        # Regression: tables must be arranged inline within the content box.
+        # A fractional height on the Horizontal container used to push
+        # MarkdownTable widgets below the content where they were invisible.
+        table = app.query_one(MarkdownTable)
+        assert content.region.contains_region(table.region)
 
         # 3. Expand doc node to reveal sections
         doc_node.expand()
@@ -100,7 +114,7 @@ async def test_document_graph_tui_navigation(sample_tui_db: str) -> None:
         tree.select_node(sec_node)
         for _ in range(50):
             await pilot.pause(0.02)
-            if not app.query_one("#loading").has_class("active"):
+            if content.display:
                 break
 
         assert len(content._markdown) > 0
@@ -128,7 +142,7 @@ async def test_document_graph_tui_rapid_navigation(sample_tui_db: str) -> None:
         # Allow final worker to complete
         for _ in range(50):
             await pilot.pause(0.02)
-            if not app.query_one("#loading").has_class("active"):
+            if app.query_one("#content", Markdown).display:
                 break
 
         content = app.query_one("#content", Markdown)
@@ -152,7 +166,7 @@ async def test_document_graph_tui_mouse_click_and_allow_select(sample_tui_db: st
 
         for _ in range(50):
             await pilot.pause(0.02)
-            if not app.query_one("#loading").has_class("active"):
+            if app.query_one("#content", Markdown).display:
                 break
 
         # Click on the Markdown content area — should not raise AttributeError
@@ -208,7 +222,7 @@ async def test_document_graph_tui_shows_descriptions(sample_tui_db: str) -> None
 
         for _ in range(50):
             await pilot.pause(0.02)
-            if not app.query_one("#loading").has_class("active"):
+            if app.query_one("#content", Markdown).display:
                 break
 
         meta = app.query_one("#meta")

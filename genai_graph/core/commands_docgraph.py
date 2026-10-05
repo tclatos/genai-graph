@@ -27,7 +27,21 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
 
+from genai_graph.kg.backend import KuzuBackend
+
 console = Console()
+
+
+def _connect_display(db_path: str) -> Any:
+    """Connect to a DocGraph database for a display-only command.
+
+    Opens read-only whenever the file exists (no WAL, no checkpointing, safe
+    alongside writers); falls back to a read-write open for a not-yet-built
+    database so the "nothing ingested yet" experience still works.
+    """
+    backend = KuzuBackend()
+    backend.connect(db_path, read_only=Path(db_path).exists())
+    return backend
 
 
 def _resolve_db_path(db_path: str | None = None, profile: str = "default") -> str:
@@ -418,11 +432,9 @@ class DocGraphCommands(CliTopCommand):
         ) -> None:
             """List ingested documents, optionally filtered to one folder's subtree."""
             db_path = _resolve_db_path(db_path, profile=profile)
-            from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import list_documents
 
-            backend = KuzuBackend()
-            backend.connect(db_path)
+            backend = _connect_display(db_path)
 
             folder_id = _resolve_folder_ref_or_exit(backend, folder)
             rows = list_documents(backend, folder_id=folder_id)
@@ -478,7 +490,6 @@ class DocGraphCommands(CliTopCommand):
         ) -> None:
             """Show the table of contents for one document, or list a folder's contents."""
             db_path = _resolve_db_path(db_path, profile=profile)
-            from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import (
                 document_toc_yaml,
                 folder_toc_yaml,
@@ -489,8 +500,7 @@ class DocGraphCommands(CliTopCommand):
                 resolve_folder_id,
             )
 
-            backend = KuzuBackend()
-            backend.connect(db_path)
+            backend = _connect_display(db_path)
 
             folder_id = resolve_folder_id(backend, document)
             if folder_id is not None:
@@ -564,11 +574,9 @@ class DocGraphCommands(CliTopCommand):
             then run `docgraph toc <id> --yaml` for its sections. Pass --sections to inline them.
             """
             db_path = _resolve_db_path(db_path, profile=profile)
-            from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import folder_toc_yaml
 
-            backend = KuzuBackend()
-            backend.connect(db_path)
+            backend = _connect_display(db_path)
             folder_id = _resolve_folder_ref_or_exit(backend, folder)
             console.print(
                 folder_toc_yaml(backend, folder_id, include_sections=sections, include_summaries=summaries),
@@ -606,15 +614,13 @@ class DocGraphCommands(CliTopCommand):
         ) -> None:
             """Reconstruct and print a document's (or one section's) Markdown text from its sections."""
             db_path = _resolve_db_path(db_path, profile=profile)
-            from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import (
                 reconstruct_document,
                 reconstruct_section,
                 resolve_folder_id,
             )
 
-            backend = KuzuBackend()
-            backend.connect(db_path)
+            backend = _connect_display(db_path)
 
             if "::" not in document and resolve_folder_id(backend, document) is not None:
                 console.print(
@@ -697,15 +703,13 @@ class DocGraphCommands(CliTopCommand):
         ) -> None:
             """Search section titles and text across ingested documents, with hybrid, vector, BM25, or native Cypher mode."""
             db_path = _resolve_db_path(db_path, profile=profile)
-            from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import (
                 get_available_indexes,
                 resolve_node_ref,
                 search_sections,
             )
 
-            backend = KuzuBackend()
-            backend.connect(db_path)
+            backend = _connect_display(db_path)
 
             folder_id: str | None = None
             doc_id: str | None = None
@@ -805,11 +809,9 @@ class DocGraphCommands(CliTopCommand):
         ) -> None:
             """Display the ingested folder hierarchy as a tree."""
             db_path = _resolve_db_path(db_path, profile=profile)
-            from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import get_folder_tree
 
-            backend = KuzuBackend()
-            backend.connect(db_path)
+            backend = _connect_display(db_path)
             root_id = _resolve_folder_ref_or_exit(backend, ref)
 
             rows = get_folder_tree(backend, root_id)
@@ -861,11 +863,9 @@ class DocGraphCommands(CliTopCommand):
         ) -> None:
             """List and search images extracted into the Document Graph."""
             db_path = _resolve_db_path(db_path, profile=profile)
-            from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import search_images
 
-            backend = KuzuBackend()
-            backend.connect(db_path)
+            backend = _connect_display(db_path)
 
             rows = search_images(backend, query=query, document_id=doc, limit=limit)
             if not rows:
@@ -915,11 +915,9 @@ class DocGraphCommands(CliTopCommand):
         ) -> None:
             """List and search tables extracted into the Document Graph."""
             db_path = _resolve_db_path(db_path, profile=profile)
-            from genai_graph.kg.backend import KuzuBackend
             from genai_graph.kg.query.document_graph_tools import search_tables
 
-            backend = KuzuBackend()
-            backend.connect(db_path)
+            backend = _connect_display(db_path)
 
             rows = search_tables(backend, query=query, document_id=doc, limit=limit)
             if not rows:

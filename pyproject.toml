@@ -32,6 +32,7 @@ dependencies = [
     # "pgvector>=0.4.2",
     "psycopg[binary, pool]>=3.3.2",
     "prefect>=3.6.7",
+    "prefect-yaml",
     "sqlmodel>=0.0.31",
     "xxhash>=3.6.0",
     "baml-lib>=0.42.0",
@@ -104,6 +105,9 @@ dev = [
 toolkit = [
     "genai-tk @ git+https://github.com/tclatos/genai-tk@main",
 ]
+
+[tool.uv.sources]
+prefect-yaml = { path = "../prefect-yaml", editable = true }
 
 [tool.uv]
 package = true

@@ -20,11 +20,21 @@ ingest_routes:
   default:
     description: >
       PDFs go through the markdownize flow (Mistral OCR via the default
-      profile), web pages through the Tavily fetcher, and everything else —
-      including pre-existing Markdown — through the markdownize flow, which
-      copies Markdown files unchanged.
+      profile), git repositories through git_repo flow, web pages through
+      the Tavily fetcher, and everything else — including pre-existing
+      Markdown — through the markdownize flow, which copies Markdown files unchanged.
     default: markdownize_documents
     routes:
+      - pathspec: "https://github.com/**"
+        workflow: genai_tk.workflow.prefect.flows.git_repo_flow.git_repo_flow
+      - pathspec: "https://gitlab.com/**"
+        workflow: genai_tk.workflow.prefect.flows.git_repo_flow.git_repo_flow
+      - pathspec: "https://bitbucket.org/**"
+        workflow: genai_tk.workflow.prefect.flows.git_repo_flow.git_repo_flow
+      - pathspec: "**/*.git"
+        workflow: genai_tk.workflow.prefect.flows.git_repo_flow.git_repo_flow
+      - pathspec: "git@**"
+        workflow: genai_tk.workflow.prefect.flows.git_repo_flow.git_repo_flow
       - pathspec: "https://**"
         workflow: genai_tk.workflow.prefect.flows.web_page_flow.web_page_flow
         with:

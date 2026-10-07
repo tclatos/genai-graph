@@ -107,7 +107,7 @@ toolkit = [
 ]
 
 [tool.uv.sources]
-prefect-yaml = { path = "../prefect-yaml", editable = true }
+prefect-yaml = { git = "https://github.com/tclatos/prefect-yaml", branch = "main" }
 
 [tool.uv]
 package = true

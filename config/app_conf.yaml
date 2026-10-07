@@ -159,6 +159,7 @@ cli:
     - genai_tk.workflow.rag.commands_rag.RagCommands
     - genai_tk.agents.commands_agents.AgentCommands
     - genai_tk.extra.structured.commands_baml.BamlCommands
+    - genai_tk.mcp.cli_commands.McpCommands
     - genai_graph.core.commands_docgraph.DocGraphCommands
     - genai_graph.core.commands_docbench.DocBenchCommands
     - genai_graph.core.commands_bench.BenchCommands

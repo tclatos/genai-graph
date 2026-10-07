@@ -1,0 +1,37 @@
+# MCP Server Exposure Configuration for genai-graph
+#
+# Exposes Document Graph navigation tools and deep agent as MCP servers.
+#
+# Usage:
+#   uv run cli mcpserver list
+#   uv run cli mcpserver start --name docgraph-tools
+#   uv run cli mcpserver start --name docgraph-agent
+#   uv run cli mcpserver generate --name docgraph-tools --output scripts/server_docgraph_tools.py
+
+mcp_expose_servers:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Document Graph navigation tools
+  # Exposes the low-level navigation tools (list_documents, get_folder_toc,
+  # get_document_toc, get_section_content, search_sections, query_image).
+  # Any MCP-compatible agent with the right skills can navigate the graph.
+  # ──────────────────────────────────────────────────────────────────────────
+  docgraph-tools:
+    description: "Document Graph navigation tools (list_documents, get_folder_toc, get_document_toc, get_section_content, search_sections, query_image)"
+    tools:
+      - factory: genai_graph.agent.docgraph_agent.create_document_graph_tools_from_config
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Document Graph deep agent
+  # Exposes the Document Graph deep agent (docgraph profile) as a single MCP tool.
+  # A normal AI RAG or external agent can ask natural language questions and
+  # receive grounded, cited answers formulated by the deep agent.
+  # ──────────────────────────────────────────────────────────────────────────
+  docgraph-agent:
+    description: "Document Graph deep agent to answer questions by navigating documents"
+    tools: []
+    agent:
+      enabled: true
+      name: ask_docgraph_agent
+      description: "Ask the Document Graph deep agent a question; it autonomously navigates the Document Graph to formulate a grounded, cited answer."
+      profile: docgraph

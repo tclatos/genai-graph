@@ -207,13 +207,52 @@ collaboration, risks), and emits a structured Markdown report with
 - `tests/integration_tests/test_document_graph_ingest.py` — covers the
   schema-tolerant behavior (empty DB → `[]`, dropped Section table → `[]`,
   full-schema navigation, folder hierarchy, hash-prefix resolution).
+- `tests/integration_tests/test_mcp_docgraph_servers.py` — covers the MCP 2.0
+  `docgraph-tools` and `docgraph-agent` server definitions, tool exposure, schema compliance,
+  and invocation.
 - Manual smoke: `cli docgraph agent "..." --folder folder_273e65da416b2e72`.
 - Real extraction: `cli agent extract` (rfq_pricing) produces the 9-category
   report cited above.
 
 ```bash
 uv run pytest tests/integration_tests/test_document_graph_ingest.py -q
+uv run pytest tests/integration_tests/test_mcp_docgraph_servers.py -q
 uv run ruff check genai_graph/agent genai_graph/kg/query/document_graph_tools.py
+```
+
+## Exposing as MCP 2.0 Servers
+
+`genai-graph` provides two pre-configured MCP 2.0 servers declared in `config/tk_servers.yaml`:
+
+### 1. `docgraph-tools` (Graph Navigation Tools)
+Exposes the six navigation tools (`list_documents`, `get_folder_toc`, `get_document_toc`,
+`get_section_content`, `search_sections`, `query_image`) as MCP tools.
+This enables **any external agent** (Claude Desktop, custom MCP agents, LangChain/LlamaIndex agents) equipped with navigation skills to autonomously traverse the Document Graph.
+
+### 2. `docgraph-agent` (Deep Agent Query Tool)
+Exposes the Document Graph deep agent as a single MCP tool (`ask_docgraph_agent`).
+This enables standard RAG pipelines or conversational assistants to ask natural-language questions
+and receive an autonomous, grounded answer with `[hash::sequence]` section citations without needing
+to know how to navigate the graph themselves.
+
+### Usage & Verification
+
+```bash
+# List exposed servers
+uv run cli mcpserver list
+
+# Start either server over stdio
+uv run cli mcpserver start --name docgraph-tools
+uv run cli mcpserver start --name docgraph-agent
+
+# Test interactive tool calls from CLI
+uv run cli core mcp-call docgraph-tools
+uv run cli core mcp-call docgraph-tools --tool list_documents
+uv run cli core mcp-call docgraph-agent --tool ask_docgraph_agent --tool-args '{"query": "Summarize the SLAs"}'
+
+# Start over network transport (SSE or Streamable-HTTP)
+uv run cli mcpserver start --name docgraph-tools --transport sse --port 8001
+uv run cli mcpserver start --name docgraph-agent --transport streamable-http --port 8002
 ```
 
 ## See also
@@ -222,3 +261,4 @@ uv run ruff check genai_graph/agent genai_graph/kg/query/document_graph_tools.py
 - `kg-query` skill — the broader Cypher / text-to-Cypher story.
 - `kg-docgraph-agent` skill — developer guide to this agent module.
 - `genai-tk/agent-profiles` — the unified `agents:` profile format and `type: deep`.
+- `docs/mcp-servers.md` (in genai-tk) — MCP 2.0 server exposure and client infrastructure.

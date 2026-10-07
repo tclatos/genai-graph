@@ -38,7 +38,15 @@ try:
 
     if os.environ.get("BAML_LOG", "").lower() not in {"debug", "info", "trace"}:
         os.environ["BAML_LOG"] = "ERROR"
-        set_log_level("ERROR")
+        # Temporarily redirect OS fd 1 to stderr so BAML's native rust banner
+        # does not write to stdout and corrupt MCP stdio JSON-RPC streams.
+        _old_stdout_fd = os.dup(1)
+        try:
+            os.dup2(2, 1)
+            set_log_level("ERROR")
+        finally:
+            os.dup2(_old_stdout_fd, 1)
+            os.close(_old_stdout_fd)
 except Exception:
     pass
 

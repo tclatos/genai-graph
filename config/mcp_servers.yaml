@@ -25,3 +25,10 @@ mcpServers:
     env: 
       TAVILY_API_KEY : ${oc.env:TAVILY_API_KEY,  "dummy key"}
   #  disabled: true
+
+# Project-defined MCP servers (exposed via cli mcpserver start --name <key>)
+mcpProjectServers:
+  docgraph-tools:
+    description: "Document Graph navigation tools"
+  docgraph-agent:
+    description: "Document Graph deep agent"

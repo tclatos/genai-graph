@@ -354,6 +354,10 @@ filename, or source path. `document_toc_yaml`/`folder_toc_yaml` render a documen
 generated — the format an agent tool returns. `create_document_graph_tools(db_path)`
 wraps these (plus `get_folder_toc`) as LangChain `BaseTool`s for an agent.
 
+These tools are also exposed directly as an **MCP 2.0 server** (`docgraph-tools`) in
+`config/tk_servers.yaml`, allowing any MCP-compliant agent to navigate the graph over
+`stdio`, `sse`, or `streamable-http`. See [docs/docgraph-agent.md](docgraph-agent.md) for details.
+
 ## Related docs
 
 - [docs/workflows.md](workflows.md) — the workflow DSL, force stages, `cli docgraph`/`cli kg create` CLI reference

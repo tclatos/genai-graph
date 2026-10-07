@@ -112,6 +112,9 @@ prefect-yaml = { git = "https://github.com/tclatos/prefect-yaml", branch = "main
 [tool.uv]
 package = true
 default-groups = ["ui", "demos", "extra", "dev", "toolkit"]
+override-dependencies = [
+    "mcp>=2.0.0",
+]
 constraint-dependencies = [
     "ipython<9",      # 9.x has circular import (ultratb → from IPython import get_ipython during __init__)
     "requests<2.34",  # 2.34.x has broken compat.py (missing JSONDecodeError export)

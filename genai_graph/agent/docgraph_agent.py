@@ -326,6 +326,7 @@ def create_docgraph_agent(
     folder_id: str | None = None,
     extra_skill_dirs: list[str] | None = None,
     embeddings_id: str | None = None,
+    extra_tools: list[Any] | None = None,
 ) -> Any:
     """Prepare *profile* and return a ready-to-stream :class:`LangChainHarness` or :class:`DeerFlowHarness`.
 
@@ -344,6 +345,7 @@ def create_docgraph_agent(
             use-case skills).
         embeddings_id: Embeddings model id enabling the hybrid (vector + BM25)
             ``search_sections`` mode; None keeps keyword search only.
+        extra_tools: Optional additional tools to combine with the navigation tools.
 
     Returns:
         A :class:`genai_tk.agents.harness.base.BaseHarness` instance (:class:`LangChainHarness` or :class:`DeerFlowHarness`).
@@ -355,7 +357,9 @@ def create_docgraph_agent(
         folder_id=folder_id,
         extra_skill_dirs=extra_skill_dirs,
     )
-    tools = create_document_graph_tools_from_config(db_path, profile=docgraph_profile, embeddings_id=embeddings_id)
+    tools = list(create_document_graph_tools_from_config(db_path, profile=docgraph_profile, embeddings_id=embeddings_id))
+    if extra_tools:
+        tools.extend(extra_tools)
     if getattr(profile, "harness", "langchain") == "deerflow":
         from genai_tk.agents.harness.deerflow_harness import DeerFlowHarness
 

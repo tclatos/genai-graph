@@ -18,6 +18,7 @@ raw Cypher binder error. Truly-missing structures surface as
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import threading
@@ -100,10 +101,9 @@ _SECTION_TOC_KEYS: tuple[str, ...] = (
     "summary_source",
 )
 
-# Per-backend introspection caches (keyed by id(backend) so distinct connections
-# don't share stale schemas).
-_TABLE_COL_CACHE: dict[tuple[int, str], set[str]] = {}
-_REL_CACHE: dict[int, set[str]] = {}
+# Per-backend introspection caches: stored on backend instances directly
+# (e.g. backend._docgraph_col_cache) so distinct connections never share stale
+# schemas or suffer from object ID reuse across tests.
 
 
 class DocumentGraphError(Exception):
@@ -214,29 +214,33 @@ def _table_columns(backend: KgBackend, table: str) -> set[str]:
     Returns an empty set when the table does not exist (e.g. a fresh DB that has
     never been ingested) so callers can fall back instead of crashing.
     """
-    key = (id(backend), table)
-    cached = _TABLE_COL_CACHE.get(key)
+    col_cache: dict[str, set[str]] = getattr(backend, "_docgraph_col_cache", None)
+    if col_cache is None:
+        col_cache = {}
+        with contextlib.suppress(Exception):
+            backend._docgraph_col_cache = col_cache
+
+    cached = col_cache.get(table)
     if cached is not None:
         return cached
     try:
         df = backend.execute_get_as_df(f"CALL table_info('{table}') RETURN *", None, union=False)
     except Exception as exc:
         logger.debug("table_info('{}') failed: {}", table, exc)
-        _TABLE_COL_CACHE[key] = set()
+        col_cache[table] = set()
         return set()
     if df is None or df.empty:
-        _TABLE_COL_CACHE[key] = set()
+        col_cache[table] = set()
         return set()
     name_col = df["name"] if "name" in df.columns else df.iloc[:, 1]
     cols = {str(v) for v in name_col}
-    _TABLE_COL_CACHE[key] = cols
+    col_cache[table] = cols
     return cols
 
 
 def _has_relationship(backend: KgBackend, rel_name: str) -> bool:
     """Return True when a relationship table named *rel_name* exists in the DB."""
-    key = id(backend)
-    cached = _REL_CACHE.get(key)
+    cached: set[str] | None = getattr(backend, "_docgraph_rel_cache", None)
     if cached is None:
         try:
             df = backend.execute_get_as_df("CALL show_tables() RETURN *", None, union=False)
@@ -244,7 +248,8 @@ def _has_relationship(backend: KgBackend, rel_name: str) -> bool:
         except Exception as exc:
             logger.debug("show_tables() failed: {}", exc)
             cached = set()
-        _REL_CACHE[key] = cached
+        with contextlib.suppress(Exception):
+            backend._docgraph_rel_cache = cached
     return rel_name in cached
 
 

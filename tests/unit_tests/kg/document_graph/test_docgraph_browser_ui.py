@@ -259,15 +259,18 @@ def test_docbench_cli_list(sample_docgraph_db: tuple[str, Path]) -> None:
 
 
 def test_docgraph_web_help() -> None:
+    import re
+
     app = typer.Typer()
     DocGraphCommands().register(app)
-    runner = CliRunner()
+    runner = CliRunner(env={"NO_COLOR": "1"})
 
     res = runner.invoke(app, ["docgraph", "web", "--help"])
     assert res.exit_code == 0
-    assert "--port" in res.output
-    assert "--host" in res.output
-    assert "--profile" in res.output
+    clean_output = re.sub(r"\x1b\[[0-9;]*m", "", res.output)
+    assert "--port" in clean_output
+    assert "--host" in clean_output
+    assert "--profile" in clean_output
 
 
 def test_get_configured_profiles() -> None:

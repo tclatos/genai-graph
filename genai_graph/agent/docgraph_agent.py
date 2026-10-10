@@ -357,7 +357,9 @@ def create_docgraph_agent(
         folder_id=folder_id,
         extra_skill_dirs=extra_skill_dirs,
     )
-    tools = list(create_document_graph_tools_from_config(db_path, profile=docgraph_profile, embeddings_id=embeddings_id))
+    tools = list(
+        create_document_graph_tools_from_config(db_path, profile=docgraph_profile, embeddings_id=embeddings_id)
+    )
     if extra_tools:
         tools.extend(extra_tools)
     if getattr(profile, "harness", "langchain") == "deerflow":

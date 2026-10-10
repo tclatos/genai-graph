@@ -45,7 +45,7 @@ test-install:
     #!/usr/bin/env bash
     set -euo pipefail
     echo -e "\033[3m\033[36mExpected output: 'tell me a joke on bears'\033[0m"
-    echo bears | PYTHONPATH={{ dev_pythonpath }} uv run cli core run joke -m parrot_local_fake
+    PYTHONPATH={{ dev_pythonpath }} uv run cli core llm -i "tell me a joke on bears" -m parrot_local@fake
 
 # ─── Graph Tools ────────────────────────────────────────────────────────────
 

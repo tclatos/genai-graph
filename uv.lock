@@ -2451,6 +2451,7 @@ extra = [
 ]
 toolkit = [
     { name = "genai-tk" },
+    { name = "prefect-yaml" },
 ]
 ui = [
     { name = "sse-starlette" },
@@ -2481,7 +2482,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pip", specifier = ">=25.1.1" },
     { name = "prefect", specifier = ">=3.6.7" },
-    { name = "prefect-yaml", git = "https://github.com/tclatos/prefect-yaml?branch=main" },
+    { name = "prefect-yaml" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.2" },
     { name = "pydantic", specifier = ">=2.7.0,<3" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
@@ -2522,7 +2523,10 @@ extra = [
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "tavily-python", specifier = ">=0.7.12" },
 ]
-toolkit = [{ name = "genai-tk", git = "https://github.com/tclatos/genai-tk?rev=main" }]
+toolkit = [
+    { name = "genai-tk", git = "https://github.com/tclatos/genai-tk?rev=main" },
+    { name = "prefect-yaml", git = "https://github.com/tclatos/prefect-yaml?rev=main" },
+]
 ui = [
     { name = "sse-starlette", specifier = ">=2.1.0" },
     { name = "streamlit", extras = ["pdf"], specifier = ">=1.49" },
@@ -5955,7 +5959,7 @@ wheels = [
 [[package]]
 name = "prefect-yaml"
 version = "0.1.0"
-source = { git = "https://github.com/tclatos/prefect-yaml?branch=main#178d4e37ca11b15a4702207fd631683ec7a0b1f9" }
+source = { git = "https://github.com/tclatos/prefect-yaml?rev=main#178d4e37ca11b15a4702207fd631683ec7a0b1f9" }
 dependencies = [
     { name = "httpx" },
     { name = "loguru" },

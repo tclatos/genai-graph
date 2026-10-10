@@ -99,15 +99,14 @@ dev = [
     "pytest-beartype>=0.2.0", # Runtime type checking for pytest
 ]
 
-# git-only genai-tk reference for this repo's own `uv sync` (the published
-# requirement is bare — see the NOTE above [build-system]). Root-only: consumers
-# choose their own genai-tk source and are never affected by this pin.
+# git-only genai-tk and prefect-yaml references for this repo's own `uv sync`
+# (the published requirements are bare — see the NOTE above [build-system]).
+# Root-only: consumers choose their own sources and are never affected by these pins.
 toolkit = [
     "genai-tk @ git+https://github.com/tclatos/genai-tk@main",
+    "prefect-yaml @ git+https://github.com/tclatos/prefect-yaml@main",
 ]
 
-[tool.uv.sources]
-prefect-yaml = { git = "https://github.com/tclatos/prefect-yaml", branch = "main" }
 
 [tool.uv]
 package = true
@@ -126,13 +125,13 @@ constraint-dependencies = [
     "deerflow-harness @ git+https://github.com/bytedance/deer-flow@795af20a6b79b22fd9e95f674554605c5bfb6cdc#subdirectory=backend/packages/harness",
 ]
 
-# NOTE: genai-tk is a bare requirement in [project.dependencies] on purpose.
-# Do NOT add a [tool.uv.sources] entry for it here: uv applies a dependency
-# package's sources to consumers resolving it from a path/git checkout, and a
-# baked URL (git or relative path) then CONFLICTS with whatever source the
+# NOTE: genai-tk and prefect-yaml are bare requirements in [project.dependencies]
+# on purpose. Do NOT add [tool.uv.sources] entries for them here: uv applies a
+# dependency package's sources to consumers resolving it from a path/git checkout,
+# and a baked URL (git or relative path) then CONFLICTS with whatever source the
 # consumer chooses (sibling editable checkouts, git pin, ...). The `toolkit`
-# group below carries the git reference for this repo's own `uv sync` instead —
-# dependency-groups are root-only, so consumers never inherit it. The README
+# group carries the git references for this repo's own `uv sync` instead —
+# dependency-groups are root-only, so consumers never inherit them. The README
 # quick start also works unchanged because it `uv add`s genai-tk explicitly.
 
 [build-system]

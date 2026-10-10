@@ -17,7 +17,7 @@ modal_entry := "genai_graph/main/modal_app.py"
 dev_pythonpath := "../genai-tk:.:${PWD}"
 
 # Import shared genai-tk recipes
-import '../genai-tk/tk.just'
+import? '../genai-tk/tk.just'
 
 # Import deployment modules
 mod docker 'deploy/docker.just'

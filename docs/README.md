@@ -71,15 +71,20 @@ Evaluate agent accuracy, retrieval fidelity, and cost on standard long-document 
 
 ---
 
-## 5. UI, Visualization & Skills
+## 5. UI, Visualization & Architecture Curriculum
 
-Explore graphs interactively and empower autonomous AI coding agents.
+Explore graphs interactively, inspect architectural blueprints, and empower autonomous AI coding agents.
 
 | Guide | Description | Key Topics |
 |---|---|---|
 | [kg_explorer.md](kg_explorer.md) | **Streamlit KG Explorer** | Interactive graph traversal, D3 schema diagrams, text-to-Cypher interface |
+| [design/README.md](design/README.md) | **Architectural Design Curriculum** | Didactic 5-part numbered design specifications for knowledge and document graphs |
+| [design/01_knowledge_graph_architecture.md](design/01_knowledge_graph_architecture.md) | **Design 01: KG Foundation** | Ladybug embedded engine, Pydantic schema compiler, batch MERGE |
+| [design/02_document_graph_decomposition.md](design/02_document_graph_decomposition.md) | **Design 02: Document Graph** | Outline decomposition, vectorless agentic navigation, hybrid search |
+| [design/03_access_control_and_security_trimming.md](design/03_access_control_and_security_trimming.md) | **Design 03: Access Control (ACL)** | Early-binding Cypher query filtering, principal propagation, fail-closed |
+| [design/04_rule_selected_ingest_routing.md](design/04_rule_selected_ingest_routing.md) | **Design 04: Ingest Routing** | Rule-selected YAML workflows, route tables, single-writer fan-in |
+| [design/05_mcp_and_agent_navigation.md](design/05_mcp_and_agent_navigation.md) | **Design 05: MCP 2.0 & Tools** | MCP stdio/SSE servers, navigation tools (`get_document_outline`, `search_sections`) |
 | [SKILLS.md](SKILLS.md) | **Skills Guide** | 4-tier skills architecture (`runtime`, `development`, `governance`, `vendor`) |
-| [design/README.md](design/README.md) | **Design Specifications** | Active proposals including LightRAG corpus-scale entity layer |
 
 ---
 

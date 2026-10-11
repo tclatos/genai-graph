@@ -26,29 +26,29 @@ This folder organizes skills for agents working on the **genai-graph** library o
 
 | Skill | Closest docs | Primary code/config | Complements (genai-tk) |
 |---|---|---|---|
-| `kg-docgraph-agent` | `docs/document-graph.md` | `genai_graph/agent/docgraph_agent.py` | `agent-profiles`, `browser-and-sandbox` |
-| `kg-document-graph` | `docs/document-graph.md` | `genai_graph/kg/document_graph/` | `workflow-engine` |
+| `kg-docgraph-agent` | `docs/design/02_document_graph_decomposition.md`, `docs/document-graph.md` | `genai_graph/agent/docgraph_agent.py` | `agent-profiles`, `browser-and-sandbox` |
+| `kg-document-graph` | `docs/design/02_document_graph_decomposition.md`, `docs/document-graph.md` | `genai_graph/kg/document_graph/` | `workflow-engine` |
 | `kg-explorer` | `docs/kg_explorer.md` | `genai_graph/webapp/`, `genai_graph/main/streamlit.py` | `webapp`, `streamlit-workflow-runner` |
-| `kg-query` | `docs/kg_explorer.md`, `docs/document-graph.md` | `genai_graph/kg/query/` | `agent-profiles`, `add-tool` |
+| `kg-query` | `docs/design/03_access_control_and_security_trimming.md`, `docs/design/05_mcp_and_agent_navigation.md` | `genai_graph/kg/query/` | `agent-profiles`, `add-tool` |
 
 ## 2. Development Skills (`skills/development/`)
 
 | Skill | Closest docs | Primary code/config | Complements (genai-tk) |
 |---|---|---|---|
 | `benchmark-framework` | `docs/benchmark_framework.md` | `genai_graph/bench/`, `genai_graph/core/commands_bench.py` | `evaluation-testing` |
-| `kg-schema` | `docs/graph-definition-guide.md`, `docs/schema-compilation.md` | `genai_graph/kg/schema/` | `core-models` |
+| `kg-schema` | `docs/design/01_knowledge_graph_architecture.md`, `docs/graph-definition-guide.md` | `genai_graph/kg/schema/` | `core-models` |
 | `kg-factories` | `docs/graph-authoring-patterns.md`, `docs/graph_construction.md` | `genai_graph/kg/factories/` | `baml-structured-extraction` |
-| `kg-ingest` | `docs/graph_construction.md`, `docs/cache_management.md`, `docs/workflows.md` | `genai_graph/kg/ingest/`, `genai_graph/kg/backend.py` | `core-models` |
+| `kg-ingest` | `docs/design/04_rule_selected_ingest_routing.md`, `docs/graph_construction.md` | `genai_graph/kg/ingest/`, `genai_graph/kg/backend.py` | `core-models` |
 | `kg-neo4j-import` | `docs/graph-authoring-patterns.md` (Pattern 3) | `genai_graph/neo4j_import/` | — |
-| `kg-workflows` | `docs/workflows.md`, `docs/prefect_dag_pipeline.md` | `genai_graph/orchestration/` | `workflow-engine` |
+| `kg-workflows` | `docs/design/04_rule_selected_ingest_routing.md`, `docs/workflows.md` | `genai_graph/orchestration/` | `workflow-engine` |
 | `kg-export` | `docs/graph-definition-guide.md`, `docs/graph_construction.md` | `genai_graph/kg/export/` | — |
-| `kg-cli` | `docs/workflows.md` (CLI Reference), `docs/document-graph.md` | `genai_graph/core/commands_*.py` | `cli-and-scaffolding` |
+| `kg-cli` | `docs/design/05_mcp_and_agent_navigation.md`, `docs/workflows.md` | `genai_graph/core/commands_*.py` | `cli-and-scaffolding` |
 
 ## 3. Governance Skills (`skills/governance/`)
 
 | Skill | Closest docs | Primary code/config | Complements (genai-tk) |
 |---|---|---|---|
-| `kg-repo-map` | `docs/graph-definition-guide.md` | `genai_graph/kg/`, `genai_graph/orchestration/` | `repo-map` |
+| `kg-repo-map` | `docs/design/README.md`, `docs/graph-definition-guide.md` | `genai_graph/kg/`, `genai_graph/orchestration/` | `repo-map` |
 | `kg-schema-maintenance` | `Agents_Skills.md`, `docs/schema-compilation.md` | `genai_graph/kg/schema/`, `genai_graph/kg/factories/` | — |
 
 ## 4. Vendor Skills (`skills/vendor/`)

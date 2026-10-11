@@ -269,3 +269,44 @@ For graph schema authoring:
 - **[docs/graph-authoring-patterns.md](docs/graph-authoring-patterns.md)** — JSON, tables, Neo4j, documents, similarity, canonical reuse
 - **[docs/schema-compilation.md](docs/schema-compilation.md)** — Field-path deduction, `table_name`, exclusion, compiler functions
 
+## Documentation & Skills Invariants (Mandatory on Every Commit)
+
+**Rule: Documentation and skills MUST be updated in the same commit as the code changes.**
+
+Whenever you introduce a new feature, refactor graph mechanics, or modify configurations/CLI flags:
+1. **Update Skills**: Any change affecting graph tools, Cypher queries, MCP servers, or workflows must be reflected in the matching `skills/**/SKILL.md` file. Always run `uv run cli skills validate --all` to ensure zero schema errors.
+2. **Update Design / Guides**:
+   - `docs/design/`: Foundational architectural blueprints and specifications, organized in a didactic numbered sequence (`01_knowledge_graph_architecture.md`, `02_document_graph_decomposition.md`, ...). Update these when graph schemas, engines, access control, or routing mechanics evolve.
+   - `docs/`: User-facing guides and tutorials (`document-graph.md`, `graph-definition-guide.md`, `workflows.md`, `kg_explorer.md`).
+   - `docs/studies/`: Strictly reserved for research, external framework surveys (e.g. DocAtlas, MDocAgent), and proposals that have **not** yet been implemented. Once an architecture is implemented, promote the design to `docs/design/` or core documentation and remove it from `docs/studies/`.
+3. **Update CHANGELOG.md**: Record notable changes under `## [Unreleased]` in a pedagogical, readable style explaining *what* changed and *why*.
+4. **Linkification & Style**: Never use backticks around file links. Use clean Markdown links `[path/file.py](path/file.py)`. Do not cite line numbers with backticks.
+
+Current docs index:
+
+| File | Topic |
+|---|---|
+| `docs/design/README.md` | Didactic 5-part architectural design curriculum |
+| `docs/design/01_knowledge_graph_architecture.md` | Ladybug embedded engine, Pydantic schema compilation, batch MERGE |
+| `docs/design/02_document_graph_decomposition.md` | Structure-first outline decomposition, vectorless agentic navigation, hybrid search |
+| `docs/design/03_access_control_and_security_trimming.md` | Document-level authorization, principal propagation, early-binding Cypher filtering |
+| `docs/design/04_rule_selected_ingest_routing.md` | Rule-selected YAML workflows, route tables, single-writer fan-in |
+| `docs/design/05_mcp_and_agent_navigation.md` | Document Graph MCP 2.0 servers (stdio/SSE), navigation tool suite |
+| `docs/document-graph.md` | Hierarchical Document Graph & vectorless agentic RAG |
+| `docs/document-decomposition-guide.md` | Multi-tier heading parser, token budgets, table/image preservation |
+| `docs/docgraph-agent.md` | Autonomous DocGraph deep planning agent and query tools |
+| `docs/access-control-security-trimming.md` | Enterprise access control & security trimming reference guide |
+| `docs/graph-definition-guide.md` | 5-minute graph guide: models → GraphNode → schema → ingest → query |
+| `docs/graph-authoring-patterns.md` | JSON, tables, Neo4j imports, documents, similarity, canonical reuse |
+| `docs/schema-compilation.md` | Field-path deduction, primary key inference, metadata exclusions |
+| `docs/graph_construction.md` | Multi-source merging, canonical types, batch parquet imports |
+| `docs/primary_key_implementation.md` | Deterministic node hashing, MERGE mechanics, migration |
+| `docs/workflows.md` | Composable YAML workflows, profile overrides, CLI reference |
+| `docs/prefect_dag_pipeline.md` | Prefect DAG pipeline integration and concurrency |
+| `docs/baml_extraction_guide.md` | High-throughput structured LLM extraction into graph entities |
+| `docs/cache_management.md` | Fingerprint invalidation and intermediate parquet reuse |
+| `docs/benchmark_framework.md` | 6-Stage benchmark execution engine (`cli bench`) |
+| `docs/benchmarks_financebench_officeqa.md` | FinanceBench & OfficeQA Pro empirical evaluation |
+| `docs/kg_explorer.md` | Streamlit interactive KG Explorer and D3 schema diagrams |
+| `docs/studies/README.md` | Research & surveys directory (unimplemented studies) |
+

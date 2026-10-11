@@ -89,6 +89,18 @@ Progressive disclosure of domain knowledge for AI coding agents and runtime mode
 
 ---
 
+## 📚 Architectural Design Curriculum
+
+For a didactic, deep-dive understanding of the internal architecture and design patterns, read the numbered design specifications in [docs/design/](docs/design/README.md):
+
+1. **[Design 01: Knowledge Graph Foundation & Schema Compilation](docs/design/01_knowledge_graph_architecture.md)** — Embedded Ladybug engine, Pydantic v2 schema compiler, deterministic primary key hashing, batch MERGE mechanics, and buffer pool scaling.
+2. **[Design 02: Hierarchical Document Graph & Agentic Navigation](docs/design/02_document_graph_decomposition.md)** — Structure-first outline decomposition (`Folder` -> `Document` -> `MarkdownSection` -> `SectionChunk`), vectorless agentic navigation, hybrid full-text/vector index, and dynamic query relaxation.
+3. **[Design 03: Enterprise Access Control & Security Trimming](docs/design/03_access_control_and_security_trimming.md)** — Document-level authorization, principal propagation via harness, early-binding Cypher query filtering, and fail-closed security.
+4. **[Design 04: Multi-Source Ingestion Routing & Route Tables](docs/design/04_rule_selected_ingest_routing.md)** — Rule-selected YAML workflows, pathspec route tables, concurrent sub-workflows (PDF, Office, Web, Git), and single-writer fan-in into Ladybug.
+5. **[Design 05: Model Context Protocol (MCP 2.0) & Graph Navigation Tools](docs/design/05_mcp_and_agent_navigation.md)** — Document Graph MCP servers (stdio and SSE), navigation tool suite (`list_documents`, `get_document_outline`, `get_section_content`, `search_sections`, `query_cypher`), and IDE integration.
+
+---
+
 ## Quick Start
 
 ### Recommended: Scaffold from Scratch

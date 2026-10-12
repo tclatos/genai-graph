@@ -5,6 +5,8 @@ Hybrid **Knowledge Graph**, **Document Graph**, and **GraphRAG** framework built
 GenAI Graph transforms unstructured document collections (PDF, PPTX, DOCX, Markdown), structured tables (Excel, CSV), and Neo4j exports into unified, queryable [Ladybug](https://github.com/LadybugDB/ladybug) graph databases. It provides autonomous document-walking agents, multi-dataset benchmark evaluation pipelines (`cli bench`), and interactive Streamlit/TUI visualization interfaces.
 
 ---
+DeepWiki generated documentation is available (might be not in sync): 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/tclatos/genai-graphl)
 
 ## Architecture Overview
 

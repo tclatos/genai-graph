@@ -22,6 +22,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) — [Semantic V
 #### Document Graph Tools
 - **Declarative Tool Factory**: Added `create_docgraph_tools` factory in `genai_graph.agent` that resolves database configuration automatically and instantiates all 6 Document Graph navigation tools (`get_folder_toc`, `get_document_toc`, `get_section_content`, `search_sections`, `query_image`, `list_documents`) for direct reference in agent profile YAML.
 
+#### Graph Commands & Cypher Query TUI
+- **Top-Level `cli graph` Command Group**: Introduced `GraphCommands` (`cli graph`) providing `display` and `query` subcommands across `genai-graph` and downstream projects such as `rfq-pricing`.
+- **Interactive Graph Display (`cli graph display`)**: Generates an interactive D3.js force-directed HTML graph visualization from a Cypher query with automatic browser opening, custom query overrides, and limit flags.
+- **Interactive Cypher Query TUI (`cli graph query`)**: Textual terminal user interface for testing and exploring Cypher queries. Features live schema table introspection (nodes and relationships), curated generic and Document Graph example queries with one-click editor population, query execution with timing and row count metrics, scrollable tabular result display, and CSV export. Includes batch execution mode (`--batch -q "..."`).
+
 #### Enterprise Access Control & Security Trimming
 - **Early-Binding Security Trimming**: Integrated document-level authorization and tenant isolation directly into Ladybug Cypher execution (`WHERE d.tenant_id = $tenant_id AND ...`).
 - **Parameterized Security Clauses**: Sanitized security parameter injection to strictly eliminate Cypher injection vulnerabilities.

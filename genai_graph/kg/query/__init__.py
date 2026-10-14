@@ -16,13 +16,19 @@ _EXPORTS = {
     "SYSTEM_PROMPT": "genai_graph.kg.query.text2cypher",
     "query_kg": "genai_graph.kg.query.text2cypher",
     "text2cypher_chain": "genai_graph.kg.query.text2cypher",
+    "CypherQueryApp": "genai_graph.kg.query.cypher_tui",
+    "run_cypher_tui": "genai_graph.kg.query.cypher_tui",
+    "DEFAULT_CYPHER_EXAMPLES": "genai_graph.kg.query.cypher_tui",
 }
 
 __all__ = [
+    "CypherQueryApp",
+    "DEFAULT_CYPHER_EXAMPLES",
     "SYSTEM_PROMPT",
     "build_kg_agent_system_prompt",
     "create_kg_cypher_tool",
     "query_kg",
+    "run_cypher_tui",
     "text2cypher_chain",
 ]
 

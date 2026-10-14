@@ -163,6 +163,7 @@ cli:
     - genai_graph.core.commands_docgraph.DocGraphCommands
     - genai_graph.core.commands_docbench.DocBenchCommands
     - genai_graph.core.commands_bench.BenchCommands
+    - genai_graph.core.commands_graph.GraphCommands
     - genai_tk.main.cli.register_commands
 
 test:

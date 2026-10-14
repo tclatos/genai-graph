@@ -149,6 +149,32 @@ def create_document_graph_tools_from_config(
     return create_document_graph_tools(resolve_db_path(db_path, profile=profile), embeddings_id=embeddings_id)
 
 
+def create_docgraph_tools(
+    db_path: str | None = None,
+    *,
+    profile: str = "default",
+    embeddings_id: str | None = None,
+    **kwargs: Any,
+) -> list[BaseTool]:
+    """Factory creating Document Graph navigation tools from config or explicit parameters.
+
+    Suitable for direct reference in agent profile YAML:
+        tools:
+          - genai_graph.agent.create_docgraph_tools
+
+    Args:
+        db_path: Optional path to the Ladybug database. Resolved from config when None.
+        profile: DocGraph profile name for database resolution (default: 'default').
+        embeddings_id: Embeddings model id enabling hybrid search.
+        **kwargs: Additional keyword arguments passed from agent configurations (e.g. llm).
+
+    Returns:
+        List of Document Graph BaseTool instances:
+        [get_folder_toc, get_document_toc, get_section_content, search_sections, query_image, list_documents].
+    """
+    return create_document_graph_tools_from_config(db_path=db_path, profile=profile, embeddings_id=embeddings_id)
+
+
 def build_docgraph_system_prompt(
     folder_id: str | None = None,
     folder_name: str | None = None,

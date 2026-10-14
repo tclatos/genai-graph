@@ -19,6 +19,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) — [Semantic V
 - **Parquet Staging & Image Support**: Added intermediate Parquet staging pipeline for high-throughput batch loading, and added `Image` node type with base64 payload representation.
 - **DocGraph Terminal TUI**: Enhanced interactive terminal TUI with mouse text selection support and clean Markdown table rendering.
 
+#### Document Graph Tools
+- **Declarative Tool Factory**: Added `create_docgraph_tools` factory in `genai_graph.agent` that resolves database configuration automatically and instantiates all 6 Document Graph navigation tools (`get_folder_toc`, `get_document_toc`, `get_section_content`, `search_sections`, `query_image`, `list_documents`) for direct reference in agent profile YAML.
+
 #### Enterprise Access Control & Security Trimming
 - **Early-Binding Security Trimming**: Integrated document-level authorization and tenant isolation directly into Ladybug Cypher execution (`WHERE d.tenant_id = $tenant_id AND ...`).
 - **Parameterized Security Clauses**: Sanitized security parameter injection to strictly eliminate Cypher injection vulnerabilities.

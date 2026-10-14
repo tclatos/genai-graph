@@ -1,4 +1,5 @@
-
+# Security
+Study https://github.com/openfga/openfga  - Benefit ?  
 
 # Use BAML
 

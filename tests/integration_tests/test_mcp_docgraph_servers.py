@@ -8,8 +8,8 @@ Tests the two exposed MCP servers in genai-graph:
 from __future__ import annotations
 
 import pytest
-from genai_tk.mcp.config import get_mcp_server_definition, load_mcp_server_definitions
-from genai_tk.mcp.server_builder import build_mcp_server
+from genai_tk.protocols.mcp.config import get_mcp_server_definition, load_mcp_server_definitions
+from genai_tk.protocols.mcp.server_builder import build_mcp_server
 from mcp import Client
 
 

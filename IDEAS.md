@@ -46,7 +46,7 @@ ex: skills/custom/officeqa-qa/SKILL.md "Targeted Search with `search_sections(qu
 Update doc 
 
 # CLI
- ? Merge cli docgraph folder-toc and cli docgraph folders 
+ ? Merge cli docgraph ls and cli docgraph folders 
 
  
 

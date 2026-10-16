@@ -127,7 +127,7 @@ async def fetch_folders_and_documents(
     return await asyncio.to_thread(_query)
 
 
-async def fetch_document_sections_full(backend: KgBackend, markdown_hash: str) -> list[dict[str, Any]]:
+async def fetch_document_sections_full(backend: KgBackend, content_hash: str) -> list[dict[str, Any]]:
     """Asynchronously fetch all sections for a document including body text, tables, and images."""
 
     def _query() -> list[dict[str, Any]]:
@@ -140,7 +140,7 @@ async def fetch_document_sections_full(backend: KgBackend, markdown_hash: str) -
             "s",
             (
                 "section_id",
-                "markdown_hash",
+                "content_hash",
                 "parent_section_id",
                 "title",
                 "level",
@@ -156,11 +156,11 @@ async def fetch_document_sections_full(backend: KgBackend, markdown_hash: str) -
             ),
         )
         cypher = f"""
-            MATCH (s:{_SECTION_LABEL} {{markdown_hash: $markdown_hash}})
+            MATCH (s:{_SECTION_LABEL} {{content_hash: $content_hash}})
             RETURN {fields}
             ORDER BY s.sequence
         """
-        rows, _ = _query_rows(backend, cypher, {"markdown_hash": markdown_hash})
+        rows, _ = _query_rows(backend, cypher, {"content_hash": content_hash})
 
         # Fetch table counts for this document
         tables_by_sec: dict[str, list[dict[str, Any]]] = {}
@@ -169,12 +169,12 @@ async def fetch_document_sections_full(backend: KgBackend, markdown_hash: str) -
                 backend,
                 """
                 MATCH (s:MarkdownSection)-[:HAS_TABLE]->(t:MarkdownTable)
-                WHERE s.markdown_hash = $markdown_hash
+                WHERE s.content_hash = $content_hash
                 RETURN s.section_id AS section_id, t.table_id AS table_id, t.name AS name,
                        t.table_format AS table_format, t.caption AS caption,
                        t.token_count AS token_count, t.content AS content
                 """,
-                {"markdown_hash": markdown_hash},
+                {"content_hash": content_hash},
             )
             for tr in t_rows:
                 tables_by_sec.setdefault(tr["section_id"], []).append(tr)
@@ -186,12 +186,12 @@ async def fetch_document_sections_full(backend: KgBackend, markdown_hash: str) -
                 backend,
                 """
                 MATCH (s:MarkdownSection)-[:HAS_IMAGE]->(i:Image)
-                WHERE s.markdown_hash = $markdown_hash
+                WHERE s.content_hash = $content_hash
                 RETURN s.section_id AS section_id, i.image_id AS image_id, i.name AS name,
                        i.filename AS filename, i.path AS path, i.description AS description,
                        i.size AS size
                 """,
-                {"markdown_hash": markdown_hash},
+                {"content_hash": content_hash},
             )
             for ir in i_rows:
                 images_by_sec.setdefault(ir["section_id"], []).append(ir)
@@ -204,13 +204,13 @@ async def fetch_document_sections_full(backend: KgBackend, markdown_hash: str) -
                 backend,
                 """
                 MATCH (s:MarkdownSection)-[r]-(e)
-                WHERE s.markdown_hash = $markdown_hash
+                WHERE s.content_hash = $content_hash
                   AND type(r) NOT IN ['HAS_SECTION', 'HAS_SUBSECTION', 'HAS_CHUNK', 'HAS_TABLE', 'HAS_IMAGE']
                 RETURN s.section_id AS section_id, type(r) AS rel_type,
                        labels(e) AS entity_labels,
                        coalesce(e.name, e.title, e.id, 'Entity') AS entity_name
                 """,
-                {"markdown_hash": markdown_hash},
+                {"content_hash": content_hash},
             )
             for gr in rel_rows:
                 graph_links_by_sec.setdefault(gr["section_id"], []).append(gr)
@@ -313,7 +313,7 @@ def dedupe_documents(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep one Document per source path/filename — the richest (most sections)."""
     best: dict[str, dict[str, Any]] = {}
     for row in rows:
-        key = row.get("path") or row.get("filename") or row.get("markdown_hash") or ""
+        key = row.get("path") or row.get("filename") or row.get("content_hash") or ""
         current = best.get(key)
         if current is None or (row.get("section_count", 0) > current.get("section_count", 0)):
             best[key] = row
@@ -406,7 +406,7 @@ def build_tree_select_nodes(
 
     def _build_doc_node(doc: dict[str, Any]) -> dict[str, Any]:
         """Build a tree node for a single document."""
-        md_hash = doc.get("markdown_hash") or doc.get("content_hash") or ""
+        content_hash = doc.get("content_hash") or ""
         fname = doc.get("filename") or "Untitled Document"
         sec_count = doc.get("section_count", 0)
         tok_count = doc.get("token_count", 0)
@@ -414,11 +414,11 @@ def build_tree_select_nodes(
         label = f"📄 {fname} ({sec_count} sec, {tok_count:,} tok)"
         doc_node: dict[str, Any] = {
             "label": label,
-            "value": f"doc:{md_hash}",
+            "value": f"doc:{content_hash}",
         }
 
-        if include_sections and md_hash in sections_by_doc:
-            sec_nodes = _build_section_nodes(sections_by_doc[md_hash])
+        if include_sections and content_hash in sections_by_doc:
+            sec_nodes = _build_section_nodes(sections_by_doc[content_hash])
             if sec_nodes:
                 doc_node["children"] = sec_nodes
 
@@ -692,7 +692,7 @@ def render_section_banner(
 def render_document_banner(doc_data: dict[str, Any]) -> None:
     """Render a compact header card for a document."""
     fname = doc_data.get("filename") or "Document"
-    m_hash = doc_data.get("markdown_hash") or doc_data.get("content_hash") or "-"
+    c_hash = doc_data.get("content_hash") or "-"
     p = doc_data.get("path") or ""
     origin_src = read_origin_path(p) if p else None
     sec_count = doc_data.get("section_count", 0)
@@ -707,7 +707,7 @@ def render_document_banner(doc_data: dict[str, Any]) -> None:
                 📄 {fname}
             </div>
             <div style="font-size: 0.88em; color: #444; margin-top: 4px;">
-                🔑 <strong>Hash:</strong> <code>{m_hash[:12]}...</code> · 📑 <strong>{sec_count}</strong> sections · 🔤 <strong>{tok_count:,}</strong> tokens · 🌐 <strong>{lang}</strong>
+                🔑 <strong>Hash:</strong> <code>{c_hash[:12]}...</code> · 📑 <strong>{sec_count}</strong> sections · 🔤 <strong>{tok_count:,}</strong> tokens · 🌐 <strong>{lang}</strong>
                 {(" · 📁 <code>" + p + "</code>") if p else ""}
             </div>
         </div>

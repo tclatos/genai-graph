@@ -263,7 +263,7 @@ def _build_image_node(
     return Image(
         image_id=f"{section.section_id}::{image_hash}",
         section_id=section.section_id,
-        markdown_hash=section.markdown_hash,
+        content_hash=section.content_hash,
         image_hash=image_hash,
         name=image_hash,
         filename=filename,

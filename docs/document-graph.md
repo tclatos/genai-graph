@@ -19,9 +19,9 @@ Folder ──CONTAINS──▶ Document ──HAS_SECTION──▶ MarkdownSecti
 
 | Node | Key | Notes |
 |------|-----|-------|
-| `Folder` | `folder_id` | A directory, a `.zip` archive, or a single file's parent — the base location documents are read from. |
-| `Document` | `content_hash` (xxHash of the raw file bytes) | Provenance anchor for everything derived from a file. Carries `filename`, `relative_path`, `path`, `mime_type`, plus `markdown_hash`, `token_count`, `section_count`, and (once summarized) a one-sentence `description` and a paragraph `summary`. |
-| `MarkdownSection` | `section_id` = `{markdown_hash}::{sequence}` | One heading-delimited section (heading line + body up to the next heading of any level). Every document has at least one section — a synthetic level-0 root section captures a heading-less document or its preamble. Carries `token_count` and, once summarized, `description` (always), `summary` (substantial sections only), `keywords` (3–7 search terms), and `summary_source`. |
+| `Folder` | `folder_id` = `srcfold_<hash>` or `mdfold_<hash>` | A directory, a `.zip` archive, or a single file's parent — the base location documents are read from. `srcfold` when the folder holds non-Markdown sources, `mdfold` when it holds only Markdown. Carries `name`, `uri`, `kind`, `metadata` (a `MAP(STRING, STRING)`), and `_created_at`/`_updated_at`. |
+| `Document` | `content_hash` = `file_<hash>` (XXH3-64 of the raw file bytes) | Provenance anchor for everything derived from a file. Carries `filename`, `relative_path`, `path`, `mime_type`, `token_count`, `section_count`, `metadata` (a `MAP(STRING, STRING)`), `_created_at`/`_updated_at`, and (once summarized) a one-sentence `description` and a paragraph `summary`. |
+| `MarkdownSection` | `section_id` = `{content_hash}::{sequence}` | One heading-delimited section (heading line + body up to the next heading of any level). Every document has at least one section — a synthetic level-0 root section captures a heading-less document or its preamble. Carries `token_count` and, once summarized, `description` (always), `summary` (substantial sections only), `keywords` (3–7 search terms), and `summary_source`. |
 | `SectionChunk` | `chunk_id` = `{section_id}::{chunk_index}` | Optional chunk node created when `retrieval.embeddings_id` is configured. Long sections are chunked to target size (~1500 tokens) with semantic vectors and heading/keyword header context. |
 
 Sections form a flat table with an explicit `parent_section_id` — the hierarchy is
@@ -35,11 +35,23 @@ converted to Markdown or annotated HTML) and image descriptions reside directly 
 the enclosing `MarkdownSection`. Figures and diagrams can be visually examined via the
 targeted `query_image` tool.
 
-**Identity and dedup:** `Document` and `MarkdownSection` are both keyed by content
-hash, so re-ingesting unchanged files is a no-op MERGE. When an entity-extraction
-factory (see below) also produces a `Document` node for the same file, it MERGEs
-into the *same* node — a document's provenance and its extracted entities share one
-graph node.
+**Identity and dedup:** every id is `<kind>_<16 hex digits>`, where the digest is an
+XXH3-64 hash of the node's content (see `genai_graph/kg/ids.py`). The prefix says what
+the id refers to, so `file_…` is a source file (its digest covers the raw bytes, and it
+is the key that sections, chunks, and images reference), `mdfold_…` a Markdown folder,
+and `srcfold_…` a folder of original sources. Because `file_` hashes raw bytes, a
+line-ending-only change (for example CRLF to LF) yields a new document id. A
+`srcfold` id is computed over the sorted relative paths and content digests of every
+file, so any added, removed, renamed, or changed source file produces a new id.
+Re-ingesting unchanged content is a no-op MERGE, and changed content produces a new id.
+Each node also has `_created_at`/`_updated_at` timestamps and a `metadata` map of strings, so new information can be stored without a
+schema change. When an entity-extraction factory (see below) also produces a `Document`
+node for the same file, it MERGEs into the *same* node, so a document's provenance and
+its extracted entities share one graph node.
+
+Folder ids can be passed to the `docgraph` commands by full id, unique prefix, or name.
+`build_document_graph(..., root_metadata=...)` stores caller-supplied metadata on the root
+folder; `rfq ingest` uses this to record the `srcfold` id of the original sources.
 
 For details on the multi-tier heading decomposition and LLM enrichment strategies,
 see the **[Document Decomposition Guide](document-decomposition-guide.md)**.
@@ -154,7 +166,7 @@ model discovers each document's structure **and** summarizes its sections in a
 single call. It emits a content-free JSON outline — the table of contents plus a
 description of every section (and a summary of the substantial ones) — *without*
 re-emitting section text, so the output stays small on million-token documents.
-The outline is cached by `markdown_hash` (and a policy/LLM hash, so re-runs are
+The outline is cached by a digest of the Markdown text (and a policy/LLM hash, so re-runs are
 free), and a deterministic merge anchors its titles back to the Markdown to build
 the actual section nodes.
 
@@ -199,7 +211,7 @@ result = summarize_graph(
 
 For an explicit document list (by hash, prefix, or filename), use
 `summarize_documents(db_path, document_ids, config, *, force=False, dry_run=False,
-workers=1)`; references sharing a `markdown_hash` are de-duplicated so the same
+workers=1)`; references sharing a `content_hash` are de-duplicated so the same
 rows are never written from two concurrent transactions.
 
 **Two fields, two jobs.** `description` is one plain-text sentence and is always
@@ -316,8 +328,11 @@ cli docgraph toc <filename-or-hash> --db ./data/kg/tree.db
 cli docgraph toc <filename-or-hash> --db ./data/kg/tree.db --yaml   # section tree with descriptions
 cli docgraph toc <filename-or-hash> --db ./data/kg/tree.db --yaml --summaries --max-level 2
 cli docgraph toc <folder-hash-or-name> --db ./data/kg/tree.db --yaml  # --yaml also works on a folder ref
-cli docgraph folder-toc --db ./data/kg/tree.db                     # orientation view: documents only
-cli docgraph folder-toc --db ./data/kg/tree.db --sections          # inline each document's section tree
+cli docgraph ls --db ./data/kg/tree.db                             # root folders (id + path)
+cli docgraph ls <folder-id> --db ./data/kg/tree.db                 # subfolders and documents of a folder
+cli docgraph ls <folder-id> -r --db ./data/kg/tree.db              # recursive, like ls -R
+cli docgraph ls <folder-or-file-id> -l --db ./data/kg/tree.db      # add description and section count
+cli docgraph ls <folder-or-file-id> --yaml --db ./data/kg/tree.db  # YAML form
 cli docgraph cat <filename-or-hash> --db ./data/kg/tree.db
 cli docgraph search "keyword" --db ./data/kg/tree.db
 cli docgraph tui --db ./data/kg/tree.db
@@ -348,8 +363,10 @@ from genai_graph.kg.query.document_graph_tools import (
 )
 ```
 
-Documents can be addressed by content hash (full or prefix), `markdown_hash`,
-filename, or source path. `document_toc_yaml`/`folder_toc_yaml` render a document's
+Documents can be addressed by their typed `file_` id (full or unique prefix),
+filename, or source path. Folders accept their typed `srcfold_`/`mdfold_` id, a prefix, or a
+name. `list_entries(backend, folder_id=None, recursive=...)` returns the subfolder and document
+rows that `cli docgraph ls` prints, with ACL trimming applied per row. `document_toc_yaml`/`folder_toc_yaml` render a document's
 (or a folder subtree's) heading hierarchy as YAML, including summaries once
 generated — the format an agent tool returns. `create_document_graph_tools(db_path)`
 wraps these (plus `get_folder_toc`) as LangChain `BaseTool`s for an agent.

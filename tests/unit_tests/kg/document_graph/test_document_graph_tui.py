@@ -61,12 +61,12 @@ def test_read_origin_path(tmp_path: Path) -> None:
 
 def test_dedupe_documents() -> None:
     rows = [
-        {"filename": "doc.md", "path": "dir/doc.md", "section_count": 2, "markdown_hash": "hash1"},
-        {"filename": "doc.md", "path": "dir/doc.md", "section_count": 5, "markdown_hash": "hash2"},
+        {"filename": "doc.md", "path": "dir/doc.md", "section_count": 2, "content_hash": "hash1"},
+        {"filename": "doc.md", "path": "dir/doc.md", "section_count": 5, "content_hash": "hash2"},
     ]
     deduped = _dedupe_documents(rows)
     assert len(deduped) == 1
-    assert deduped[0]["markdown_hash"] == "hash2"
+    assert deduped[0]["content_hash"] == "hash2"
     assert deduped[0]["section_count"] == 5
 
 
@@ -193,7 +193,7 @@ async def test_document_graph_tui_shows_descriptions(sample_tui_db: str) -> None
     backend.connect(sample_tui_db)
     docs = list_documents(backend)
     assert len(docs) > 0
-    mh = docs[0]["markdown_hash"]
+    mh = docs[0]["content_hash"]
     apply_document_summary(backend, mh, description="A guide to testing", summary="Summary of the testing guide.")
     toc = get_document_toc(backend, mh)
     if toc:

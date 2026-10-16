@@ -112,10 +112,10 @@ an interactive REPL with
 
 ```bash
 # one-shot
-cli docgraph agent "What IT services is Alko requesting?" --folder folder_273e65da416b2e72
+cli docgraph agent "What IT services is Alko requesting?" --folder <folder-id>
 
 # interactive multi-turn REPL (memory enabled)
-cli docgraph agent --chat --folder folder_273e65da416b2e72
+cli docgraph agent --chat --folder <folder-id>
 
 # overrides
 cli docgraph agent "Summarize the SLAs" --llm deepseek_v4flash@openrouter --db ./data/kg/tree.db
@@ -210,7 +210,7 @@ collaboration, risks), and emits a structured Markdown report with
 - `tests/integration_tests/test_mcp_docgraph_servers.py` — covers the MCP 2.0
   `docgraph-tools` and `docgraph-agent` server definitions, tool exposure, schema compliance,
   and invocation.
-- Manual smoke: `cli docgraph agent "..." --folder folder_273e65da416b2e72`.
+- Manual smoke: `cli docgraph agent "..." --folder <folder-id>`.
 - Real extraction: `cli agent extract` (rfq_pricing) produces the 9-category
   report cited above.
 

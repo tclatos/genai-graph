@@ -128,12 +128,13 @@ class FolderTree:
     """Builds a Merkle-hashed `Folder` node for every directory level under a `SourceFolder`.
 
     Only directories that (transitively) contain at least one matched file get a
-    Folder node — a directory's `folder_id` is a content hash of its direct
+    Folder node. A directory's `folder_id` is a typed content hash of its direct
     children (matched file names + content hashes, subfolder names + folder_ids),
     so identical subtrees collapse to the same node and unchanged subtrees keep
-    a stable id across re-ingestion. Two *different* sources with a structurally
-    identical subtree intentionally collapse to the same Folder node, mirroring
-    how `Document.content_hash` dedupes identical files.
+    a stable id across re-ingestion. The prefix is `mdfold_` when every matched
+    file is Markdown, `srcfold_` otherwise. Two *different* sources with a
+    structurally identical subtree intentionally collapse to the same Folder node,
+    mirroring how `Document.content_hash` dedupes identical files.
     """
 
     def __init__(self, source: SourceFolder) -> None:
@@ -146,15 +147,22 @@ class FolderTree:
         files: list[ResolvedFile],
         content_hashes: dict[str, str],
         acl_provider: Any = None,
+        root_metadata: dict[str, str] | None = None,
     ) -> None:
         """Compute all Folder nodes for *files* bottom-up.
 
         Args:
             files: Files already matched by include/exclude under this source.
-            content_hashes: Map of `str(abs_path)` -> content hash (precomputed by the caller).
+            content_hashes: Map of `str(abs_path)` -> typed `file_` content id (precomputed by the caller).
             acl_provider: Optional BaseAccessControlProvider to populate folder allowed_principals.
+            root_metadata: Metadata stored on the root Folder only.
         """
         from genai_tk.utils.hashing import buffer_digest
+
+        from genai_graph.kg.ids import make_id
+
+        is_markdown_tree = bool(files) and all(rf.abs_path.suffix.lower() == ".md" for rf in files)
+        folder_kind = "mdfold" if is_markdown_tree else "srcfold"
 
         root: dict[str, Any] = {"files": [], "dirs": {}}
         for rf in files:
@@ -174,7 +182,7 @@ class FolderTree:
             entries = sorted(f"F:{name}:{content_hashes[path]}" for name, path in node["files"])
             entries += sorted(f"D:{name}:{cid}" for name, cid in child_ids.items())
             canonical = "\n".join(entries)
-            folder_id = f"folder_{buffer_digest(canonical.encode('utf-8'))}"
+            folder_id = make_id(folder_kind, buffer_digest(canonical.encode("utf-8")))
 
             is_root = not dir_parts
             folder_uri = self.source.uri if is_root else "/".join(dir_parts)
@@ -195,6 +203,7 @@ class FolderTree:
                 kind=self.source.kind if is_root else "directory",
                 name=self.source.name if is_root else dir_parts[-1],
                 allowed_principals=allowed_principals,
+                metadata=dict(root_metadata or {}) if is_root else {},
             )
             self.folders[folder_id] = folder
             for cid in child_ids.values():

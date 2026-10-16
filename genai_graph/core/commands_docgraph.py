@@ -7,7 +7,7 @@ Provides:
 - ``build``  : quick document-graph-only build (markdownize sources, then ingest
                the Folder → Document → Section structure) directly on a Ladybug DB.
 - ``delete`` : delete all documents, folders, and sections from the graph.
-- ``list`` / ``toc`` / ``cat`` / ``search`` / ``tui`` : navigate an ingested graph.
+- ``list`` / ``ls`` / ``toc`` / ``cat`` / ``search`` / ``tui`` : navigate an ingested graph.
 
 ``run`` and ``kg create`` share the same workflow engine; ``run`` targets ad-hoc
 sources while ``kg create`` targets a predefined, named set of documents.
@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
 import typer
+import yaml
 from genai_tk.main.cli import CliTopCommand
 from genai_tk.workflow.force import ForceStage
 from loguru import logger
@@ -98,7 +99,7 @@ def _resolve_folder_ref_or_exit(backend: Any, folder_ref: str | None) -> str | N
 
 
 def _resolve_doc_ref_or_exit(backend: Any, doc_ref: str | None) -> str | None:
-    """Resolve a `--doc` option value to a `markdown_hash`, or exit with an error message."""
+    """Resolve a `--doc` option value to a `content_hash`, or exit with an error message."""
     if doc_ref is None:
         return None
     from genai_graph.kg.query.document_graph_tools import resolve_document_id
@@ -456,7 +457,7 @@ class DocGraphCommands(CliTopCommand):
                     breadcrumb,
                     str(r["section_count"]),
                     str(r.get("description") or ""),
-                    str(r["markdown_hash"]),
+                    str(r["content_hash"]),
                     str(r["path"]),
                 )
             console.print(table)
@@ -526,7 +527,7 @@ class DocGraphCommands(CliTopCommand):
                     console.print(f"- \U0001f4c1 {f['name']} ({f['folder_id']}, {f['doc_count']} doc(s)){desc}")
                 for d in docs:
                     desc = f" — {d['description']}" if d.get("description") else ""
-                    console.print(f"- \U0001f4c4 {d['filename']} ({d['markdown_hash']}){desc}")
+                    console.print(f"- \U0001f4c4 {d['filename']} ({d['content_hash']}){desc}")
                 return
 
             if yaml_out:
@@ -542,12 +543,26 @@ class DocGraphCommands(CliTopCommand):
                 return
             console.print(render_toc_outline(rows))  # type: ignore[arg-type]
 
-        @cli_app.command("folder-toc")
-        def folder_toc(
-            folder: Annotated[
+        @cli_app.command("ls")
+        def ls(
+            target: Annotated[
                 str | None,
-                typer.Argument(help="Folder hash/name to root the TOC at. Covers every document if omitted."),
+                typer.Argument(
+                    help="Folder id (full, prefix, bare digest or name) or file id. Lists the root folders when omitted."
+                ),
             ] = None,
+            recursive: Annotated[
+                bool,
+                typer.Option("-r", "--recursive", help="List subfolders recursively."),
+            ] = False,
+            long: Annotated[
+                bool,
+                typer.Option("-l", "--long", help="Also show each document's description and section count."),
+            ] = False,
+            as_yaml: Annotated[
+                bool,
+                typer.Option("--yaml", help="Print the entries as YAML instead of a table."),
+            ] = False,
             db_path: Annotated[
                 str | None,
                 typer.Option(
@@ -559,29 +574,54 @@ class DocGraphCommands(CliTopCommand):
                 str,
                 typer.Option("--profile", "-p", help="DocGraph profile name (default: default)."),
             ] = "default",
-            sections: Annotated[
-                bool,
-                typer.Option("--sections", help="Also inline each document's section tree."),
-            ] = False,
-            summaries: Annotated[
-                bool,
-                typer.Option("--summaries", help="Also include the fuller summaries."),
-            ] = False,
         ) -> None:
-            """Print the documents under a folder's subtree as YAML, each with a one-line description.
+            """List the subfolders and documents of a folder, or describe one file.
 
-            Sections are omitted by default — this is the orientation view: pick a document,
-            then run `docgraph toc <id> --yaml` for its sections. Pass --sections to inline them.
+            Each row shows the entry's id (usable as the argument of other docgraph commands),
+            its path relative to the listed folder, and with -l its description and section count.
+            Folder paths end with '/'.
             """
             db_path = _resolve_db_path(db_path, profile=profile)
-            from genai_graph.kg.query.document_graph_tools import folder_toc_yaml
+            from genai_graph.kg.query.document_graph_tools import (
+                document_entry,
+                list_entries,
+                resolve_folder_id,
+            )
 
             backend = _connect_display(db_path)
-            folder_id = _resolve_folder_ref_or_exit(backend, folder)
-            console.print(
-                folder_toc_yaml(backend, folder_id, include_sections=sections, include_summaries=summaries),
-                soft_wrap=True,
-            )
+            if target is None:
+                entries = list_entries(backend, None, recursive=recursive)
+            else:
+                folder_id = resolve_folder_id(backend, target)
+                if folder_id is not None:
+                    entries = list_entries(backend, folder_id, recursive=recursive)
+                else:
+                    doc = document_entry(backend, target)
+                    if doc is None:
+                        console.print(f"[red]No folder or document found matching: {target}[/red]")
+                        raise typer.Exit(1)
+                    entries = [doc]
+
+            if as_yaml:
+                payload = [e.model_dump(exclude_none=True) for e in entries]
+                console.print(yaml.safe_dump({"entries": payload}, sort_keys=False, allow_unicode=True), soft_wrap=True)
+                return
+            if not entries:
+                console.print("[yellow]Folder is empty.[/yellow]")
+                return
+
+            table = Table(show_header=True)
+            table.add_column("Id", style="dim")
+            table.add_column("Path", style="cyan")
+            if long:
+                table.add_column("Sections", justify="right")
+                table.add_column("Description", style="green")
+            for e in entries:
+                row = [e.id, e.path]
+                if long:
+                    row += ["" if e.kind == "folder" else str(e.sections or 0), e.description or ""]
+                table.add_row(*row)
+            console.print(table)
 
         @cli_app.command("cat")
         def cat(
@@ -784,7 +824,7 @@ class DocGraphCommands(CliTopCommand):
                 score_str = f", score: {r['score']}" if r.get("score") and r["score"] > 0 else ""
                 desc_suffix = f" — {r['description']}" if r.get("description") else ""
                 console.print(
-                    f"- [{r['section_id']}] {r['title']} (line {r['line_start']}{score_str}){desc_suffix} — {r['markdown_hash']}"
+                    f"- [{r['section_id']}] {r['title']} (line {r['line_start']}{score_str}){desc_suffix} — {r['content_hash']}"
                 )
                 if r.get("matched_chunk"):
                     console.print(f"    [dim]Chunk: {r['matched_chunk']}[/dim]")
@@ -1070,8 +1110,8 @@ class DocGraphCommands(CliTopCommand):
             """Run a deep agent that navigates the Document Graph to answer a query.
 
             Examples:
-                cli docgraph agent "What IT services is Alko requesting?" --folder folder_273e65da416b2e72
-                cli docgraph agent --chat --folder folder_273e65da416b2e72
+                cli docgraph agent "What IT services is Alko requesting?" --folder <srcfold-or-mdfold-id>
+                cli docgraph agent --chat --folder <srcfold-or-mdfold-id>
                 cli docgraph agent "Summarize the SLAs" --llm deepseek_v4flash@openrouter
             """
             import asyncio

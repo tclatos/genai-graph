@@ -17,7 +17,7 @@ Further explanation follows.
 """
     sec = MarkdownSection(
         section_id="doc1::0",
-        markdown_hash="doc1",
+        content_hash="doc1",
         title="Section 1",
         level=1,
         line_start=1,
@@ -34,7 +34,7 @@ Further explanation follows.
     assert img.filename == "7a8b9c0d.png"
     assert img.description == "Fig. 1: Trends in economic mobility among Latinos (2008-2015)"
     assert img.section_id == "doc1::0"
-    assert img.markdown_hash == "doc1"
+    assert img.content_hash == "doc1"
     assert img.image_id == "doc1::0::7a8b9c0d"
 
 
@@ -47,7 +47,7 @@ _Figure 2: Architecture diagram of the pipeline._
 """
     sec = MarkdownSection(
         section_id="doc1::1",
-        markdown_hash="doc1",
+        content_hash="doc1",
         title="Section 2",
         level=1,
         line_start=13,
@@ -72,7 +72,7 @@ def test_extract_section_images_alt_text_fallback():
 """
     sec = MarkdownSection(
         section_id="doc1::2",
-        markdown_hash="doc1",
+        content_hash="doc1",
         title="Section 3",
         level=1,
         line_start=21,

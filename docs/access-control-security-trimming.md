@@ -157,7 +157,6 @@ class Folder(BaseModel):
 
 class Document(BaseModel):
     content_hash: str  # Primary Key (xxHash XXH3-64)
-    markdown_hash: str | None = None
     filename: str
     folder_id: str | None = None
     relative_path: str | None = None
@@ -212,9 +211,9 @@ Every DocGraph tool enforces security trimming:
 1. **`list_documents`**: Pre-filters rows matching `user_context.has_access(row.allowed_principals)`. If configured with `aggregate_notice`, appends `[Note: N document(s) omitted due to access permissions]`.
 2. **`get_folder_toc`**: Hides unauthorized folders and documents from the YAML hierarchy.
 3. **`get_document_toc`**: Verifies document permissions; returns `Access Denied: You do not have permission to view document <id>` if unauthorized.
-4. **`get_section_content`**: Joins `MarkdownSection.markdown_hash` to authorized documents. Unauthorized section requests return explicit `Access Denied` feedback.
-5. **`search_sections`**: Pre-resolves `authorized_markdown_hashes` and scopes hybrid (vector + BM25) search before scoring.
-6. **`query_image`**: Joins `Image.markdown_hash` to parent document ACL before sending image payloads to VLMs.
+4. **`get_section_content`**: Joins `MarkdownSection.content_hash` to authorized documents. Unauthorized section requests return explicit `Access Denied` feedback.
+5. **`search_sections`**: Pre-resolves `authorized_content_hashes` and scopes hybrid (vector + BM25) search before scoring.
+6. **`query_image`**: Joins `Image.content_hash` to parent document ACL before sending image payloads to VLMs.
 
 ---
 
@@ -287,11 +286,11 @@ class SharePointAccessControlProvider(BaseAccessControlProvider):
 
 ### 1. Orphan Node Query Bypass (Section, Chunk & Image Leakage)
 - **Vulnerability:** `MarkdownSection`, `SectionChunk`, and `Image` nodes are separate entities from `Document`. Direct Cypher queries (`MATCH (s:MarkdownSection) ...`) or raw vector index scans (`CALL QUERY_VECTOR_INDEX('SectionChunk', ...)`) that do not filter by parent `Document.allowed_principals` will leak confidential content.
-- **Enforcement:** All retrieval tools must resolve the authorized `markdown_hash` set at the query entry point or enforce parent joins.
+- **Enforcement:** All retrieval tools must resolve the authorized `content_hash` set at the query entry point or enforce parent joins.
 
 ### 2. Vector Index Top-$K$ Starvation
 - **Vulnerability:** HNSW vector indices return the nearest neighbors globally. If security trimming is applied *after* fetching the top 10 vector hits, and the top 10 all belong to restricted documents, the user receives 0 results even if relevant public documents exist at ranks 11–20.
-- **Enforcement:** Combine overfetching ($3\times$ to $5\times$ multiplier) with pre-filtering on `allowed_markdown_hashes`.
+- **Enforcement:** Combine overfetching ($3\times$ to $5\times$ multiplier) with pre-filtering on `allowed_content_hashes`.
 
 ### 3. Build-Time Summary Cross-Pollination
 - **Vulnerability:** If an LLM generates a multi-document summary or folder-level routing description that incorporates confidential document facts, an unauthorized user reading `Folder.description` or `list_documents` could learn confidential details.

@@ -215,6 +215,6 @@ class DocBenchCommands(CliTopCommand):
                     str(r["section_count"]),
                     str(r.get("token_count") or 0),
                     str(r.get("description") or ""),
-                    str(r["markdown_hash"]),
+                    str(r["content_hash"]),
                 )
             console.print(table)

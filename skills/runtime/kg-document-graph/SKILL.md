@@ -31,8 +31,8 @@ Folder ──CONTAINS──▶ Document ──HAS_SECTION──▶ MarkdownSecti
 | Node | Key | Notes |
 |---|---|---|
 | `Folder` | `folder_id` | A directory, `.zip` archive, or a single file's parent. |
-| `Document` | `content_hash` (xxHash of raw bytes) | Provenance anchor; carries `filename`, `relative_path`, `path`, `mime_type`, `markdown_hash`, `token_count`, `section_count`. |
-| `MarkdownSection` | `section_id` = `{markdown_hash}::{sequence}` | One heading-delimited section (heading + body up to the next heading). A synthetic level-0 root section captures heading-less documents/preambles. |
+| `Document` | `content_hash` (xxHash of raw bytes) | Provenance anchor; carries `filename`, `relative_path`, `path`, `mime_type`, `token_count`, `section_count`. |
+| `MarkdownSection` | `section_id` = `{content_hash}::{sequence}` | One heading-delimited section (heading + body up to the next heading). A synthetic level-0 root section captures heading-less documents/preambles. |
 
 Sections form a flat table with `parent_section_id`; the hierarchy is materialized as
 `HAS_SUBSECTION` edges. A section's `text` is its own content only (non-overlapping), so
@@ -112,7 +112,7 @@ from genai_graph.kg.query.document_graph_tools import (
 )
 ```
 
-Documents are addressed by content hash (full or prefix), `markdown_hash`, filename, or
+Documents are addressed by content hash (full or prefix), filename, or
 source path. `create_document_graph_tools(db_path)` wraps these as LangChain `BaseTool`s:
 `list_documents`, `get_document_toc`, `get_section_content`, `search_sections`. Wire them
 into an agent profile (see `kg-query` and `genai-tk/add-tool`).

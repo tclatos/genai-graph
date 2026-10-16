@@ -39,6 +39,7 @@ def document_graph_flow(
     fts: bool = True,
     chunk_size_tokens: int = 1500,
     embed_workers: int | None = None,
+    root_metadata: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build (or update) a Document Graph at *db_path*.
 
@@ -78,6 +79,7 @@ def document_graph_flow(
         chunk_size_tokens: Target chunk size for long sections.
         embed_workers: Parallel workers for per-document chunk-embedding batches
             during ingest; defaults to *workers*.
+        root_metadata: Metadata stored on the root Folder (e.g. ``source_folder_id``).
 
     Returns:
         Dict with `db_path`, `documents_processed`, `documents_skipped`,
@@ -111,6 +113,7 @@ def document_graph_flow(
         fts=fts,
         chunk_size_tokens=chunk_size_tokens,
         embed_workers=embed_workers,
+        root_metadata=root_metadata,
     )
     return {
         "db_path": db_path,

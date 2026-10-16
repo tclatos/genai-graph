@@ -188,8 +188,6 @@ class ResolvedSchema(BaseModel):
             indexed_field_names = {fn for fn, _ in node.index_field_specs}
 
             for field_name, field_info in model_fields.items():
-                if field_name == "metadata":
-                    continue
                 if field_name in node.excluded_fields:
                     continue
 
@@ -232,21 +230,6 @@ class ResolvedSchema(BaseModel):
                             embedded=False,
                         )
                     )
-
-            # Provenance metadata.source
-            if "metadata" in model_fields:
-                fields_out.append(
-                    ResolvedField(
-                        name="metadata.source",
-                        type_human="string",
-                        type_kuzu="STRING",
-                        description="source of the document",
-                        indexed=False,
-                        embedded=True,
-                        parent_field="metadata",
-                        embedded_class="metadata",
-                    )
-                )
 
             nodes_out.append(
                 ResolvedNode(

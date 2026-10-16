@@ -12,7 +12,7 @@ single Ladybug ``Database`` (each thread its own ``Connection``) — see
 read-write ``Database`` may exist per file in a process, but multiple
 ``Connection``s from that one ``Database`` issue concurrent read and write
 transactions safely as long as they touch disjoint rows, which per-document
-summarization does (each ``markdown_hash`` is summarized exactly once). This
+summarization does (each ``content_hash`` is summarized exactly once). This
 stays a single Prefect task with internal thread parallelism, not a fan-out of
 per-document Prefect tasks (those would each open their own ``Database`` and
 race). The Ladybug REST API server is only needed for multi-*process* access,

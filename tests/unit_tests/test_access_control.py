@@ -13,7 +13,7 @@ from genai_graph.kg.backend import KuzuBackend, create_in_memory_backend
 from genai_graph.kg.document_graph.ingest import ingest_document_graph
 from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
 from genai_graph.kg.query.document_graph_tools import (
-    _get_authorized_markdown_hashes,
+    _get_authorized_content_hashes,
     _is_document_authorized,
     create_document_graph_tools,
     document_toc_yaml,
@@ -193,13 +193,11 @@ def test_missing_allowed_principals_column_fails_open_by_default(monkeypatch: py
     """A pre-ACL database (no allowed_principals column) is unfiltered by default."""
     monkeypatch.delenv("GENAI_GRAPH_ACL_REQUIRED", raising=False)
     backend = create_in_memory_backend()
-    backend.execute(
-        "CREATE NODE TABLE Document(content_hash STRING PRIMARY KEY, markdown_hash STRING, filename STRING)"
-    )
-    backend.execute("CREATE (:Document {content_hash: 'h1', markdown_hash: 'mh1', filename: 'doc.md'})")
+    backend.execute("CREATE NODE TABLE Document(content_hash STRING PRIMARY KEY, filename STRING)")
+    backend.execute("CREATE (:Document {content_hash: 'h1', filename: 'doc.md'})")
 
     ctx = UserContext.create(user_id="bob")
-    assert _get_authorized_markdown_hashes(backend, ctx) is None
+    assert _get_authorized_content_hashes(backend, ctx) is None
     assert _is_document_authorized(backend, "doc.md", ctx) is True
 
 
@@ -208,16 +206,14 @@ def test_missing_allowed_principals_column_fails_closed_when_required(monkeypatc
     """Setting GENAI_GRAPH_ACL_REQUIRED=1 denies access when the ACL column is absent."""
     monkeypatch.setenv("GENAI_GRAPH_ACL_REQUIRED", "1")
     backend = create_in_memory_backend()
-    backend.execute(
-        "CREATE NODE TABLE Document(content_hash STRING PRIMARY KEY, markdown_hash STRING, filename STRING)"
-    )
-    backend.execute("CREATE (:Document {content_hash: 'h1', markdown_hash: 'mh1', filename: 'doc.md'})")
+    backend.execute("CREATE NODE TABLE Document(content_hash STRING PRIMARY KEY, filename STRING)")
+    backend.execute("CREATE (:Document {content_hash: 'h1', filename: 'doc.md'})")
 
     ctx = UserContext.create(user_id="bob")
-    assert _get_authorized_markdown_hashes(backend, ctx) == set()
+    assert _get_authorized_content_hashes(backend, ctx) == set()
     assert _is_document_authorized(backend, "doc.md", ctx) is False
 
     # Admins always bypass, even when the column is missing and enforcement is required.
     admin_ctx = UserContext.create(user_id="root", is_admin=True)
-    assert _get_authorized_markdown_hashes(backend, admin_ctx) is None
+    assert _get_authorized_content_hashes(backend, admin_ctx) is None
     assert _is_document_authorized(backend, "doc.md", admin_ctx) is True

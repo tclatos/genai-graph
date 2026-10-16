@@ -33,8 +33,8 @@ from genai_graph.kg.schema.core import GraphNode, GraphRelation
 class MarkdownSection(BaseModel):
     """A single heading-delimited section of a document's Markdown rendering."""
 
-    section_id: str = Field(..., description="Primary key: f'{markdown_hash}::{sequence}'")
-    markdown_hash: str = Field(..., description="markdown_hash of the owning Document (foreign key)")
+    section_id: str = Field(..., description="Primary key: f'{content_hash}::{sequence}'")
+    content_hash: str = Field(..., description="content_hash (file_<hash>) of the owning Document (foreign key)")
     parent_section_id: str | None = Field(
         default=None, description="section_id of the parent section, or None for a top-level (root) section"
     )
@@ -109,7 +109,7 @@ class SectionChunk(BaseModel):
 
     chunk_id: str = Field(..., description="Primary key: f'{section_id}::c{chunk_index}'")
     section_id: str = Field(..., description="section_id of the owning MarkdownSection (foreign key)")
-    markdown_hash: str = Field(..., description="markdown_hash of the owning Document")
+    content_hash: str = Field(..., description="content_hash (file_<hash>) of the owning Document")
     chunk_index: int = Field(..., description="0-based position of this chunk within its section")
     chunk_text: str = Field(..., description="A contiguous slice of the section's body text")
     token_count: int = Field(..., description="Approximate token count of chunk_text")
@@ -147,7 +147,7 @@ class Image(BaseModel):
 
     image_id: str = Field(..., description="Primary key: f'{section_id}::{image_hash}'")
     section_id: str = Field(..., description="section_id of the owning MarkdownSection (foreign key)")
-    markdown_hash: str = Field(..., description="markdown_hash of the owning Document (foreign key)")
+    content_hash: str = Field(..., description="content_hash (file_<hash>) of the owning Document (foreign key)")
     image_hash: str = Field(..., description="Hash of image binary content")
     name: str = Field(default="", description="Image name / hash code")
     filename: str = Field(..., description="Image filename (e.g. chart1.png)")

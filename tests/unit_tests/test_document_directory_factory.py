@@ -24,7 +24,6 @@ class TestDocumentModel:
         doc = Document(content_hash="abc123", path="/data/file.md", filename="file.md")
         assert doc.file_size is None
         assert doc.mime_type is None
-        assert doc.markdown_hash is None
         assert doc.token_count == 0
         assert doc.section_count == 0
         assert doc.access_level == "public"

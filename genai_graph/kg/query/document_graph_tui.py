@@ -50,7 +50,7 @@ class NodeData(BaseModel):
 
     kind: Literal["root", "folder", "document", "section"]
     path: str | None = None
-    markdown_hash: str | None = None
+    content_hash: str | None = None
     section_id: str | None = None
     filename: str | None = None
     title: str | None = None
@@ -165,7 +165,7 @@ class DocumentGraphApp(App[None]):
                 data=NodeData(
                     kind="document",
                     path=row.get("path"),
-                    markdown_hash=row["markdown_hash"],
+                    content_hash=row["content_hash"],
                     filename=row["filename"],
                     title=row.get("filename"),
                     description=row.get("description"),
@@ -176,8 +176,8 @@ class DocumentGraphApp(App[None]):
             leaf.allow_expand = True
         node.data.loaded = True
 
-    def _load_sections(self, node: TreeNode, markdown_hash: str) -> None:
-        toc = get_document_toc(self.backend, markdown_hash)
+    def _load_sections(self, node: TreeNode, content_hash: str) -> None:
+        toc = get_document_toc(self.backend, content_hash)
         by_parent: dict[str | None, list[dict[str, Any]]] = {}
         for row in toc:  # type: ignore[union-attr]
             by_parent.setdefault(row["parent_section_id"], []).append(row)
@@ -188,7 +188,7 @@ class DocumentGraphApp(App[None]):
                     str(row["title"]),
                     data=NodeData(
                         kind="section",
-                        markdown_hash=markdown_hash,
+                        content_hash=content_hash,
                         section_id=row["section_id"],
                         title=row["title"],
                         description=row.get("description"),
@@ -219,7 +219,7 @@ class DocumentGraphApp(App[None]):
         if data.kind == "folder":
             self._load_documents(node, data.path or ".")
         elif data.kind == "document":
-            self._load_sections(node, data.markdown_hash or "")
+            self._load_sections(node, data.content_hash or "")
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
         self._show_node(event.node)
@@ -237,7 +237,7 @@ class DocumentGraphApp(App[None]):
         if data is None:
             return
 
-        node_key = (data.kind, data.section_id or data.markdown_hash or data.path)
+        node_key = (data.kind, data.section_id or data.content_hash or data.path)
         if self._active_node_key == node_key:
             return
         self._active_node_key = node_key
@@ -265,15 +265,15 @@ class DocumentGraphApp(App[None]):
                 f"{summary_line}"
                 f"markdown: {data.path}\n"
                 f"source: {self._current_origin_path or '(none recorded — not converted from a raw document)'}\n"
-                f"hash: {data.markdown_hash}\nsections: {data.count}\n"
+                f"hash: {data.content_hash}\nsections: {data.count}\n"
                 f"\n[dim](press [bold]m[/bold] to open the .md, [bold]o[/bold] to open the source)[/dim]\n"
                 f"[yellow]⏳ Loading content...[/yellow]"
             )
             meta.update(meta_text)
             self._set_loading(True)
-            self._load_content_worker("document", data.markdown_hash or "", meta_text)
+            self._load_content_worker("document", data.content_hash or "", meta_text)
         elif data.kind == "section":
-            self._current_md_path = self._path_for_markdown_hash(data.markdown_hash)
+            self._current_md_path = self._path_for_content_hash(data.content_hash)
             self._current_origin_path = _read_origin_path(self._current_md_path)
             desc_line = f"[italic green]Description:[/italic green] {data.description}\n" if data.description else ""
             summary_line = f"[italic cyan]Summary:[/italic cyan] {data.summary}\n" if data.summary else ""
@@ -282,7 +282,7 @@ class DocumentGraphApp(App[None]):
                 f"{desc_line}"
                 f"{summary_line}"
                 f"id: {data.section_id}\n"
-                f"doc hash: {data.markdown_hash}\n"
+                f"doc hash: {data.content_hash}\n"
                 f"level: {data.level}   line: {data.line_start}\n"
                 f"[yellow]⏳ Loading content...[/yellow]"
             )
@@ -316,11 +316,11 @@ class DocumentGraphApp(App[None]):
         self._set_loading(False)
         self.query_one("#info-panel", VerticalScroll).scroll_to(y=0, animate=False)
 
-    def _path_for_markdown_hash(self, markdown_hash: str | None) -> str | None:
+    def _path_for_content_hash(self, content_hash: str | None) -> str | None:
         """Look up a document's converted-Markdown path by its content hash."""
-        if not markdown_hash:
+        if not content_hash:
             return None
-        return next((row.get("path") for row in self._doc_rows if row["markdown_hash"] == markdown_hash), None)
+        return next((row.get("path") for row in self._doc_rows if row["content_hash"] == content_hash), None)
 
     def action_refresh_tree(self) -> None:
         self._rebuild_tree()

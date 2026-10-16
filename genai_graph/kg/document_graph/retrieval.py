@@ -223,7 +223,7 @@ def prepare_chunk_inputs(
     """Chunk *sections* and build the embedding inputs for each chunk (pure CPU, no I/O).
 
     Returns:
-        List of ``(section_id, markdown_hash, chunk_id, chunk_index, chunk_text, token_count, embed_input)`` tuples.
+        List of ``(section_id, content_hash, chunk_id, chunk_index, chunk_text, token_count, embed_input)`` tuples.
     """
     items: list[tuple[str, str, str, int, str, int, str]] = []
     for section in sections:
@@ -236,7 +236,7 @@ def prepare_chunk_inputs(
             embed_input = f"{header}\n\n{chunk_text}"
             chunk_id = f"{section.section_id}::c{idx}"
             items.append(
-                (section.section_id, section.markdown_hash, chunk_id, idx, chunk_text, token_count, embed_input)
+                (section.section_id, section.content_hash, chunk_id, idx, chunk_text, token_count, embed_input)
             )
     return items
 
@@ -246,7 +246,7 @@ def attach_chunk_embeddings(
 ) -> list[tuple[str, dict[str, Any]]]:
     """Pair prepared chunk inputs with their computed embeddings as chunk dicts."""
     results: list[tuple[str, dict[str, Any]]] = []
-    for (section_id, md_hash, chunk_id, idx, chunk_text, token_count, _), embedding in zip(
+    for (section_id, content_hash, chunk_id, idx, chunk_text, token_count, _), embedding in zip(
         items, embeddings, strict=True
     ):
         results.append(
@@ -255,7 +255,7 @@ def attach_chunk_embeddings(
                 {
                     "chunk_id": chunk_id,
                     "section_id": section_id,
-                    "markdown_hash": md_hash,
+                    "content_hash": content_hash,
                     "chunk_index": idx,
                     "chunk_text": chunk_text,
                     "token_count": token_count,

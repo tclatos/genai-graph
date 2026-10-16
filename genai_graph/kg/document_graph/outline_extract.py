@@ -5,7 +5,7 @@ model for its **table of contents** plus a one-sentence description of every
 section (and a short summary of the substantial ones) — *without* re-emitting
 the section content, so the output stays small regardless of document size.
 
-The outline is a content-free JSON artifact, cached by ``markdown_hash`` (and a
+The outline is a content-free JSON artifact, cached by the digest of its text (and a
 policy/LLM hash) so re-runs are free. A later deterministic pass
 (:func:`genai_graph.kg.document_graph.outline_merge.merge_outline`) reconciles
 the outline's heading anchors against the Markdown to produce the actual
@@ -291,12 +291,12 @@ def _llm_tag_for_path(llm_id: str) -> str:
     return llm_id.replace("@", "_").replace("/", "_")
 
 
-def _cache_path(config: OutlineConfig, llm_id: str, markdown_hash: str) -> Path | None:
+def _cache_path(config: OutlineConfig, llm_id: str, text_digest: str) -> Path | None:
     """Return the content-addressed cache path for one document's outline, or None if caching is disabled."""
     if not config.cache_root:
         return None
     root = Path(config.cache_root) / f"{_llm_tag_for_path(llm_id)}__{_policy_hash(config, llm_id)}"
-    return root / f"{markdown_hash}.json"
+    return root / f"{text_digest}.json"
 
 
 def _condense_table_smart(table_block: str, head_rows: int = 3, tail_rows: int = 2) -> str:
@@ -1291,13 +1291,13 @@ def _write_cached(cache_path: Path, result: OutlineResult) -> None:
 
 def extract_outline(
     md_text: str,
-    markdown_hash: str,
+    text_digest: str,
     filename: str,
     config: OutlineConfig,
     *,
     warnings: list[str],
 ) -> OutlineResult:
-    """Extract a document's outline (TOC + summaries), cache-addressed by *markdown_hash*.
+    """Extract a document's outline (TOC + summaries), cache-addressed by *text_digest*.
 
     Idempotent: a fresh cache hit returns the stored result without an LLM call.
     Supports multi-tier structure discovery:
@@ -1309,7 +1309,7 @@ def extract_outline(
 
     Args:
         md_text: Full Markdown document text.
-        markdown_hash: Content hash of the Markdown rendering (cache key + identity).
+        text_digest: Buffer digest of the Markdown text (cache key).
         filename: Document filename, for prompt context and log messages.
         config: Outline policy and LLM settings.
         warnings: List to append human-readable warnings to.
@@ -1318,7 +1318,7 @@ def extract_outline(
         `OutlineResult`; ``.outline`` is None when degraded.
     """
     llm_id = _resolve_llm_id(config)
-    cache_path = _cache_path(config, llm_id, markdown_hash)
+    cache_path = _cache_path(config, llm_id, text_digest)
     if cache_path is not None:
         cached = _load_cached(cache_path)
         if cached is not None:

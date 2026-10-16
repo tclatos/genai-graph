@@ -91,8 +91,8 @@ class TestDocumentGraphFactoryParsing:
         assert [s.title for s in bundle.sections] == ["Title", "Sub"]
         assert bundle.sections[0].parent_section_id is None
         assert bundle.sections[1].parent_section_id == bundle.sections[0].section_id
-        markdown_hash = bundle.document.markdown_hash
-        assert bundle.sections[0].section_id == f"{markdown_hash}::0"
+        content_hash = bundle.document.content_hash
+        assert bundle.sections[0].section_id == f"{content_hash}::0"
 
     def test_missing_file_returns_none(self, tmp_path: Path) -> None:
         factory = DocumentGraphFactory(sources=[str(tmp_path)])

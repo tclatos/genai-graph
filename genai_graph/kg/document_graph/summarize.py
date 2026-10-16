@@ -511,7 +511,7 @@ def summarize_document(
 
     Args:
         backend: Connected `KgBackend`.
-        document_id: Content hash (full or prefix), `markdown_hash`, filename, or path.
+        document_id: Content hash (full or prefix), filename, or path.
         config: Summarization policy and LLM settings. Defaults applied if omitted.
         force: Re-summarize even if the document already has a `summary`.
         dry_run: Compute the plan (selection, batching, warnings) without calling the
@@ -528,8 +528,8 @@ def summarize_document(
         result.warnings.append(f"Document not found: {document_id}")
         return result
 
-    markdown_hash = doc["markdown_hash"]
-    toc_rows = get_document_toc(backend, markdown_hash)
+    content_hash = doc["content_hash"]
+    toc_rows = get_document_toc(backend, content_hash)
     if not toc_rows:
         result.warnings.append(f"No sections found for document: {document_id}")
         return result
@@ -629,7 +629,7 @@ def summarize_document(
     result.sections_summarized = sum(1 for u in section_updates if u["summary"])
 
     apply_section_summaries(backend, section_updates)
-    apply_document_summary(backend, markdown_hash, description=document_description, summary=document_summary)
+    apply_document_summary(backend, content_hash, description=document_description, summary=document_summary)
 
     logger.info(
         "{}: done ({} described, {} summarized, {} LLM call(s))",
@@ -655,7 +655,7 @@ def _summarize_hashes(
 
     Each worker borrows a backend from *parallel* and summarizes one document, so
     the slow LLM calls overlap while the fast graph writes stay on disjoint rows
-    (every `markdown_hash` is summarized exactly once). Per-document failures are
+    (every `content_hash` is summarized exactly once). Per-document failures are
     returned by `SharedKuzuParallel.map` as `Exception` values and folded into
     `documents_failed`/`warnings`, never aborting the whole run.
     """
@@ -664,12 +664,12 @@ def _summarize_hashes(
         logger.info("Summarize done: nothing to do")
         return result
 
-    def _worker(backend: KgBackend, markdown_hash: str) -> SummarizeDocumentResult:
-        return summarize_document(backend, markdown_hash, config, force=force, dry_run=dry_run)
+    def _worker(backend: KgBackend, content_hash: str) -> SummarizeDocumentResult:
+        return summarize_document(backend, content_hash, config, force=force, dry_run=dry_run)
 
     outcomes = parallel.map(_worker, target_hashes)
-    for markdown_hash, outcome in zip(target_hashes, outcomes, strict=True):
-        filename = hash_to_filename.get(markdown_hash, markdown_hash)
+    for content_hash, outcome in zip(target_hashes, outcomes, strict=True):
+        filename = hash_to_filename.get(content_hash, content_hash)
         if isinstance(outcome, Exception):
             result.documents_failed += 1
             result.warnings.append(f"Failed to summarize {filename}: {outcome}")
@@ -709,7 +709,7 @@ def summarize_graph(
     single read-write ``Database`` per file in a process, so the fan-out shares it
     rather than opening one per worker; concurrent writes require
     ``enable_multi_writes=True`` (set by ``SharedKuzuParallel``) and must touch
-    disjoint rows, which is why each ``markdown_hash`` is summarized exactly once.
+    disjoint rows, which is why each ``content_hash`` is summarized exactly once.
 
     Args:
         db_path: Path to the (already built) Ladybug Document Graph database.
@@ -725,17 +725,17 @@ def summarize_graph(
     config = config or SummarizationConfig()
     with SharedKuzuParallel(db_path, max_workers=workers) as parallel:
         docs = list_documents(parallel.primary, folder_id=folder_id)
-        # Dedupe by markdown_hash: documents sharing content share the same
+        # Dedupe by content_hash: documents sharing content share the same
         # MarkdownSection/Document rows, so summarizing them concurrently would
         # write the same rows from two transactions and conflict.
         hash_to_filename: dict[str, str] = {}
         target_hashes: list[str] = []
         for doc in docs:
-            markdown_hash = doc["markdown_hash"]
-            if markdown_hash in hash_to_filename:
+            content_hash = doc["content_hash"]
+            if content_hash in hash_to_filename:
                 continue
-            hash_to_filename[markdown_hash] = doc["filename"]
-            target_hashes.append(markdown_hash)
+            hash_to_filename[content_hash] = doc["filename"]
+            target_hashes.append(content_hash)
         scope = f" under folder {folder_id}" if folder_id else ""
         logger.info("Summarizing {} document(s){}...", len(target_hashes), scope)
         return _summarize_hashes(parallel, target_hashes, hash_to_filename, config, force=force, dry_run=dry_run)
@@ -752,8 +752,8 @@ def summarize_documents(
 ) -> SummarizeGraphResult:
     """Summarize an explicit list of documents (by hash, prefix, filename, or path).
 
-    Each reference is resolved to its `markdown_hash` on the shared-DB primary
-    connection, references are de-duplicated by `markdown_hash` (same content = same
+    Each reference is resolved to its `content_hash` on the shared-DB primary
+    connection, references are de-duplicated by `content_hash` (same content = same
     rows; summarizing it twice concurrently would conflict), and the resolved
     documents are summarized concurrently across `workers` threads. Unresolved
     references are recorded as failures with a warning rather than raising.
@@ -780,11 +780,11 @@ def summarize_documents(
                 result.warnings.append(f"Document not found: {ref}")
                 result.documents_failed += 1
                 continue
-            markdown_hash = doc["markdown_hash"]
-            if markdown_hash in hash_to_filename:
+            content_hash = doc["content_hash"]
+            if content_hash in hash_to_filename:
                 continue
-            hash_to_filename[markdown_hash] = doc["filename"]
-            target_hashes.append(markdown_hash)
+            hash_to_filename[content_hash] = doc["filename"]
+            target_hashes.append(content_hash)
         logger.info("Summarizing {} document(s)...", len(target_hashes))
         return _summarize_hashes(
             parallel, target_hashes, hash_to_filename, config, force=force, dry_run=dry_run, result=result

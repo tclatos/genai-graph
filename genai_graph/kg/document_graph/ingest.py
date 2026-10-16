@@ -10,7 +10,7 @@ them with the same Arrow/Ladybug primitives (`merge_nodes_batch`,
 
 Documents are keyed by content hash, so re-ingesting an unchanged corpus is a
 MERGE no-op. Before parsing sections for a document, the DB is checked for an
-existing Document with the same ``markdown_hash`` — when present, section
+existing Document with the same ``content_hash`` — when present, section
 creation is skipped entirely, avoiding costly recomputation.
 """
 
@@ -83,12 +83,12 @@ class DocumentGraphIngestResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-def _document_exists(backend: KgBackend, markdown_hash: str) -> bool:
-    """Return True if a Document with this markdown_hash is already in the graph."""
+def _document_exists(backend: KgBackend, content_hash: str) -> bool:
+    """Return True if a Document with this content_hash is already in the graph."""
     try:
         df = backend.execute_get_as_df(
-            f"MATCH (d:{_DOCUMENT_TYPE} {{markdown_hash: $h}}) RETURN d.markdown_hash AS h LIMIT 1",
-            {"h": markdown_hash},
+            f"MATCH (d:{_DOCUMENT_TYPE} {{content_hash: $h}}) RETURN d.content_hash AS h LIMIT 1",
+            {"h": content_hash},
             union=False,
         )
     except Exception as exc:
@@ -98,7 +98,7 @@ def _document_exists(backend: KgBackend, markdown_hash: str) -> bool:
     return not df.empty
 
 
-def _sections_described(backend: KgBackend, markdown_hash: str) -> bool:
+def _sections_described(backend: KgBackend, content_hash: str) -> bool:
     """Return True if any section of this document already carries a description.
 
     Used by the LLM build path to decide whether an already-ingested document's
@@ -107,8 +107,8 @@ def _sections_described(backend: KgBackend, markdown_hash: str) -> bool:
     """
     try:
         df = backend.execute_get_as_df(
-            f"MATCH (s:{_SECTION_TYPE} {{markdown_hash: $h}}) WHERE s.description IS NOT NULL RETURN count(s) AS c",
-            {"h": markdown_hash},
+            f"MATCH (s:{_SECTION_TYPE} {{content_hash: $h}}) WHERE s.description IS NOT NULL RETURN count(s) AS c",
+            {"h": content_hash},
             union=False,
         )
     except Exception as exc:
@@ -132,7 +132,7 @@ def ingest_document_graph(
     """Ingest a Markdown corpus (via *factory*) into *backend* as a hash-keyed tree.
 
     Idempotent: unchanged files MERGE in place. A Document already present in the
-    graph (matched by ``markdown_hash``) has its sections reused — they are not
+    graph (matched by ``content_hash``) has its sections reused — they are not
     re-parsed into new nodes — unless ``force=True``, which deletes and rebuilds
     them.
 
@@ -223,7 +223,7 @@ def ingest_document_graph(
     pending: list[tuple[DocumentGraphBundle, Document, bool]] = []
     for bundle in parsed:
         document = bundle.document
-        md_hash = document.markdown_hash or ""
+        content_hash = document.content_hash
 
         # Structural nodes (always MERGE; cheap and idempotent)
         for folder in bundle.folders:
@@ -254,19 +254,19 @@ def ingest_document_graph(
 
         # Section reuse: skip if already ingested. In-batch dedup first: the
         # same markdown already queued for merge this run.
-        if md_hash in seen_markdown:
+        if content_hash in seen_markdown:
             result.documents_skipped += 1
             result.documents_processed += 1
             continue
 
-        in_db = _document_exists(backend, md_hash)
+        in_db = _document_exists(backend, content_hash)
         if force:
             rebuild = True
         elif factory.outline_config is not None:
             # LLM build path: rebuild sections that were built without descriptions
             # (algorithmically, or by a prior degraded run) so a re-run after `--llm`
             # enriches them with the outline's descriptions/summaries.
-            rebuild = in_db and not _sections_described(backend, md_hash)
+            rebuild = in_db and not _sections_described(backend, content_hash)
         else:
             rebuild = False
 
@@ -274,7 +274,7 @@ def ingest_document_graph(
             result.documents_skipped += 1
             result.documents_processed += 1
             continue
-        seen_markdown.add(md_hash)
+        seen_markdown.add(content_hash)
         pending.append((bundle, document, rebuild))
 
     # --- Phase 3: chunk + embed documents in parallel (no DB access) -------
@@ -311,10 +311,10 @@ def ingest_document_graph(
 
     # --- Phase 4: accumulate section/chunk rows serially, then merge -------
     for doc_idx, (bundle, document, rebuild) in enumerate(pending, 1):
-        md_hash = document.markdown_hash or ""
+        content_hash = document.content_hash
 
         if rebuild:
-            _delete_document_sections(backend, md_hash)
+            _delete_document_sections(backend, content_hash)
 
         for section in bundle.sections:
             section_dict = section.model_dump()
@@ -439,23 +439,23 @@ def ingest_document_graph(
     return result
 
 
-def _delete_document_sections(backend: KgBackend, markdown_hash: str) -> None:
+def _delete_document_sections(backend: KgBackend, content_hash: str) -> None:
     """Delete existing sections (and their chunks/images) for a document (used on force)."""
     try:
         backend.execute(
-            f"MATCH (s:{_SECTION_TYPE} {{markdown_hash: $h}})-[:{HAS_IMAGE.name}]->(i:{_IMAGE_TYPE}) DETACH DELETE i",
-            {"h": markdown_hash},
+            f"MATCH (s:{_SECTION_TYPE} {{content_hash: $h}})-[:{HAS_IMAGE.name}]->(i:{_IMAGE_TYPE}) DETACH DELETE i",
+            {"h": content_hash},
         )
     except Exception as exc:
-        logger.debug("Could not clear stale {} for {}: {}", _IMAGE_TYPE, markdown_hash, exc)
+        logger.debug("Could not clear stale {} for {}: {}", _IMAGE_TYPE, content_hash, exc)
     try:
-        backend.execute(f"MATCH (c:{_CHUNK_TYPE} {{markdown_hash: $h}}) DETACH DELETE c", {"h": markdown_hash})
+        backend.execute(f"MATCH (c:{_CHUNK_TYPE} {{content_hash: $h}}) DETACH DELETE c", {"h": content_hash})
     except Exception as exc:
-        logger.debug("Could not clear stale {} for {}: {}", _CHUNK_TYPE, markdown_hash, exc)
+        logger.debug("Could not clear stale {} for {}: {}", _CHUNK_TYPE, content_hash, exc)
     try:
-        backend.execute(f"MATCH (n:{_SECTION_TYPE} {{markdown_hash: $h}}) DETACH DELETE n", {"h": markdown_hash})
+        backend.execute(f"MATCH (n:{_SECTION_TYPE} {{content_hash: $h}}) DETACH DELETE n", {"h": content_hash})
     except Exception as exc:
-        logger.warning("Could not clear stale {} for {}: {}", _SECTION_TYPE, markdown_hash, exc)
+        logger.warning("Could not clear stale {} for {}: {}", _SECTION_TYPE, content_hash, exc)
 
 
 def drop_document_graph(backend: KgBackend, *, drop_documents: bool = False) -> None:

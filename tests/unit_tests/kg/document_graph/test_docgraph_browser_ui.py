@@ -117,7 +117,7 @@ def test_build_tree_select_nodes_hierarchy() -> None:
     ]
     docs = [
         {
-            "markdown_hash": "doc_hash_1",
+            "content_hash": "doc_hash_1",
             "filename": "q1_report.md",
             "folder_id": "f1",
             "section_count": 2,
@@ -217,7 +217,7 @@ async def test_async_fetch_docgraph_data(sample_docgraph_db: tuple[str, Path]) -
 
     _folders, docs = await fetch_folders_and_documents(backend)
     assert len(docs) == 1
-    doc_hash = docs[0]["markdown_hash"]
+    doc_hash = docs[0]["content_hash"]
 
     sections = await fetch_document_sections_full(backend, doc_hash)
     assert len(sections) >= 3
@@ -283,7 +283,7 @@ def test_get_configured_profiles() -> None:
 def test_build_tree_select_nodes_unwraps_synthetic_root() -> None:
     docs = [
         {
-            "markdown_hash": "h1",
+            "content_hash": "h1",
             "filename": "guide.md",
             "section_count": 2,
             "token_count": 100,
@@ -336,7 +336,7 @@ async def test_async_fetch_section_markdown(sample_docgraph_db: tuple[str, Path]
     backend.connect(db_path)
 
     _, docs = await fetch_folders_and_documents(backend)
-    doc_hash = docs[0]["markdown_hash"]
+    doc_hash = docs[0]["content_hash"]
     sections = await fetch_document_sections_full(backend, doc_hash)
     sec_id = sections[1]["section_id"]
 

@@ -28,7 +28,6 @@ def test_stage_and_ingest_document_graph_parquet(tmp_path: Path) -> None:
     )
     doc = Document(
         content_hash="doc_hash_123",
-        markdown_hash="md_hash_123",
         filename="report.md",
         folder_id="root_folder",
         relative_path="report.md",
@@ -37,8 +36,8 @@ def test_stage_and_ingest_document_graph_parquet(tmp_path: Path) -> None:
         language="en",
     )
     sec = MarkdownSection(
-        section_id="md_hash_123::0",
-        markdown_hash="md_hash_123",
+        section_id="doc_hash_123::0",
+        content_hash="doc_hash_123",
         title="Executive Summary",
         level=1,
         line_start=1,
@@ -49,9 +48,9 @@ def test_stage_and_ingest_document_graph_parquet(tmp_path: Path) -> None:
         description="Summary of performance",
     )
     img = Image(
-        image_id="md_hash_123::0::img1",
-        section_id="md_hash_123::0",
-        markdown_hash="md_hash_123",
+        image_id="doc_hash_123::0::img1",
+        section_id="doc_hash_123::0",
+        content_hash="doc_hash_123",
         image_hash="img1",
         filename="chart1.png",
         format="png",

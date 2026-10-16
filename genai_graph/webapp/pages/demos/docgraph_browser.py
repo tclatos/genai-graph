@@ -320,14 +320,14 @@ async def render_docgraph_explorer() -> None:
     # Map documents by hash
     doc_map: dict[str, dict[str, Any]] = {}
     for d in documents:
-        m_hash = d.get("markdown_hash") or d.get("content_hash") or ""
+        m_hash = d.get("content_hash") or ""
         doc_map[m_hash] = d
 
     # Pre-fetch TOC for documents to build deep hierarchy tree
     sections_by_doc: dict[str, list[dict[str, Any]]] = {}
     if len(documents) <= 150:
         for d in documents:
-            m_hash = d.get("markdown_hash")
+            m_hash = d.get("content_hash")
             if m_hash:
                 from genai_graph.kg.query.document_graph_tools import get_document_toc
 
@@ -341,7 +341,7 @@ async def render_docgraph_explorer() -> None:
 
     # Default selection if none set
     if not st.session_state.selected_doc_hash and documents:
-        first_hash = documents[0].get("markdown_hash") or documents[0].get("content_hash")
+        first_hash = documents[0].get("content_hash")
         st.session_state.selected_doc_hash = first_hash
         st.session_state.selected_tree_val = f"doc:{first_hash}"
         st.session_state.selected_node_type = "document"
@@ -591,7 +591,7 @@ async def render_docgraph_explorer() -> None:
                     st.info("No documents directly in this folder.")
                 else:
                     for d in folder_docs:
-                        d_hash = d.get("markdown_hash") or d.get("content_hash") or ""
+                        d_hash = d.get("content_hash") or ""
                         with st.container():
                             st.markdown(
                                 f"📄 **{d.get('filename')}** — {d.get('section_count', 0)} sections, {d.get('token_count', 0):,} tokens"
@@ -641,7 +641,7 @@ async def render_docgraph_explorer() -> None:
                     score_badge = f" `(Score: {score_val:.3f})`" if score_val else ""
                     sec_title = r.get("title") or "Untitled Section"
                     sid = r.get("section_id") or ""
-                    m_hash = r.get("markdown_hash") or ""
+                    m_hash = r.get("content_hash") or ""
                     lvl = r.get("level", 1)
                     lvl_tag = f"H{lvl}" if lvl > 0 else "Doc"
 
@@ -695,14 +695,14 @@ async def render_docgraph_explorer() -> None:
                 "Search image captions/filenames", "", placeholder="e.g. architecture, revenue chart..."
             )
         with img_doc_col:
-            doc_filter_choices = ["All Documents"] + [d.get("filename") or d["markdown_hash"] for d in documents]
+            doc_filter_choices = ["All Documents"] + [d.get("filename") or d["content_hash"] for d in documents]
             chosen_doc = st.selectbox("Filter by Document", doc_filter_choices)
 
         doc_filter_hash = None
         if chosen_doc != "All Documents":
             for d in documents:
-                if (d.get("filename") == chosen_doc) or (d.get("markdown_hash") == chosen_doc):
-                    doc_filter_hash = d.get("markdown_hash")
+                if (d.get("filename") == chosen_doc) or (d.get("content_hash") == chosen_doc):
+                    doc_filter_hash = d.get("content_hash")
                     break
 
         all_imgs = await fetch_all_images_async(backend, query=img_query or None, document_id=doc_filter_hash, limit=60)
@@ -755,8 +755,8 @@ async def render_docgraph_explorer() -> None:
         tbl_doc_hash = None
         if chosen_tbl_doc != "All Documents":
             for d in documents:
-                if (d.get("filename") == chosen_tbl_doc) or (d.get("markdown_hash") == chosen_tbl_doc):
-                    tbl_doc_hash = d.get("markdown_hash")
+                if (d.get("filename") == chosen_tbl_doc) or (d.get("content_hash") == chosen_tbl_doc):
+                    tbl_doc_hash = d.get("content_hash")
                     break
 
         all_tbls = await fetch_all_tables_async(backend, query=tbl_query or None, document_id=tbl_doc_hash, limit=60)

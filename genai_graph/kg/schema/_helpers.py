@@ -168,6 +168,9 @@ def _get_kuzu_type_for_field(annotation: Any) -> str:
             return f"{_get_kuzu_type_for_field(inner_args[0]).rstrip('[]')}[]"
         return "STRING[]"
 
+    if origin is dict:
+        return "MAP(STRING, STRING)"
+
     if actual is int:
         return "INT64"
     if actual is float:

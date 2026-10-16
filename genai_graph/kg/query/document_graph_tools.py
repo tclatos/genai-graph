@@ -3,8 +3,7 @@
 Exposes read-only Cypher-backed functions an agent (or the `cli docgraph`
 command) can call to walk a document's heading hierarchy, fetch individual
 sections, and reconstruct a whole document from its sections. Documents are
-addressed by the Document content hash (full or prefix), its ``markdown_hash``,
-the filename, or the source path.
+addressed by the Document content hash (full or prefix), the filename, or the source path.
 
 The tools are **schema-tolerant**: they introspect the actual Ladybug table
 columns once (via ``CALL table_info``) and ``CALL show_tables`` for
@@ -28,11 +27,15 @@ from typing import TYPE_CHECKING, Any, Literal, cast, overload
 import yaml
 from genai_tk.utils.ladybug import get_shared_database
 from loguru import logger
+from pydantic import BaseModel
 
 from genai_graph.kg.backend import KgBackend, KuzuBackend, LadybugBackend
+from genai_graph.kg.ids import is_bare_digest
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
+
+    from genai_graph.kg.access.context import UserContext
 
 _DOCUMENT_LABEL = "Document"
 _SECTION_LABEL = "MarkdownSection"
@@ -78,7 +81,6 @@ _FOLDER_KEYS: tuple[str, ...] = (
 )
 _DOC_KEYS: tuple[str, ...] = (
     "content_hash",
-    "markdown_hash",
     "filename",
     "section_count",
     "token_count",
@@ -118,8 +120,8 @@ class AccessDeniedError(DocumentGraphError):
     """Raised when the active user context is unauthorized to access a document or section."""
 
 
-def _get_authorized_markdown_hashes(backend: KgBackend, user_context: Any = None) -> set[str] | None:
-    """Return the set of markdown_hash values the user is authorized to read, or None if unfiltered."""
+def _get_authorized_content_hashes(backend: KgBackend, user_context: Any = None) -> set[str] | None:
+    """Return the set of Document content_hash values the user is authorized to read, or None if unfiltered."""
     from genai_graph.kg.access.context import UserContext, get_active_user_context
 
     ctx: UserContext = user_context if isinstance(user_context, UserContext) else get_active_user_context(user_context)
@@ -144,7 +146,7 @@ def _get_authorized_markdown_hashes(backend: KgBackend, user_context: Any = None
         )
         return None
 
-    query = f"MATCH (d:{_DOCUMENT_LABEL}) RETURN d.markdown_hash AS mh, d.allowed_principals AS principals"
+    query = f"MATCH (d:{_DOCUMENT_LABEL}) RETURN d.content_hash AS mh, d.allowed_principals AS principals"
     rows, _ = _query_rows(backend, query)
     authorized: set[str] = set()
     for r in rows:
@@ -187,9 +189,8 @@ def _is_document_authorized(backend: KgBackend, document_id: str, user_context: 
     id_stem = Path(clean_id).stem
     query = (
         f"MATCH (d:{_DOCUMENT_LABEL}) "
-        "WHERE d.content_hash = $id OR d.content_hash STARTS WITH $id OR d.markdown_hash = $id "
-        "OR d.markdown_hash STARTS WITH $id OR d.filename = $id OR d.path = $id "
-        "OR d.filename = $id_md OR d.filename = $id_pdf OR d.filename STARTS WITH $stem "
+        "WHERE d.content_hash = $id OR d.content_hash STARTS WITH $id "
+        "OR d.filename = $id OR d.path = $id "
         "OR d.path STARTS WITH $stem "
         "RETURN d.allowed_principals AS principals LIMIT 1"
     )
@@ -300,27 +301,30 @@ def _query_rows(
     return records, query
 
 
-def _resolve_markdown_hash(backend: KgBackend, document_id: str) -> str | None:
-    """Resolve a document reference to a Document.markdown_hash.
+def _resolve_content_hash(backend: KgBackend, document_id: str) -> str | None:
+    """Resolve a document reference to a Document.content_hash.
 
-    Accepts a Document content hash (full or prefix), a ``markdown_hash``, a
-    filename, or a source Document path (with or without .md / .pdf extensions).
+    Accepts a Document content hash (full, prefix, or bare digest), a filename,
+    or a source Document path (with or without .md / .pdf extensions).
     """
     clean_id = document_id.strip()
     id_stem = Path(clean_id).stem
+    bare_suffix = f"_{clean_id}" if is_bare_digest(clean_id) else "\x00"
     query = (
         f"MATCH (d:{_DOCUMENT_LABEL}) "
-        "WHERE d.content_hash = $id OR d.content_hash STARTS WITH $id OR d.markdown_hash = $id "
-        "OR d.markdown_hash STARTS WITH $id OR d.filename = $id OR d.path = $id "
+        "WHERE d.content_hash = $id OR d.content_hash STARTS WITH $id "
+        "OR d.content_hash ENDS WITH $bare_suffix "
+        "OR d.filename = $id OR d.path = $id "
         "OR d.filename = $id_md OR d.filename = $id_pdf OR d.filename STARTS WITH $stem "
         "OR d.path STARTS WITH $stem "
-        "RETURN d.markdown_hash AS h LIMIT 1"
+        "RETURN d.content_hash AS h LIMIT 1"
     )
     rows, _ = _query_rows(
         backend,
         query,
         {
             "id": clean_id,
+            "bare_suffix": bare_suffix,
             "id_md": f"{id_stem}.md",
             "id_pdf": f"{id_stem}.pdf",
             "stem": id_stem,
@@ -332,33 +336,45 @@ def _resolve_markdown_hash(backend: KgBackend, document_id: str) -> str | None:
 
 
 def resolve_document_id(backend: KgBackend, document_id: str) -> str | None:
-    """Resolve a document reference to a Document.markdown_hash.
+    """Resolve a document reference to a Document.content_hash.
 
-    Accepts a Document content hash (full or prefix), a ``markdown_hash``, a
-    filename, or a source Document path.
+    Accepts a Document content hash (full or prefix), a filename, or a source
+    Document path.
     """
-    return _resolve_markdown_hash(backend, document_id)
+    return _resolve_content_hash(backend, document_id)
 
 
 def resolve_folder_id(backend: KgBackend, folder_ref: str) -> str | None:
-    """Resolve a folder reference (hash, hash prefix, or name) to a Folder.folder_id."""
+    """Resolve a folder reference to a Folder.folder_id.
+
+    Accepts a typed id (``mdfold_<hex>``), an id prefix, a bare digest (the id without its
+    kind), the source folder id stored in ``metadata.source_folder_id``, or a folder name.
+    An exact id match wins over the looser matches.
+    """
+    ref = folder_ref.strip()
+    clauses = ["f.folder_id = $id", "f.folder_id STARTS WITH $id", "f.name = $id"]
+    params: dict[str, Any] = {"id": ref}
+    if is_bare_digest(ref):
+        clauses.append("f.folder_id ENDS WITH $suffix")
+        params["suffix"] = f"_{ref}"
+    if "metadata" in _table_columns(backend, _FOLDER_LABEL):
+        clauses.append("list_contains(map_values(f.metadata), $id)")
     query = (
-        f"MATCH (f:{_FOLDER_LABEL}) "
-        "WHERE f.folder_id = $id OR f.folder_id STARTS WITH $id OR f.name = $id "
-        "RETURN f.folder_id AS id LIMIT 1"
+        f"MATCH (f:{_FOLDER_LABEL}) WHERE {' OR '.join(clauses)} "
+        "RETURN f.folder_id AS id ORDER BY CASE WHEN f.folder_id = $id THEN 0 ELSE 1 END LIMIT 1"
     )
-    rows, _ = _query_rows(backend, query, {"id": folder_ref})
+    rows, _ = _query_rows(backend, query, params)
     if rows:
         return rows[0]["id"]
     return None
 
 
 def resolve_node_ref(backend: KgBackend, node_ref: str) -> tuple[str, str] | tuple[None, None]:
-    """Resolve a node reference to either ('folder', folder_id) or ('document', markdown_hash)."""
+    """Resolve a node reference to either ('folder', folder_id) or ('document', content_hash)."""
     fid = resolve_folder_id(backend, node_ref)
     if fid is not None:
         return ("folder", fid)
-    did = _resolve_markdown_hash(backend, node_ref)
+    did = _resolve_content_hash(backend, node_ref)
     if did is not None:
         return ("document", did)
     return (None, None)
@@ -489,7 +505,7 @@ def list_documents(
         user_context: Optional UserContext for security trimming.
 
     Returns:
-        List of ``{content_hash, markdown_hash, filename, section_count, token_count,
+        List of ``{content_hash, filename, section_count, token_count,
         description, summary, path, folder_id}`` dicts (optional fields are ``None``
         when absent from the DB).
     """
@@ -539,15 +555,15 @@ def get_document(backend: KgBackend, document_id: str) -> dict[str, Any] | None:
     """Return one Document's full metadata, including ``token_count`` and ``summary``.
 
     Accepts the same references as `get_document_toc`: a content hash (full or
-    prefix), a ``markdown_hash``, a filename, or a source path.
+    prefix), a filename, or a source path.
     """
     if not _has_table(backend, _DOCUMENT_LABEL):
         return None
     fields = _return_fields(backend, _DOCUMENT_LABEL, "d", _DOC_KEYS)
     query = (
         f"MATCH (d:{_DOCUMENT_LABEL}) "
-        "WHERE d.content_hash = $id OR d.content_hash STARTS WITH $id OR d.markdown_hash = $id "
-        "OR d.markdown_hash STARTS WITH $id OR d.filename = $id OR d.path = $id "
+        "WHERE d.content_hash = $id OR d.content_hash STARTS WITH $id "
+        "OR d.filename = $id OR d.path = $id "
         f"RETURN {fields} LIMIT 1"
     )
     rows, _ = _query_rows(backend, query, {"id": document_id})
@@ -580,13 +596,13 @@ def apply_section_summaries(backend: KgBackend, rows: list[dict[str, Any]]) -> i
 
 
 def apply_document_summary(
-    backend: KgBackend, markdown_hash: str, *, description: str | None = None, summary: str | None = None
+    backend: KgBackend, content_hash: str, *, description: str | None = None, summary: str | None = None
 ) -> None:
-    """Write the document-level description/abstract onto every Document sharing *markdown_hash*."""
+    """Write the document-level description/abstract onto the Document with *content_hash*."""
     backend.execute(
-        f"MATCH (d:{_DOCUMENT_LABEL} {{markdown_hash: $markdown_hash}}) "
+        f"MATCH (d:{_DOCUMENT_LABEL} {{content_hash: $content_hash}}) "
         "SET d.description = $description, d.summary = $summary",
-        {"markdown_hash": markdown_hash, "description": description, "summary": summary},
+        {"content_hash": content_hash, "description": description, "summary": summary},
     )
 
 
@@ -599,8 +615,8 @@ def get_document_toc(
     is the map an agent uses to decide which sections to fetch in full with
     `get_section_content`.
     """
-    markdown_hash = _resolve_markdown_hash(backend, document_id)
-    if not markdown_hash:
+    content_hash = _resolve_content_hash(backend, document_id)
+    if not content_hash:
         result: list[dict[str, Any]] = []
         query = f"-- No document found matching: {document_id}"
         return (result, query) if return_query else result
@@ -614,22 +630,22 @@ def get_document_toc(
 
     fields = _return_fields(backend, _SECTION_LABEL, "s", _SECTION_TOC_KEYS)
     query = f"""
-        MATCH (s:{_SECTION_LABEL} {{markdown_hash: $markdown_hash}})
+        MATCH (s:{_SECTION_LABEL} {{content_hash: $content_hash}})
         RETURN {fields}
         ORDER BY s.sequence
     """
-    rows, q = _query_rows(backend, query, {"markdown_hash": markdown_hash})
+    rows, q = _query_rows(backend, query, {"content_hash": content_hash})
     rows = [_normalize_row(r, _SECTION_TOC_KEYS) for r in rows]
 
     # Attach images if Image table and HAS_IMAGE relation exist
     if _has_table(backend, "Image") and _has_relationship(backend, "HAS_IMAGE"):
         try:
             img_query = f"""
-                MATCH (s:{_SECTION_LABEL} {{markdown_hash: $markdown_hash}})-[:HAS_IMAGE]->(i:Image)
+                MATCH (s:{_SECTION_LABEL} {{content_hash: $content_hash}})-[:HAS_IMAGE]->(i:Image)
                 RETURN s.section_id AS section_id, i.image_id AS image_id, i.filename AS filename,
                        i.caption AS caption, i.description AS description
             """
-            img_rows, _ = _query_rows(backend, img_query, {"markdown_hash": markdown_hash})
+            img_rows, _ = _query_rows(backend, img_query, {"content_hash": content_hash})
             imgs_by_sec: dict[str, list[dict[str, Any]]] = {}
             for ir in img_rows:
                 sec_id = ir.get("section_id")
@@ -795,7 +811,7 @@ def folder_toc_yaml(
         if include_summaries and doc.get("summary"):
             entry["summary"] = doc["summary"]
         if include_sections:
-            toc_rows = get_document_toc(backend, doc["markdown_hash"])
+            toc_rows = get_document_toc(backend, doc["content_hash"])
             entry["toc"] = build_toc_tree(
                 toc_rows,  # type: ignore[arg-type]
                 include_summaries=include_summaries,
@@ -803,6 +819,119 @@ def folder_toc_yaml(
             )
         payload["documents"].append(entry)
     return yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
+
+
+class GraphEntry(BaseModel):
+    """A subfolder or document listed by `docgraph ls`."""
+
+    id: str
+    name: str
+    kind: Literal["folder", "file"]
+    path: str
+    description: str | None = None
+    sections: int | None = None
+
+
+def _root_folder_entries(backend: KgBackend) -> list[GraphEntry]:
+    """Return the root folders of the graph (those without a parent)."""
+    if not _has_table(backend, _FOLDER_LABEL):
+        return []
+    query = (
+        f"MATCH (f:{_FOLDER_LABEL}) WHERE f.parent_folder_id IS NULL "
+        "RETURN f.folder_id AS id, f.name AS name ORDER BY name"
+    )
+    rows, _ = _query_rows(backend, query, {})
+    return [GraphEntry(id=r["id"], name=r["name"], kind="folder", path=f"{r['name']}/") for r in rows]
+
+
+def _direct_children(backend: KgBackend, folder_id: str, prefix: str, ctx: UserContext) -> list[GraphEntry]:
+    """Return the immediate subfolders and documents of a folder, with paths relative to *prefix*."""
+    entries: list[GraphEntry] = []
+    if _has_relationship(backend, "HAS_SUBFOLDER"):
+        query = (
+            f"MATCH (p:{_FOLDER_LABEL} {{folder_id: $id}})-[:HAS_SUBFOLDER]->(f:{_FOLDER_LABEL}) "
+            "RETURN f.folder_id AS id, f.name AS name ORDER BY name"
+        )
+        rows, _ = _query_rows(backend, query, {"id": folder_id})
+        entries.extend(
+            GraphEntry(id=r["id"], name=r["name"], kind="folder", path=f"{prefix}{r['name']}/") for r in rows
+        )
+    if _has_table(backend, _DOCUMENT_LABEL):
+        fields = _return_fields(backend, _DOCUMENT_LABEL, "d", _DOC_KEYS)
+        query = (
+            f"MATCH (f:{_FOLDER_LABEL} {{folder_id: $id}})-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) "
+            f"RETURN {fields} ORDER BY d.filename"
+        )
+        rows, _ = _query_rows(backend, query, {"id": folder_id})
+        for raw in rows:
+            row = _normalize_row(raw, _DOC_KEYS)
+            if (
+                not ctx.is_admin
+                and row.get("allowed_principals") is not None
+                and not ctx.has_access(row.get("allowed_principals"))
+            ):
+                continue
+            entries.append(
+                GraphEntry(
+                    id=row["content_hash"],
+                    name=row["filename"],
+                    kind="file",
+                    path=f"{prefix}{row['filename']}",
+                    description=row.get("description") or None,
+                    sections=int(row.get("section_count") or 0),
+                )
+            )
+    return entries
+
+
+def list_entries(
+    backend: KgBackend,
+    folder_id: str | None = None,
+    *,
+    recursive: bool = False,
+    user_context: Any = None,
+) -> list[GraphEntry]:
+    """List the subfolders and documents of a folder, like the Unix `ls` command.
+
+    Args:
+        backend: KgBackend connection.
+        folder_id: Folder to list. When None, lists the root folders of the graph.
+        recursive: When True, descend into every subfolder (``ls -r``).
+        user_context: Optional UserContext for security trimming.
+
+    Returns:
+        Entries in listing order, each subfolder followed by its own children when recursive.
+    """
+    from genai_graph.kg.access.context import UserContext, get_active_user_context
+
+    ctx: UserContext = user_context if isinstance(user_context, UserContext) else get_active_user_context(user_context)
+
+    def walk(children: list[GraphEntry]) -> list[GraphEntry]:
+        out: list[GraphEntry] = []
+        for entry in children:
+            out.append(entry)
+            if recursive and entry.kind == "folder":
+                out.extend(walk(_direct_children(backend, entry.id, entry.path, ctx)))
+        return out
+
+    if folder_id is None:
+        return walk(_root_folder_entries(backend))
+    return walk(_direct_children(backend, folder_id, "", ctx))
+
+
+def document_entry(backend: KgBackend, document_id: str) -> GraphEntry | None:
+    """Return a single document as a `GraphEntry`, accepting the same references as `get_document`."""
+    doc = get_document(backend, document_id)
+    if doc is None:
+        return None
+    return GraphEntry(
+        id=doc["content_hash"],
+        name=doc["filename"],
+        kind="file",
+        path=doc["filename"],
+        description=doc.get("description") or None,
+        sections=doc["section_count"],
+    )
 
 
 @overload
@@ -831,7 +960,7 @@ def get_section_content(
 ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], str]:
     """Fetch the raw Markdown text of one or more sections.
 
-    Each entry in *section_ids* may be a full ``section_id`` (``{markdown_hash}::{sequence}``)
+    Each entry in *section_ids* may be a full ``section_id`` (``{content_hash}::{sequence}``)
     or a prefix of one — e.g. a bare (or truncated) document hash matches every section of
     that document, so `cli docgraph list`'s short hash column can be used directly.
     """
@@ -839,14 +968,14 @@ def get_section_content(
         UNWIND $section_ids AS sid
         MATCH (s:{_SECTION_LABEL})
         WHERE s.section_id = sid OR (s.section_id STARTS WITH sid AND NOT sid CONTAINS "::")
-        RETURN DISTINCT s.section_id AS section_id, s.markdown_hash AS markdown_hash, s.title AS title,
+        RETURN DISTINCT s.section_id AS section_id, s.content_hash AS content_hash, s.title AS title,
                s.line_start AS line_start, s.line_end AS line_end, s.sequence AS sequence, s.text AS text
-        ORDER BY markdown_hash, sequence
+        ORDER BY content_hash, sequence
     """
     rows, _ = _query_rows(backend, query, {"section_ids": section_ids})
-    auth_hashes = _get_authorized_markdown_hashes(backend, user_context)
+    auth_hashes = _get_authorized_content_hashes(backend, user_context)
     if auth_hashes is not None:
-        rows = [r for r in rows if r.get("markdown_hash") in auth_hashes]
+        rows = [r for r in rows if r.get("content_hash") in auth_hashes]
     return (rows, query) if return_query else rows
 
 
@@ -868,11 +997,11 @@ def reconstruct_document(
     Sections partition the document's lines without overlap, so concatenating
     their ``text`` in ``sequence`` order reproduces the original document.
     """
-    query = f"MATCH (s:{_SECTION_LABEL} {{markdown_hash: $markdown_hash}}) RETURN s.text AS text ORDER BY s.sequence"
-    markdown_hash = _resolve_markdown_hash(backend, document_id)
-    if not markdown_hash:
+    query = f"MATCH (s:{_SECTION_LABEL} {{content_hash: $content_hash}}) RETURN s.text AS text ORDER BY s.sequence"
+    content_hash = _resolve_content_hash(backend, document_id)
+    if not content_hash:
         return (None, query) if return_query else None
-    rows, _ = _query_rows(backend, query, {"markdown_hash": markdown_hash})
+    rows, _ = _query_rows(backend, query, {"content_hash": content_hash})
     text = "\n".join(r["text"] for r in rows)
     return (text, query) if return_query else text
 
@@ -899,20 +1028,20 @@ def reconstruct_section(
 ) -> str | tuple[str | None, str] | None:
     """Rebuild the Markdown text of one section plus all of its nested subsections.
 
-    Accepts a full ``section_id`` (``{markdown_hash}::{sequence}``) or a prefix of one.
+    Accepts a full ``section_id`` (``{content_hash}::{sequence}``) or a prefix of one.
     """
     query = (
         f"MATCH (s:{_SECTION_LABEL}) WHERE s.section_id = $id OR (s.section_id STARTS WITH $id AND NOT $id CONTAINS '::') "
-        "RETURN s.section_id AS section_id, s.markdown_hash AS markdown_hash LIMIT 1"
+        "RETURN s.section_id AS section_id, s.content_hash AS content_hash LIMIT 1"
     )
     rows, _ = _query_rows(backend, query, {"id": section_id})
     if not rows:
         return (None, query) if return_query else None
 
     resolved_id = rows[0]["section_id"]
-    markdown_hash = rows[0]["markdown_hash"]
+    content_hash = rows[0]["content_hash"]
 
-    toc = get_document_toc(backend, markdown_hash)
+    toc = get_document_toc(backend, content_hash)
     subtree_ids = _collect_subtree_section_ids(toc, resolved_id)  # type: ignore[arg-type]
 
     content_rows = get_section_content(backend, subtree_ids)
@@ -966,25 +1095,25 @@ def _resolve_default_embeddings_id() -> str | None:
         return None
 
 
-def _scope_markdown_hashes(
+def _scope_content_hashes(
     backend: KgBackend,
     folder_id: str | None = None,
     document_id: str | None = None,
     user_context: Any = None,
 ) -> set[str] | None:
-    """Return the markdown_hash set under *folder_id*'s subtree and/or *document_id*, or None (no scope).
+    """Return the content_hash set under *folder_id*'s subtree and/or *document_id*, or None (no scope).
 
     Used to filter ranked candidates to one folder/document without folding the traversal
     into the vector/FTS index calls themselves. Also intersects with user's authorized hashes.
     """
-    auth_hashes = _get_authorized_markdown_hashes(backend, user_context)
+    auth_hashes = _get_authorized_content_hashes(backend, user_context)
 
     if folder_id is None and document_id is None:
         return auth_hashes
 
     doc_hash: str | None = None
     if document_id is not None:
-        doc_hash = _resolve_markdown_hash(backend, document_id)
+        doc_hash = _resolve_content_hash(backend, document_id)
         if doc_hash is None:
             return set()
 
@@ -993,10 +1122,10 @@ def _scope_markdown_hashes(
         if _has_relationship(backend, "HAS_SUBFOLDER"):
             query = (
                 f"MATCH (root:{_FOLDER_LABEL} {{folder_id: $fid}})-[:HAS_SUBFOLDER*0..30]->(f:{_FOLDER_LABEL})"
-                f"-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) RETURN DISTINCT d.markdown_hash AS mh"
+                f"-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) RETURN DISTINCT d.content_hash AS mh"
             )
         else:
-            query = f"MATCH (f:{_FOLDER_LABEL} {{folder_id: $fid}})-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) RETURN DISTINCT d.markdown_hash AS mh"
+            query = f"MATCH (f:{_FOLDER_LABEL} {{folder_id: $fid}})-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) RETURN DISTINCT d.content_hash AS mh"
         rows, _ = _query_rows(backend, query, {"fid": folder_id})
         folder_hashes = {r["mh"] for r in rows}
         scoped = ({doc_hash} if doc_hash in folder_hashes else set()) if doc_hash is not None else folder_hashes
@@ -1019,14 +1148,14 @@ def _semantic_section_hits(
     k = max(limit * _HNSW_OVERFETCH, 50)
     query = (
         f"CALL QUERY_VECTOR_INDEX('{_CHUNK_LABEL}','{_CHUNK_VECTOR_INDEX}', $query_vector, {k}) "
-        "RETURN node.section_id AS section_id, node.markdown_hash AS markdown_hash, "
+        "RETURN node.section_id AS section_id, node.content_hash AS content_hash, "
         "node.chunk_id AS chunk_id, node.chunk_text AS chunk_text, distance AS distance "
         "ORDER BY distance ASC"
     )
     rows, _ = _query_rows(backend, query, {"query_vector": query_vec})
     best: dict[str, dict[str, Any]] = {}
     for r in rows:
-        if allowed is not None and r.get("markdown_hash") not in allowed:
+        if allowed is not None and r.get("content_hash") not in allowed:
             continue
         sid = r["section_id"]
         if sid not in best or r["distance"] < best[sid]["distance"]:
@@ -1112,28 +1241,28 @@ def _contains_section_hits(
     where = "(" + " OR ".join(conditions) + ")"
     score = " + ".join(score_parts)
     ret = (
-        f"RETURN s.markdown_hash AS markdown_hash, s.section_id AS section_id, s.title AS title, "
+        f"RETURN s.content_hash AS content_hash, s.section_id AS section_id, s.title AS title, "
         f"s.level AS level, s.line_start AS line_start{desc_field}, ({score}) AS score "
-        f"ORDER BY score DESC, s.markdown_hash, s.line_start LIMIT {limit}"
+        f"ORDER BY score DESC, s.content_hash, s.line_start LIMIT {limit}"
     )
 
     if allowed is not None:
         if not allowed:
             return []
         allowed_list_str = "[" + ", ".join(f"'{h}'" for h in allowed) + "]"
-        query = f"MATCH (s:{_SECTION_LABEL}) WHERE s.markdown_hash IN {allowed_list_str} AND {where} {ret}"
+        query = f"MATCH (s:{_SECTION_LABEL}) WHERE s.content_hash IN {allowed_list_str} AND {where} {ret}"
     elif folder_id is not None:
         escaped_fid = folder_id.replace("'", "\\'")
         if _has_relationship(backend, "HAS_SUBFOLDER"):
             query = (
                 f"MATCH (root:{_FOLDER_LABEL} {{folder_id: '{escaped_fid}'}})-[:HAS_SUBFOLDER*0..30]->(f:{_FOLDER_LABEL}) "
                 f"MATCH (f)-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) "
-                f"MATCH (s:{_SECTION_LABEL} {{markdown_hash: d.markdown_hash}}) WHERE {where} {ret}"
+                f"MATCH (s:{_SECTION_LABEL} {{content_hash: d.content_hash}}) WHERE {where} {ret}"
             )
         else:
             query = (
                 f"MATCH (f:{_FOLDER_LABEL} {{folder_id: '{escaped_fid}'}})-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) "
-                f"MATCH (s:{_SECTION_LABEL} {{markdown_hash: d.markdown_hash}}) WHERE {where} {ret}"
+                f"MATCH (s:{_SECTION_LABEL} {{content_hash: d.content_hash}}) WHERE {where} {ret}"
             )
     else:
         query = f"MATCH (s:{_SECTION_LABEL}) WHERE {where} {ret}"
@@ -1166,13 +1295,13 @@ def _keyword_section_hits(
                     return []
                 fts = (
                     f"CALL QUERY_FTS_INDEX('{_SECTION_LABEL}','{_SECTION_FTS_INDEX}', '{clean_q}') "
-                    "RETURN node.markdown_hash AS markdown_hash, node.section_id AS section_id, "
+                    "RETURN node.content_hash AS content_hash, node.section_id AS section_id, "
                     f"node.title AS title, node.level AS level, node.line_start AS line_start{desc_field}, "
                     f"score AS score ORDER BY score DESC LIMIT {fetch_k}"
                 )
                 r, _ = _query_rows(backend, fts)
                 if allowed is not None:
-                    r = [row for row in r if row.get("markdown_hash") in allowed]
+                    r = [row for row in r if row.get("content_hash") in allowed]
                 return r
 
             # 1. Primary FTS query
@@ -1202,7 +1331,7 @@ def _keyword_section_hits(
 
 
 def _fetch_section_meta(backend: KgBackend, section_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """Return section_id -> {title, level, line_start, markdown_hash, description} for the given ids."""
+    """Return section_id -> {title, level, line_start, content_hash, description} for the given ids."""
     if not section_ids:
         return {}
     cols = _table_columns(backend, _SECTION_LABEL)
@@ -1210,7 +1339,7 @@ def _fetch_section_meta(backend: KgBackend, section_ids: list[str]) -> dict[str,
     query = (
         f"MATCH (s:{_SECTION_LABEL}) WHERE s.section_id IN $ids "
         f"RETURN s.section_id AS section_id, s.title AS title, s.level AS level, "
-        f"s.line_start AS line_start, s.markdown_hash AS markdown_hash{desc_field}"
+        f"s.line_start AS line_start, s.content_hash AS content_hash{desc_field}"
     )
     rows, _ = _query_rows(backend, query, {"ids": section_ids})
     return {r["section_id"]: r for r in rows}
@@ -1246,12 +1375,12 @@ def search_sections(
         user_context: Optional UserContext for security trimming.
 
     Returns:
-        Ranked section dicts (best first) with ``section_id``, ``markdown_hash``,
+        Ranked section dicts (best first) with ``section_id``, ``content_hash``,
         ``title``, ``level``, ``line_start``, ``score`` and, when a chunk matched,
         ``matched_chunk``.
     """
     mode = mode.lower().strip()
-    allowed = _scope_markdown_hashes(backend, folder_id=folder_id, document_id=document_id, user_context=user_context)
+    allowed = _scope_content_hashes(backend, folder_id=folder_id, document_id=document_id, user_context=user_context)
     if allowed is not None and not allowed:
         return []
 
@@ -1261,7 +1390,7 @@ def search_sections(
         return [
             {
                 "section_id": r["section_id"],
-                "markdown_hash": meta.get(r["section_id"], {}).get("markdown_hash") or r.get("markdown_hash"),
+                "content_hash": meta.get(r["section_id"], {}).get("content_hash") or r.get("content_hash"),
                 "title": meta.get(r["section_id"], {}).get("title") or r.get("title"),
                 "description": meta.get(r["section_id"], {}).get("description") or r.get("description"),
                 "level": meta.get(r["section_id"], {}).get("level") or r.get("level"),
@@ -1331,7 +1460,7 @@ def search_sections(
         results.append(
             {
                 "section_id": sid,
-                "markdown_hash": m.get("markdown_hash") or srow.get("markdown_hash") or krow.get("markdown_hash"),
+                "content_hash": m.get("content_hash") or srow.get("content_hash") or krow.get("content_hash"),
                 "title": m.get("title") or krow.get("title"),
                 "description": m.get("description") or krow.get("description"),
                 "level": m.get("level") or krow.get("level"),
@@ -1360,10 +1489,10 @@ def search_images(
     if not cols:
         return []
 
-    target_md_hash: str | None = None
+    target_content_hash: str | None = None
     if document_id:
-        target_md_hash = resolve_document_id(backend, document_id)
-        if target_md_hash is None:
+        target_content_hash = resolve_document_id(backend, document_id)
+        if target_content_hash is None:
             return []
 
     indexes = get_available_indexes(backend)
@@ -1387,8 +1516,8 @@ def search_images(
                         node = row["node"]
                         if not isinstance(node, dict):
                             continue
-                        m_hash = node.get("markdown_hash")
-                        if target_md_hash and m_hash != target_md_hash:
+                        m_hash = node.get("content_hash")
+                        if target_content_hash and m_hash != target_content_hash:
                             continue
                         if section_id and node.get("section_id") != section_id:
                             continue
@@ -1402,7 +1531,7 @@ def search_images(
                                 "description": node.get("description"),
                                 "size": node.get("size"),
                                 "section_id": node.get("section_id"),
-                                "markdown_hash": m_hash,
+                                "content_hash": m_hash,
                                 "distance": dist,
                                 "score": round(max(0.0, 1.0 - (dist / 2.0)), 6),
                             }
@@ -1413,9 +1542,9 @@ def search_images(
     params: dict[str, Any] = {"limit": limit}
     conditions: list[str] = []
 
-    if target_md_hash:
-        conditions.append("i.markdown_hash = $md_hash")
-        params["md_hash"] = target_md_hash
+    if target_content_hash:
+        conditions.append("i.content_hash = $md_hash")
+        params["md_hash"] = target_content_hash
 
     if section_id:
         conditions.append("i.section_id = $section_id")
@@ -1435,7 +1564,7 @@ def search_images(
     cypher = f"""
     MATCH (s:{_SECTION_LABEL})-[:HAS_IMAGE]->(i:Image)
     {where_clause}
-    OPTIONAL MATCH (d:Document) WHERE d.markdown_hash = i.markdown_hash
+    OPTIONAL MATCH (d:Document) WHERE d.content_hash = i.content_hash
     RETURN i.image_id AS image_id,
            i.name AS name,
            i.filename AS filename,
@@ -1445,7 +1574,7 @@ def search_images(
            i.section_id AS section_id,
            s.title AS section_title,
            d.filename AS document_name,
-           i.markdown_hash AS markdown_hash
+           i.content_hash AS content_hash
     LIMIT $limit
     """
     rows, _ = _query_rows(backend, cypher, params)
@@ -1483,11 +1612,11 @@ def search_tables(
     conditions: list[str] = []
 
     if document_id:
-        md_hash = resolve_document_id(backend, document_id)
-        if md_hash is None:
+        content_hash = resolve_document_id(backend, document_id)
+        if content_hash is None:
             return []
-        conditions.append("t.markdown_hash = $md_hash")
-        params["md_hash"] = md_hash
+        conditions.append("t.content_hash = $md_hash")
+        params["md_hash"] = content_hash
 
     if section_id:
         conditions.append("t.section_id = $section_id")
@@ -1508,7 +1637,7 @@ def search_tables(
     cypher = f"""
     MATCH (s:{_SECTION_LABEL})-[:HAS_TABLE]->(t:MarkdownTable)
     {where_clause}
-    OPTIONAL MATCH (d:Document) WHERE d.markdown_hash = t.markdown_hash
+    OPTIONAL MATCH (d:Document) WHERE d.content_hash = t.content_hash
     RETURN t.table_id AS table_id,
            t.name AS name,
            t.table_format AS table_format,
@@ -1518,7 +1647,7 @@ def search_tables(
            t.section_id AS section_id,
            s.title AS section_title,
            d.filename AS document_name,
-           t.markdown_hash AS markdown_hash
+           t.content_hash AS content_hash
     LIMIT $limit
     """
     rows, _ = _query_rows(backend, cypher, params)
@@ -1561,7 +1690,7 @@ def execute_image_query(
             WHERE i.image_id = $ref OR i.filename = $ref
                OR (i.image_hash IS NOT NULL AND i.image_hash = $ref)
                OR (i.name IS NOT NULL AND i.name = $ref)
-            OPTIONAL MATCH (d:Document) WHERE d.markdown_hash = i.markdown_hash
+            OPTIONAL MATCH (d:Document) WHERE d.content_hash = i.content_hash
             RETURN {fields_str}, d.allowed_principals AS doc_principals
             LIMIT 1
         """
@@ -1933,7 +2062,7 @@ def create_document_graph_tools(
             if f_id:
                 f_id = resolve_folder_id(backend, f_id)
             if d_id:
-                d_id = _resolve_markdown_hash(backend, d_id)
+                d_id = _resolve_content_hash(backend, d_id)
             rows = search_sections(
                 backend,
                 query,

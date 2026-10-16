@@ -63,6 +63,10 @@ def pydantic_annotation_to_arrow(annotation: Any) -> pa.DataType:
         inner = pydantic_annotation_to_arrow(args[0]) if args else pa.string()
         return pa.list_(inner)
 
+    # dict[str, str] -> MAP(STRING, STRING)
+    if origin is dict:
+        return pa.map_(pa.string(), pa.string())
+
     # Primitives
     if annotation in _PRIMITIVE_TO_ARROW:
         return _PRIMITIVE_TO_ARROW[annotation]

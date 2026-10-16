@@ -566,6 +566,8 @@ def _prepare_node_arrow_table(
             if arrow_type is not None and pa.types.is_struct(arrow_type):
                 # Reorder dict keys to match schema-defined struct field order
                 return {f.name: clean_value(value.get(f.name), f.type) for f in arrow_type}
+            if arrow_type is not None and pa.types.is_map(arrow_type):
+                return {str(k): str(v) for k, v in value.items()}
             # Unknown dict (schema stores it as STRING) — serialise to JSON
             return json.dumps(value, default=str) if value else None
 

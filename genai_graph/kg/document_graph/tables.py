@@ -16,7 +16,7 @@ class MarkdownTable(BaseModel):
 
     table_id: str = Field(..., description="Primary key: f'{section_id}::t{table_index}'")
     section_id: str = Field(..., description="section_id of the owning MarkdownSection (foreign key)")
-    markdown_hash: str = Field(..., description="markdown_hash of the owning Document")
+    content_hash: str = Field(..., description="content_hash of the owning Document")
     table_index: int = Field(..., description="0-based index of the table within its section")
     name: str = Field(..., description="Table name or title (e.g. caption, or 'Table {index}')")
     table_format: str = Field(..., description="Table format: 'html' or 'markdown'")
@@ -124,7 +124,7 @@ def extract_section_tables(
         table_obj = Table(
             table_id=f"{section.section_id}::t{table_index}",
             section_id=section.section_id,
-            markdown_hash=section.markdown_hash,
+            content_hash=section.content_hash,
             table_index=table_index,
             name=name,
             table_format="html",
@@ -163,7 +163,7 @@ def extract_section_tables(
         table_obj = Table(
             table_id=f"{section.section_id}::t{table_index}",
             section_id=section.section_id,
-            markdown_hash=section.markdown_hash,
+            content_hash=section.content_hash,
             table_index=table_index,
             name=name,
             table_format="markdown",

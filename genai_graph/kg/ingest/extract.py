@@ -117,6 +117,8 @@ def _get_kuzu_type(annotation: Any) -> str:
         if args and args[0] is float:
             return "FLOAT[]"
         return "STRING[]"
+    elif origin is dict:
+        return "MAP(STRING, STRING)"
     elif actual_type is int:
         return "INT64"
     elif actual_type is float:
@@ -447,9 +449,6 @@ def create_schema(
             if field_name not in node.excluded_fields:
                 if field_name in embedded_struct_fields:
                     kuzu_type = embedded_struct_fields[field_name]
-                elif field_name == "metadata":
-                    # Persist metadata as a JSON string for maximum flexibility.
-                    kuzu_type = "STRING"
                 else:
                     kuzu_type = _get_kuzu_type(field_info.annotation)
                     # For pre-computed list[float] fields with a known embedding dimension,
@@ -671,16 +670,6 @@ def extract_graph_data(
                 with contextlib.suppress(Exception):
                     # Defensive: do not break extraction if helper fails
                     apply_extra_fields(item_data, node_info, model, item, source_key)
-
-                # When persisting to the database, store metadata as a JSON string
-                # so that arbitrary keys/values are supported without schema
-                # evolution on the Kuzu side.
-                try:
-                    if "metadata" in item_data and isinstance(item_data["metadata"], dict):
-                        item_data["metadata"] = json.dumps(item_data["metadata"])
-                except Exception:
-                    # Best-effort only; falling back to the original value is fine.
-                    pass
 
                 # Add timestamps
                 now = datetime.now(UTC).isoformat()

@@ -15,8 +15,8 @@ Folder ──CONTAINS──▶ Document ──HAS_SECTION──▶ MarkdownSecti
 
 - **Folder** — a source location (directory, zip, or dataset bucket). Key `folder_id`.
 - **Document** — a source file, keyed by `content_hash` (xxHash of bytes); carries `filename`,
-  `markdown_hash`, `token_count`, `section_count`, routing `description`, and `summary`.
-- **MarkdownSection** — one heading-delimited section, keyed by `section_id = "{markdown_hash}::{sequence}"`.
+  `token_count`, `section_count`, routing `description`, and `summary`.
+- **MarkdownSection** — one heading-delimited section, keyed by `section_id = "{content_hash}::{sequence}"`.
   Carries `title`, `level`, `text` (raw markdown of the section excluding subsections), `token_count`,
   `sequence`, `description`, `summary`, `keywords`, and `parent_section_id`.
 - **SectionChunk** — text chunk for long sections, keyed by `chunk_id = "{section_id}::{chunk_index}"`.
@@ -37,7 +37,7 @@ Returns the hierarchical section outline of a single document as YAML:
 - `document_id`: accepts content hash (full or prefix), filename, or path.
 - `max_level`: restricts depth (e.g. `max_level=2` for top-level headers only).
 - `include_summaries`: when `True`, includes synthesized section descriptions/summaries and table metrics.
-- Output contains each section's `id` (`{markdown_hash}::{sequence}`), `title`, `level`, and `description`.
+- Output contains each section's `id` (`{content_hash}::{sequence}`), `title`, `level`, and `description`.
 
 ### `get_section_content(section_ids: str, start_line: int | None = None, max_lines: int | None = None) -> str`
 Retrieves raw Markdown body text for specified section IDs:

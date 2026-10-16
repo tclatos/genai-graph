@@ -159,6 +159,7 @@ def build_document_graph(
     access_control_provider_spec: str | None = None,
     access_control_options: dict[str, Any] | None = None,
     inheritance_mode: str = "intersection",
+    root_metadata: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build (or update) a Document Graph at *db_path* from Markdown *sources*.
 
@@ -197,6 +198,8 @@ def build_document_graph(
         embeddings_id: Embeddings model for SectionChunk vectors (None disables).
         fts: Create the native BM25/FTS index over sections.
         chunk_size_tokens: Target chunk size for long sections.
+        root_metadata: Key/value pairs stored on the root Folder's `metadata` map
+            (e.g. `source_folder_id` recorded by the caller).
 
     Returns:
         Ingest statistics dict with counts, `files_degraded`, per-stage
@@ -232,6 +235,7 @@ def build_document_graph(
         access_control_provider_spec=access_control_provider_spec,
         access_control_options=access_control_options or {},
         inheritance_mode=inheritance_mode,
+        root_metadata=root_metadata or {},
     )
 
     timings: dict[str, float] = {}

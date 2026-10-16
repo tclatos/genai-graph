@@ -155,7 +155,7 @@ class TestDocumentGraphTools:
         assert [d["filename"] for d in docs] == ["alpha.md", "beta.md"]
         for d in docs:
             assert d["content_hash"]
-            assert d["markdown_hash"]
+            assert d["content_hash"]
             assert d["section_count"] > 0
 
     def test_list_documents_empty_db(self, graph_backend: KuzuBackend) -> None:

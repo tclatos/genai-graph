@@ -65,8 +65,8 @@ an interactive REPL.
 ## CLI
 
 ```bash
-cli docgraph agent "What IT services is Alko requesting?" --folder folder_273e65da416b2e72
-cli docgraph agent --chat --folder folder_273e65da416b2e72
+cli docgraph agent "What IT services is Alko requesting?" --folder <folder-id>
+cli docgraph agent --chat --folder <folder-id>
 cli docgraph agent "Summarize the SLAs" --llm deepseek_v4flash@openrouter --db ./data/kg/tree.db
 cli docgraph agent "..." --profile docgraph --skill-dir ./extra-skills --recursion-limit 160
 ```
@@ -109,7 +109,7 @@ cli docgraph agent "..." --profile docgraph --skill-dir ./extra-skills --recursi
 ## Commands
 
 ```bash
-uv run cli docgraph agent "..." --folder folder_273e65da416b2e72
+uv run cli docgraph agent "..." --folder <folder-id>
 uv run ruff check genai_graph/agent genai_graph/core/commands_docgraph.py
 uv run just test
 ```

@@ -43,6 +43,7 @@ from genai_graph.kg.document_graph.outline_merge import merge_outline
 from genai_graph.kg.document_graph.repository import FolderTree, SourceFolder
 from genai_graph.kg.document_graph.tree_parser import _estimate_token_count, detect_headings, parse_markdown_tree
 from genai_graph.kg.factories.base import KgFactory
+from genai_graph.kg.ids import file_id
 from genai_graph.kg.nodes.document import (
     CONTAINS_DOC,
     HAS_SUBFOLDER,
@@ -129,8 +130,10 @@ class DocumentGraphFactory(KgFactory):
     inheritance_mode: str = Field(
         default="intersection", description="ACL inheritance strategy: intersection | override | union"
     )
+    root_metadata: dict[str, str] = Field(
+        default_factory=dict, description="Metadata stored on the root Folder of each source (e.g. source_folder_id)"
+    )
 
-    # Per-instance caches
     _files_cache: list[Path] | None = None
     _folder_tree_by_file: dict[str, FolderTree] | None = None
     _content_hash_by_file: dict[str, str] | None = None
@@ -179,11 +182,9 @@ class DocumentGraphFactory(KgFactory):
         content_hash = self._content_hash_by_file.get(key)
         if tree is None or content_hash is None:
             # File not discovered through a source (e.g. a direct key) — build a standalone one-file tree.
-            from genai_tk.utils.hashing import file_digest
-
             folder = SourceFolder.from_source(str(path.parent), cache_dir=self.cache_dir)
             resolved_files = folder.iter_files(single_file=path)
-            content_hash = file_digest(path)
+            content_hash = file_id(path)
             tree = FolderTree(folder)
             tree.build(resolved_files, {str(path): content_hash})
         return self._build_bundle(path, tree, content_hash)
@@ -197,7 +198,6 @@ class DocumentGraphFactory(KgFactory):
             return self._files_cache
 
         from genai_tk.config_mgmt.file_patterns import resolve_config_path
-        from genai_tk.utils.hashing import file_digest
 
         files: list[Path] = []
         folder_tree_by_file: dict[str, FolderTree] = {}
@@ -221,9 +221,14 @@ class DocumentGraphFactory(KgFactory):
             if not new_files:
                 continue
 
-            content_hashes = {str(rf.abs_path): file_digest(rf.abs_path) for rf in new_files}
+            content_hashes = {str(rf.abs_path): file_id(rf.abs_path) for rf in new_files}
             tree = FolderTree(folder)
-            tree.build(new_files, content_hashes, acl_provider=self._get_acl_provider())
+            tree.build(
+                new_files,
+                content_hashes,
+                acl_provider=self._get_acl_provider(),
+                root_metadata=self.root_metadata,
+            )
 
             for rf in new_files:
                 key = str(rf.abs_path)
@@ -241,10 +246,10 @@ class DocumentGraphFactory(KgFactory):
     # Bundle construction
     # ------------------------------------------------------------------
 
-    def _extract_outline_result(self, text: str, markdown_hash: str, filename: str) -> OutlineResult:
+    def _extract_outline_result(self, text: str, text_digest: str, filename: str) -> OutlineResult:
         """Read one document's cached outline, extracting it on a cache miss."""
         assert self.outline_config is not None
-        return extract_outline(text, markdown_hash, filename, self.outline_config, warnings=self._outline_warnings)
+        return extract_outline(text, text_digest, filename, self.outline_config, warnings=self._outline_warnings)
 
     def extract_outlines(self, workers: int = 4) -> OutlineStats:
         """Pre-extract (and cache) outlines for every discovered file, in parallel.
@@ -263,9 +268,9 @@ class DocumentGraphFactory(KgFactory):
 
         def _one(path: Path) -> tuple[OutlineResult, list[str]]:
             text = path.read_text(encoding="utf-8", errors="replace")
-            md_hash = buffer_digest(text.encode("utf-8"))
+            text_digest = buffer_digest(text.encode("utf-8"))
             local_warnings: list[str] = []
-            result = extract_outline(text, md_hash, path.name, self.outline_config, warnings=local_warnings)
+            result = extract_outline(text, text_digest, path.name, self.outline_config, warnings=local_warnings)
             return result, local_warnings
 
         if workers <= 1:
@@ -308,11 +313,12 @@ class DocumentGraphFactory(KgFactory):
 
         mime_type, _ = mimetypes.guess_type(str(path))
 
-        markdown_hash = buffer_digest(text.encode("utf-8"))
+        # The raw text digest addresses the outline cache, so existing LLM outlines stay valid across the id change.
+        md_digest = buffer_digest(text.encode("utf-8"))
         document_description: str | None = None
         document_summary: str | None = None
         if self.outline_config is not None:
-            outline_result = self._extract_outline_result(text, markdown_hash, path.name)
+            outline_result = self._extract_outline_result(text, md_digest, path.name)
             if outline_result.outline is not None:
                 flat_sections = merge_outline(text, outline_result.outline, detect_headings(text))
                 document_description = outline_result.outline.document_description
@@ -325,9 +331,9 @@ class DocumentGraphFactory(KgFactory):
 
         sections = [
             MarkdownSection(
-                section_id=f"{markdown_hash}::{idx}",
-                markdown_hash=markdown_hash,
-                parent_section_id=(f"{markdown_hash}::{fs.parent_index}" if fs.parent_index is not None else None),
+                section_id=f"{content_hash}::{idx}",
+                content_hash=content_hash,
+                parent_section_id=(f"{content_hash}::{fs.parent_index}" if fs.parent_index is not None else None),
                 title=fs.title,
                 level=fs.level,
                 line_start=fs.line_start,
@@ -369,7 +375,6 @@ class DocumentGraphFactory(KgFactory):
 
         document = Document(
             content_hash=content_hash,
-            markdown_hash=markdown_hash,
             filename=path.name,
             folder_id=chain[-1],
             relative_path=rel_path,

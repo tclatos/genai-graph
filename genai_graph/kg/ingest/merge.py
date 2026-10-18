@@ -954,33 +954,37 @@ def merge_relationships_batch(
                 # after the first MATCH, so the second MATCH matched nothing and
                 # HAS_SECTION/HAS_SUBSECTION tables stayed empty despite the build
                 # reporting a non-zero relationship count.
-                arrow_rel_table = pa.table(  # noqa: F841
-                    {
-                        "from_id": [row["from_id"] for row in row_data],
-                        "to_id": [row["to_id"] for row in row_data],
-                    }
-                )
-                merge_rel_query = f"""
-                    LOAD FROM arrow_rel_table
-                    MATCH (from:{from_type} {{{from_key_field}: from_id}}),
-                          (to:{to_type} {{{to_key_field}: to_id}})
-                    MERGE (from)-[:{rel_name}]->(to)
-                """
-                try:
-                    kuzu_conn.execute(merge_rel_query)
-                except Exception as batch_err:
-                    logger.warning(
-                        f"Batch LOAD FROM failed for {rel_name} ({len(row_data)} rows): {batch_err}; falling back to point merges"
+                # Chunk to avoid buffer pool exhaustion on large batches (>5k rows)
+                chunk_size = 2000
+                for chunk_start in range(0, len(row_data), chunk_size):
+                    chunk = row_data[chunk_start : chunk_start + chunk_size]
+                    arrow_rel_table = pa.table(  # noqa: F841
+                        {
+                            "from_id": [row["from_id"] for row in chunk],
+                            "to_id": [row["to_id"] for row in chunk],
+                        }
                     )
-                    for r in row_data:
-                        f_id = r["from_id"]
-                        t_id = r["to_id"]
-                        point_q = f"""
-                            MATCH (from:{from_type} {{{from_key_field}: $from_id}}),
-                                  (to:{to_type} {{{to_key_field}: $to_id}})
-                            MERGE (from)-[:{rel_name}]->(to)
-                        """
-                        kuzu_conn.execute(point_q, parameters={"from_id": f_id, "to_id": t_id})
+                    merge_rel_query = f"""
+                        LOAD FROM arrow_rel_table
+                        MATCH (from:{from_type} {{{from_key_field}: from_id}}),
+                              (to:{to_type} {{{to_key_field}: to_id}})
+                        MERGE (from)-[:{rel_name}]->(to)
+                    """
+                    try:
+                        kuzu_conn.execute(merge_rel_query)
+                    except Exception as batch_err:
+                        logger.warning(
+                            f"Batch LOAD FROM failed for {rel_name} ({len(chunk)} rows): {batch_err}; falling back to point merges"
+                        )
+                        for r in chunk:
+                            f_id = r["from_id"]
+                            t_id = r["to_id"]
+                            point_q = f"""
+                                MATCH (from:{from_type} {{{from_key_field}: $from_id}}),
+                                      (to:{to_type} {{{to_key_field}: $to_id}})
+                                MERGE (from)-[:{rel_name}]->(to)
+                            """
+                            kuzu_conn.execute(point_q, parameters={"from_id": f_id, "to_id": t_id})
             total_created += max(0, _count_relationships(conn, rel_name) - before)
 
             # Collect Arrow table for parquet export if collector is active

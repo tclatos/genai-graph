@@ -82,6 +82,12 @@ def test_generate_dag_html_contains_sugiyama_and_data(dag_backend: object, tmp_p
     # Every link references existing node ids (roots have no incoming edge).
     node_ids = {n["id"] for n in nodes}
     assert all(lk["source"] in node_ids and lk["target"] in node_ids for lk in links)
+    # Default orientation is TB (top-down)
+    assert 'var ORIENTATION = "TB"' in html
+
+    # Orientation override to LR
+    html_lr = generate_dag_html(dag_backend, orientation="LR")
+    assert 'var ORIENTATION = "LR"' in html_lr
 
 
 def test_generate_html_force_regression(dag_backend: object, tmp_path: Path) -> None:

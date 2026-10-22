@@ -9,18 +9,14 @@ The same ``{nodes}``/``{links}`` JSON placeholders are used, so both renderers
 share the model built by :mod:`genai_graph.kg.export._graph_model`.
 """
 
-# Layout orientation. "LR" = left-to-right (roots on the left, the default
-# requested for the Document DAG); "TB" = top-to-bottom. d3-dag's sugiyama lays
-# out with the layer/rank axis on ``y`` and the within-layer axis on ``x`` (i.e.
-# top-to-bottom by default), so "LR" swaps the axes when mapping to the screen.
-# Flip this constant to "TB" if the on-screen render comes out vertical.
-DAG_ORIENTATION = "LR"
+# Layout orientation. "TB" = top-to-bottom (roots at the top, default);
+# "LR" = left-to-right (roots on the left).
+DAG_ORIENTATION = "TB"
 
 # Pixels per sugiyama layout unit. With the default nodeSize [1,1] + gap [1,1],
-# adjacent layers and adjacent siblings are both 2 units apart, so these give a
-# ~180px layer gap and a ~56px sibling gap.
-PX_PER_LAYER_UNIT = 90
-PX_PER_SIBLING_UNIT = 28
+# adjacent layers and adjacent siblings are both 2 units apart.
+PX_PER_LAYER_UNIT = 110
+PX_PER_SIBLING_UNIT = 55
 
 DAG_HTML_TEMPLATE = """
 <!DOCTYPE html>

@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) — [Semantic V
 
 ### Added
 
+#### Layered DAG Visualization
+- **Configurable Layout Orientation**: Added orientation support (`orientation="TB"` vs `orientation="LR"`) to `generate_dag_html` and `_generate_dag_html_content` in `genai_graph.kg.export.dag_html`. Defaults to top-down (`TB`) orientation for vertical hierarchy flow with generous layer height and horizontal sibling spacing, while retaining left-to-right (`LR`) as an option.
+
 #### Knowledge Graph Core & Embedded Ladybug
 - **Buffer Pool Scaling**: Increased default Ladybug buffer pool ceiling to 8GB, with graceful `buffer_pool_size: 0` fallback when unset to prevent out-of-memory crashes during bulk loading.
 - **Batch MERGE Optimization**: Optimized bulk relationship insertion routines to eliminate accidental Cartesian cross-products and memory pool exhaustion.

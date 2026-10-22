@@ -53,22 +53,46 @@ def _embed_bundle(cdn_tag: str, bundle_name: str) -> str:
     return cdn_tag
 
 
-def _generate_dag_html_content(nodes_list: list[dict[str, Any]], links_list: list[dict[str, Any]]) -> str:
+def _generate_dag_html_content(
+    nodes_list: list[dict[str, Any]],
+    links_list: list[dict[str, Any]],
+    *,
+    orientation: str = DAG_ORIENTATION,
+    px_layer_unit: int | None = None,
+    px_sibling_unit: int | None = None,
+) -> str:
     """Generate DAG HTML content from nodes and links lists.
 
     Args:
         nodes_list: List of node dictionaries with id, name, type, color, and properties
         links_list: List of link dictionaries with source, target, relation, weight info
+        orientation: "TB" (top-to-bottom / vertical, default) or "LR" (left-to-right / horizontal)
+        px_layer_unit: Optional override for distance between adjacent layers
+        px_sibling_unit: Optional override for distance between siblings within a layer
 
     Returns:
         HTML content as a string with embedded D3.js + d3-dag visualization
     """
     html_content = DAG_HTML_TEMPLATE.replace("{nodes}", json.dumps(nodes_list))
     html_content = html_content.replace("{links}", json.dumps(links_list))
+
+    ori = orientation.upper() if orientation else "TB"
+    if ori not in ("TB", "LR"):
+        ori = "TB"
+
+    if ori == "TB":
+        # Vertical flow: generous layer height for descending arrows + horizontal sibling separation
+        layer_spacing = px_layer_unit if px_layer_unit is not None else 110
+        sibling_spacing = px_sibling_unit if px_sibling_unit is not None else 60
+    else:
+        # Horizontal flow: left-to-right layer separation + compact vertical sibling distance
+        layer_spacing = px_layer_unit if px_layer_unit is not None else PX_PER_LAYER_UNIT
+        sibling_spacing = px_sibling_unit if px_sibling_unit is not None else PX_PER_SIBLING_UNIT
+
     # Inject layout constants.
-    html_content = html_content.replace("__ORIENTATION__", DAG_ORIENTATION)
-    html_content = html_content.replace("__PX_LAYER__", str(PX_PER_LAYER_UNIT))
-    html_content = html_content.replace("__PX_SIBLING__", str(PX_PER_SIBLING_UNIT))
+    html_content = html_content.replace("__ORIENTATION__", ori)
+    html_content = html_content.replace("__PX_LAYER__", str(layer_spacing))
+    html_content = html_content.replace("__PX_SIBLING__", str(sibling_spacing))
     # Bundle d3 v5 then d3-dag offline (CDN fallback). Order matters: d3 v5 must
     # load first so the d3-dag IIFE merges into the existing ``d3`` global.
     html_content = html_content.replace(_D3_CDN_TAG, _embed_bundle(_D3_CDN_TAG, "d3.v5.min.js"))
@@ -87,15 +111,17 @@ def generate_dag_html(
     union: bool = True,
     filter_orphan_nodes: bool = False,
     selected_node_types: list[str] | None = None,
+    orientation: str = DAG_ORIENTATION,
+    px_layer_unit: int | None = None,
+    px_sibling_unit: int | None = None,
 ) -> str:
-    """Generate a left-to-right DAG HTML visualization from a graph connection/backend.
+    """Generate a DAG HTML visualization from a graph connection/backend.
 
     Shares the same data pipeline as :func:`generate_html` (same query, same
     nodes/links model, same colors and orphan filtering) and differs only in the
     renderer: d3-dag sugiyama layout instead of a D3 force simulation. The graph
-    is laid out left-to-right, starting from nodes that have no incoming
-    relationship (detected from the edge structure, so no special Cypher is
-    needed).
+    supports both top-down ("TB", default) and left-to-right ("LR") orientations,
+    starting from nodes that have no incoming relationship.
 
     Args:
         connection: Object exposing an execute() method (e.g. KgBackend or
@@ -113,6 +139,9 @@ def generate_dag_html(
             relationship. Nodes whose type is in ``selected_node_types`` are
             always preserved regardless of this flag.
         selected_node_types: Node type labels the user explicitly chose to display.
+        orientation: "TB" (top-to-bottom, default) or "LR" (left-to-right).
+        px_layer_unit: Optional override for spacing between layers.
+        px_sibling_unit: Optional override for spacing between siblings.
 
     Returns:
         The HTML content as a string.
@@ -134,7 +163,13 @@ def generate_dag_html(
         selected_node_types=selected_node_types,
     )
 
-    html_content = _generate_dag_html_content(nodes_list, links_list)
+    html_content = _generate_dag_html_content(
+        nodes_list,
+        links_list,
+        orientation=orientation,
+        px_layer_unit=px_layer_unit,
+        px_sibling_unit=px_sibling_unit,
+    )
 
     if not destination_file_path:
         home_dir = os.path.expanduser("~")

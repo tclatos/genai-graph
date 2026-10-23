@@ -813,20 +813,21 @@ class GraphSchema(BaseModel):
             else:
                 seen_labels[lbl] = cls_name
 
-        # Check for duplicate relationships between the same node pair
-        relation_pairs: dict[tuple[str, str], list[str]] = {}
+        # Check for duplicate relationship definitions (same name between the
+        # same node pair). Defining several distinct relationship types between
+        # the same node pair (e.g. Opportunity -> Folder via HAS_RFQ,
+        # HAS_PROPOSAL and HUMAN_REF) is legitimate, so only exact duplicates
+        # of (from, to, name) are reported.
+        relation_keys: set[tuple[str, str, str]] = set()
         for relation in self.relations:
-            key = (relation.from_node.label, relation.to_node.label)
-            if key in relation_pairs:
-                relation_pairs[key].append(relation.name)
-            else:
-                relation_pairs[key] = [relation.name]
-
-        for (from_label, to_label), names in relation_pairs.items():
-            if len(names) > 1:
+            key = (relation.from_node.label, relation.to_node.label, relation.name)
+            if key in relation_keys:
                 warnings_list.append(
-                    f"Multiple relationships defined between {from_label} and {to_label}: {', '.join(names)}"
+                    f"Duplicate relationship '{relation.name}' defined between "
+                    f"{key[0]} and {key[1]}"
                 )
+            else:
+                relation_keys.add(key)
 
         # Warn when we have node classes that never appear in the reachable
         # model structure (likely orphan configurations).

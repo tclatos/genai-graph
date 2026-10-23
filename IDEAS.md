@@ -1,3 +1,24 @@
+# Neo4j 
+Implement the Neo4j backend studied in /home/tcl/prj/genai-graph/docs/neo4j_backend_integration_study.md.
+
+We will use au Aura instance. It should be the latest version (check...). The  URI and credential are in the .env. 
+
+Convert Ladybug Maps as JSON. 
+Focus on the doc-graph first. That's easier.
+
+Try to male something extensible.  We might need to supprt other Cypher compatibe graph DB in the future.
+
+
+The env viariables are: 
+NEO4J_URI
+NEO4J_USERNAME
+NEO4J_PASSWORD
+NEO4J_DATABASE
+AURA_INSTANCEID
+AURA_INSTANCENAME
+
+
+
 # Security
 Study https://github.com/openfga/openfga  - Benefit ?  
 

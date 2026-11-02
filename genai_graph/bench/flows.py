@@ -7,6 +7,7 @@ and pipeline stages: fetch -> markdownize -> build -> run -> grade.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shutil
 import threading
 from pathlib import Path
@@ -571,8 +572,13 @@ def run_questions_flow(
                     outcome.fatal_results,
                     len(futures) - len(outcomes),
                 )
-                for pending in futures:
-                    pending.cancel()
+                # Prefect's PrefectConcurrentFuture exposes no cancel(); stop waiting
+                # and let the flow end with the outcomes already collected.
+                for pending in futures[len(outcomes) :]:
+                    cancel = getattr(pending, "cancel", None)
+                    if callable(cancel):
+                        with contextlib.suppress(Exception):
+                            cancel()
                 break
     finally:
         watchdog.stop()

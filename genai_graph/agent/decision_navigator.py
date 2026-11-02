@@ -63,6 +63,16 @@ class DecisionNavigatorConfig(BaseModel):
     beam_width: int = 3
     top_r_sections: int = 6
     min_confidence: float = 0.5
+    # Per-level confidence gates. L1 scores are compressed low because ~48 documents
+    # are scored jointly against one query (correct picks measured at 0.26), while L2
+    # separates a section within one document (correct picks 0.89-0.96). A single
+    # absolute 0.5 gate therefore flagged correct L1 selections as low-confidence and
+    # pushed the agent into the expensive fallback loop.
+    l1_min_confidence: float = 0.15
+    l2_min_confidence: float = 0.5
+    # Do not descend into a child section scoring below this floor; keep the parent.
+    # Descent otherwise picks noise (observed child scores of 0.02-0.07).
+    descent_min_confidence: float = 0.2
     max_depth: int = 2
     candidate_cap: int = 48
     prefilter: str = "off"
@@ -71,6 +81,7 @@ class DecisionNavigatorConfig(BaseModel):
     answerable_gate: bool = False
     pack_char_budget: int = 20000
     l2_workers: int = 1
+    trace_top_k: int = 12
 
 
 class Candidate(BaseModel):
@@ -282,12 +293,15 @@ class DecisionNavigator:
         )
 
     @staticmethod
-    def _candidate_from_section(row: dict[str, Any], document_id: str) -> Candidate:
+    def _candidate_from_section(row: dict[str, Any], document_id: str, doc_label: str | None = None) -> Candidate:
         hint_source = row.get("summary") or row.get("description") or ""
+        # Prefix the edition so period-specific questions can discriminate between
+        # the same table in different bulletin issues (the filename carries the date).
+        prefix = f"From {doc_label}: " if doc_label else ""
         return Candidate(
             id=row["section_id"],
             label=row.get("title") or row["section_id"],
-            hint=hint_source[:_HINT_CHARS],
+            hint=f"{prefix}{hint_source}"[:_HINT_CHARS],
             parent_id=document_id,
         )
 
@@ -381,9 +395,16 @@ class DecisionNavigator:
                 trace.unanswerable = True
         top = ranked[: self.config.beam_width]
         if ranked:
-            trace.levels.append(LevelTrace(level=1, n_candidates=len(ranked), kept=[c.id for c, _ in top]))
+            trace.levels.append(
+                LevelTrace(
+                    level=1,
+                    n_candidates=len(ranked),
+                    kept=[c.id for c, _ in top],
+                    scores=self._top_scores(ranked),
+                )
+            )
         if top:
-            trace.low_confidence = all(p < self.config.min_confidence for _, p in top)
+            trace.low_confidence = top[0][1] < self.config.l1_min_confidence
         return top
 
     def rank_sections(
@@ -394,18 +415,34 @@ class DecisionNavigator:
         hints: str | None = None,
         r: int | None = None,
         trace: NavigationTrace | None = None,
+        doc_label: str | None = None,
     ) -> tuple[list[tuple[Candidate, float]], list[dict[str, Any]]]:
         """L2 — score a document's top-level sections; return (top-r ranked, its TOC rows)."""
         trace = trace or NavigationTrace()
         backend = self._backend()
         toc_rows = get_document_toc(backend, document_id)
-        candidates = [self._candidate_from_section(row, document_id) for row in self._top_level_sections(toc_rows)]
+        candidates = [
+            self._candidate_from_section(row, document_id, doc_label) for row in self._top_level_sections(toc_rows)
+        ]
         candidates = self._apply_prefilter(backend, query, candidates, document_id=document_id)
         ranked, _scores = self._score_candidates(self._build_state(query, hints), candidates, trace)
         kept = ranked[: (r or self.config.top_r_sections)]
         if ranked:
-            trace.levels.append(LevelTrace(level=2, n_candidates=len(ranked), kept=[c.id for c, _ in kept]))
+            trace.levels.append(
+                LevelTrace(
+                    level=2,
+                    n_candidates=len(ranked),
+                    kept=[c.id for c, _ in kept],
+                    scores=self._top_scores(ranked),
+                )
+            )
+            if kept[0][1] < self.config.l2_min_confidence:
+                trace.low_confidence = True
         return kept, toc_rows
+
+    def _top_scores(self, ranked: list[tuple[Candidate, float]]) -> dict[str, float]:
+        """Return the top ``trace_top_k`` candidate probabilities, for offline tuning."""
+        return {c.id: round(p, 4) for c, p in ranked[: self.config.trace_top_k]}
 
     def _descend(
         self,
@@ -435,8 +472,17 @@ class DecisionNavigator:
                 for row in sorted(children, key=lambda r: r.get("sequence") or 0)
             ]
             ranked, _scores = self._score_candidates(state, child_candidates, trace)
-            if not ranked:
+            if not ranked or ranked[0][1] < self.config.descent_min_confidence:
+                # No child stands out: keep the parent rather than descend into noise.
                 break
+            trace.levels.append(
+                LevelTrace(
+                    level=3,
+                    n_candidates=len(ranked),
+                    kept=[ranked[0][0].id],
+                    scores=self._top_scores(ranked),
+                )
+            )
             current, current_score = ranked[0]
         return current, current_score
 
@@ -522,7 +568,7 @@ class DecisionNavigator:
         """L2 for one document: rank sections, descend the best branches, fetch content."""
         doc_trace = NavigationTrace()
         backend = self._backend()
-        kept, toc_rows = self.rank_sections(query, doc_id, hints=hints, trace=doc_trace)
+        kept, toc_rows = self.rank_sections(query, doc_id, hints=hints, trace=doc_trace, doc_label=doc_name)
         selected: list[SectionEvidence] = []
         seen_sections: set[str] = set()
         for section, score in kept:

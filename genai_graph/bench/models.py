@@ -109,6 +109,24 @@ class BenchRunRecord(BaseModel):
         return d
 
 
+class RunOutcome(BaseModel):
+    """Compact result of one question run, returned through the Prefect result store.
+
+    The full :class:`BenchRunRecord` (tool calls and tool results, tens of KB to
+    several MB each) is appended to the runs JSONL inside the task. Returning it
+    from the task keeps every record alive in memory for the whole flow run,
+    which grows without bound across a 33-question benchmark (observed ~350 MB
+    per question until the native Ladybug buffer pool could no longer allocate).
+    """
+
+    id: str
+    n_tool_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    error_results: int = 0
+    fatal_results: int = 0
+
+
 class JudgeVerdict(BaseModel):
     """Structured evaluation verdict returned by the LLM-as-judge."""
 

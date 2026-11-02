@@ -230,8 +230,16 @@ def _table_columns(backend: KgBackend, table: str) -> set[str]:
     try:
         df = backend.execute_get_as_df(f"CALL table_info('{table}') RETURN *", None, union=False)
     except Exception as exc:
-        logger.debug("table_info('{}') failed: {}", table, exc)
-        col_cache[table] = set()
+        if "does not exist" in str(exc):
+            # Genuinely absent (fresh/partial DB): cache so we do not re-probe per call.
+            col_cache[table] = set()
+            logger.debug("table_info('{}'): table absent", table)
+        else:
+            # Transient failure — typically the native buffer manager being out of
+            # memory. Do NOT cache: a poisoned empty entry silently downgrades every
+            # later query (see _doc_key) and hides the real error behind a misleading
+            # "Cannot find property content_hash" binder exception.
+            logger.warning("table_info('{}') failed (not cached, will retry): {}", table, exc)
         return set()
     if df is None or df.empty:
         col_cache[table] = set()
@@ -279,6 +287,13 @@ def _doc_key(backend: KgBackend, table: str) -> str:
         return "content_hash"
     if "markdown_hash" in cols:
         return "markdown_hash"
+    if not cols:
+        logger.error(
+            "Could not introspect '{table}' to pick its document key column — falling back to "
+            "'content_hash'. The table is missing, or schema introspection is failing (an exhausted "
+            "Ladybug buffer pool does this). Subsequent queries may fail with a misleading binder error.",
+            table=table,
+        )
     return "content_hash"
 
 
@@ -1570,7 +1585,7 @@ def search_images(
     conditions: list[str] = []
 
     if target_content_hash:
-        conditions.append("i.content_hash = $md_hash")
+        conditions.append(f"i.{image_doc_key} = $md_hash")
         params["md_hash"] = target_content_hash
 
     if section_id:
@@ -1882,6 +1897,29 @@ _TOOL_CONN_LOCAL = threading.local()
 _KEEPALIVE_BACKENDS: list[KgBackend] = []
 
 
+def resolve_buffer_pool_size() -> int | str:
+    """Return the Ladybug buffer-pool size to request.
+
+    Resolution order: ``LADYBUG_BUFFER_POOL_SIZE`` env var, then the project's
+    ``ladybug.buffer_pool_size`` config key (e.g. in ``config/app_conf.yaml``),
+    then ``8GB``. The engine default (~80% of system RAM) lets the pool squeeze
+    the host process on long concurrent runs, which surfaces as
+    "buffer pool is full" tool errors, so an explicit bound is preferable.
+    """
+    env_size = os.getenv("LADYBUG_BUFFER_POOL_SIZE", "").strip()
+    if env_size:
+        return env_size
+    try:
+        from genai_tk.config_mgmt.config_mngr import global_config
+
+        configured = global_config().get("ladybug.buffer_pool_size", None)
+        if configured:
+            return str(configured)
+    except Exception as exc:
+        logger.debug("Could not read ladybug.buffer_pool_size from config: {}", exc)
+    return "8GB"
+
+
 def _connect(db_path: str) -> KgBackend:
     """Return the calling thread's Document Graph connection, creating it once.
 
@@ -1899,10 +1937,7 @@ def _connect(db_path: str) -> KgBackend:
     backend = backends.get(db_path)
     if backend is None:
         backend = LadybugBackend()
-        # Explicit buffer-pool ceiling (env-overridable): the engine default of
-        # ~80% of system RAM lets the pool squeeze the host process on long
-        # concurrent runs, surfacing as "buffer pool is full" tool errors.
-        pool_size = os.getenv("LADYBUG_BUFFER_POOL_SIZE", "").strip() or "8GB"
+        pool_size = resolve_buffer_pool_size()
         backend.attach(get_shared_database(db_path, read_only=Path(db_path).exists(), buffer_pool_size=pool_size))
         backends[db_path] = backend
         _KEEPALIVE_BACKENDS.append(backend)

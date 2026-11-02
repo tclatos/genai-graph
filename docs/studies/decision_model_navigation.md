@@ -530,9 +530,76 @@ forced (possibly wrong) answer. Final pairing: wrap-up soft 8 / hard 12, cross-p
 at 12 / 16, `recursion_limit: 64` (16 × ~3 + finalize < 64). The ACL warning was also de-duplicated
 (warn once per backend — previously ~150 warnings per bench run).
 
-**Remaining known issue**: the deepagents tool-rejection loop (model keeps calling stripped tools)
+**Remaining known issue**: the deepagents tool-rejection loop (model keeps emitting stripped tools)
 ends an empty answer for glm; a downstream fix could make the rejection path inject the final-answer
-prompt as a user turn. Full-subset re-run of `decision_fast` still pending.
+prompt as a user turn.
+
+### 6.9 Second full-subset attempt (2026-11-02 evening) — cost targets met, accuracy unmeasurable
+
+Configuration: concurrency 2, `ladybug.buffer_pool_size: 4GB` (new config key), local python
+executor, `pack_char_budget: 10000`, `excluded_tools: [get_folder_toc, search_sections,
+list_documents, ls, glob, grep]`, wrap-up 8/12, `recursion_limit: 64`.
+
+Outcome: **26/33 completed, 7 never ran**. From ~15:58 the run wedged in a retry loop (2,305
+`buffer pool is full` tool errors over ~2 h) and was killed. The new fail-fast guard did **not**
+fire — it inspects only *completed* records, and the wedged question never completed.
+
+Measured on the 26 completed questions, against the baseline on the same ids:
+
+| Metric | decision_fast | baseline (glm_5.3_Flash) |
+|---|---|---|
+| Strict accuracy | 1 correct + 3 partial (4%) | 16 correct + 4 partial (62%) |
+| Avg tool calls | 11.3 | 22.5 (−50%) |
+| Avg input tokens | 116k | 628k (−81%) |
+
+**Attribution: the accuracy number measures a broken database, not the navigator.** 24 of the 26
+completed runs contain at least one buffer-pool error (only `UID0001` and `UID0003` were clean), so
+most agents were reading a failing graph for part of their investigation and correctly refused to
+fabricate answers. The cost figures (−50% calls, −81% tokens) are real and consistent with the design.
+
+**Root cause (new evidence): the exhaustion is cumulative, not RAM-bound.** The pool failed after
+~26 questions at concurrency 2 with 12 GB of host RAM free, and after ~17 questions at concurrency 4
+with 8 GB. Each question builds a fresh agent plus a thread-local Ladybug connection that is
+deliberately kept alive for the process lifetime (`_KEEPALIVE_BACKENDS`, added to avoid a native
+heap-corruption bug), so native memory grows monotonically with completed questions until the buffer
+manager cannot allocate. Pool size only moves the failure point.
+
+Secondary defects found in the trajectories:
+
+1. **No discovery fallback.** With `list_documents`, `get_folder_toc`, `search_sections`, `ls`,
+   `glob` and `grep` all excluded, a disappointing pack leaves no way to enumerate the corpus. One
+   answer says it explicitly ("…or with a document-listing tool available"), and several then narrate
+   what they still need instead of answering. The token win came from the pack budget, not from
+   removing recovery paths.
+2. **Wrap-up 8/12 converges too early.** Answers end mid-investigation ("I need a later bulletin…")
+   and the judge correctly files them as `halted_or_empty_response` (22 of 33 verdicts).
+3. **Fail-fast gap.** The guard must also watch the *running* question, and a per-question wall-clock
+   timeout is missing — one wedged question consumed the whole budget.
+4. **Navigation traces record `scores: {}`** at every level, so the cheap decision model cannot be
+tuned from the recorded runs.
+5. **Corpus gap.** `UID0003`'s gold table (1953 monthly detail, Table 6B) is genuinely absent from
+   the graph — the agent's refusal was correct.
+6. **Log noise.** Langfuse OTLP export fails every few seconds for the whole run (its container is
+   restarting), burying real errors.
+
+Proposed improvements, priority order:
+
+1. **Release per-question native state** — close/evict the thread-local connection and drop agent
+   references between questions (or run each question in a subprocess). This is the actual fix for
+   the wedge; pool sizing only delays it.
+2. **In-flight watchdog** — per-question wall-clock timeout (~20 min) plus a consecutive-DB-error
+   circuit breaker that fails the question and aborts the run, instead of retrying a dead database.
+3. **Restore a discovery fallback** — keep `list_documents` and `get_folder_toc` (both cheap); keep
+   `ls`/`glob`/`grep` excluded (they hit fs-denied paths). Pack-first discipline stays in the prompt.
+4. **Relax wrap-up to soft 16 / hard 24** with `recursion_limit ≈ 96`; 8/12 truncates legitimate
+   multi-period investigations.
+5. **Record per-candidate probabilities in the navigation trace** so the decision model can be tuned
+   offline from `runs.jsonl`.
+6. **Preflight the corpus** — assert each question's gold table is present and extractable before
+   scoring, and report ingestion gaps separately from navigation failures.
+7. **Refine the judge rubric** to distinguish "declared the evidence missing" from "crashed/empty",
+   since the two are currently merged into `halted_or_empty_response`.
+8. **Fix or disable Langfuse export** during bench runs.
 
 ## 7. References
 

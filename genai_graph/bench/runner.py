@@ -31,6 +31,18 @@ TOOL_ERROR_MARKERS: tuple[str, ...] = (
     "Exception:",
 )
 
+# Markers meaning the graph DATABASE itself is unusable, not that this question
+# failed. Retrying tool calls against it produces no progress, so the bench flow
+# aborts the run once a question accumulates this many fatal results (observed:
+# a 33-question run wedged for 40+ minutes after the buffer pool was exhausted,
+# emitting 713 such errors and completing nothing).
+FATAL_TOOL_MARKERS: tuple[str, ...] = (
+    "buffer pool is full",
+    "Cannot allocate memory",
+    "Unable to allocate memory",
+)
+FATAL_RESULT_THRESHOLD: int = 3
+
 
 async def run_one_question(
     harness: Any,
@@ -171,6 +183,16 @@ def count_error_tool_results(records: list[BenchRunRecord]) -> dict[str, Any]:
         "by_marker": by_marker,
         "run_ids": runs_with_errors,
     }
+
+
+def count_fatal_tool_results(record: BenchRunRecord) -> int:
+    """Count tool results in *record* that carry an unrecoverable database error."""
+    hits = 0
+    for result in record.tool_results or []:
+        content = str(result.get("content", ""))
+        if any(marker in content for marker in FATAL_TOOL_MARKERS):
+            hits += 1
+    return hits
 
 
 def append_run_record(record: BenchRunRecord, output_file: Path) -> None:

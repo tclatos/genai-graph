@@ -18,8 +18,15 @@ from prefect import flow, task
 from genai_graph.bench.adapters.base import get_benchmark_adapter
 from genai_graph.bench.config import BenchConfig, configure_bench_monitoring
 from genai_graph.bench.judge import evaluate_single_run, load_existing_scores
-from genai_graph.bench.models import BenchQuestion, BenchRunRecord, BenchScoreRecord
-from genai_graph.bench.runner import append_run_record, count_error_tool_results, load_existing_runs, run_one_question
+from genai_graph.bench.models import BenchQuestion, BenchRunRecord, BenchScoreRecord, RunOutcome
+from genai_graph.bench.runner import (
+    FATAL_RESULT_THRESHOLD,
+    append_run_record,
+    count_error_tool_results,
+    count_fatal_tool_results,
+    load_existing_runs,
+    run_one_question,
+)
 from genai_graph.bench.watchdog import SuspendWatchdog
 
 _QUESTION_SEMAPHORES: dict[int, threading.Semaphore] = {}
@@ -297,8 +304,13 @@ def run_question_task(
     embeddings_id: str | None = None,
     runs_path: str | None = None,
     concurrency: int = 10,
-) -> BenchRunRecord:
-    """Run a question through the docgraph agent harness with concurrency gating."""
+) -> RunOutcome:
+    """Run a question through the docgraph agent harness with concurrency gating.
+
+    Returns a compact :class:`RunOutcome`; the full record is appended to the runs
+    JSONL and re-loaded from disk when needed (grading), so its tool results are
+    not retained in memory for the whole flow run.
+    """
     from genai_tk.agents.harness.profiles import load_agent_profiles
 
     from genai_graph.agent import create_docgraph_agent
@@ -328,7 +340,14 @@ def run_question_task(
     if runs_path:
         append_run_record(record, Path(runs_path))
 
-    return record
+    return RunOutcome(
+        id=record.id,
+        n_tool_calls=record.n_tool_calls,
+        input_tokens=record.input_tokens,
+        output_tokens=record.output_tokens,
+        error_results=count_error_tool_results([record])["total_error_results"],
+        fatal_results=count_fatal_tool_results(record),
+    )
 
 
 @task(retries=5, retry_delay_seconds=3, task_run_name="grade-run-{run.id}")
@@ -516,7 +535,7 @@ def run_questions_flow(
     # continuing records answers against a degraded Ladybug buffer pool.
     watchdog = SuspendWatchdog()
     watchdog.start()
-    new_records: list[BenchRunRecord] = []
+    outcomes: list[RunOutcome] = []
     try:
         futures = [
             run_question_task.submit(
@@ -531,37 +550,62 @@ def run_questions_flow(
             )
             for q in to_run
         ]
+        aborted_runs: list[str] = []
         for future in futures:
             try:
-                new_records.append(future.result())
+                outcome = future.result()
             except Exception as exc:
                 logger.error("Question run failed (recorded nowhere, will retry on re-launch): {}", exc)
+                continue
+            outcomes.append(outcome)
+            # A dead database (buffer pool exhausted) makes every further tool call
+            # fail, so remaining questions can only burn budget: abort instead of
+            # retrying — the 2026-11-02 run wedged for 40+ minutes this way.
+            if outcome.fatal_results >= FATAL_RESULT_THRESHOLD:
+                aborted_runs.append(outcome.id)
+                logger.critical(
+                    "Graph database appears unusable: question {} hit {} fatal tool error(s) "
+                    "(e.g. 'buffer pool is full'). Aborting the remaining {} question(s) — "
+                    "fix the database/memory limits and re-launch; completed runs are cached.",
+                    outcome.id,
+                    outcome.fatal_results,
+                    len(futures) - len(outcomes),
+                )
+                for pending in futures:
+                    pending.cancel()
+                break
     finally:
         watchdog.stop()
+
+    if aborted_runs:
+        logger.critical(
+            "Bench run ABORTED after {} run(s) due to an unusable graph database (fatal runs: {}).",
+            len(outcomes),
+            aborted_runs,
+        )
 
     if watchdog.triggered:
         logger.critical(
             "Machine suspend/resume was detected mid-run: {}/{} question runs completed before the abort; "
             "the rest failed fast. Restart the machine fresh and re-launch the same command to resume.",
-            len(new_records),
+            len(outcomes),
             len(to_run),
         )
 
     # Post-run visibility: tool exceptions only surface inside tool results,
     # never in the console log — count them before they poison scores.
-    error_stats = count_error_tool_results(new_records)
-    if error_stats["runs_with_errors"]:
+    runs_with_errors = [o.id for o in outcomes if o.error_results]
+    if runs_with_errors:
         logger.warning(
-            "Tool errors stuffed into results of {}/{} new runs ({} error results, by marker: {}) — "
+            "Tool errors stuffed into results of {}/{} new runs ({} error results) — "
             "inspect tool_results in the runs JSONL. Sample ids: {}",
-            error_stats["runs_with_errors"],
-            len(new_records),
-            error_stats["total_error_results"],
-            error_stats["by_marker"],
-            error_stats["run_ids"][:10],
+            len(runs_with_errors),
+            len(outcomes),
+            sum(o.error_results for o in outcomes),
+            runs_with_errors[:10],
         )
 
-    return [r.id for r in cached_runs] + [r.id for r in new_records]
+    return [r.id for r in cached_runs] + [o.id for o in outcomes]
 
 
 @flow(name="bench-grade")

@@ -16,6 +16,7 @@ The core architecture is presented in a didactic, numbered sequence designed for
 | **04** | [04_rule_selected_ingest_routing.md](04_rule_selected_ingest_routing.md) | **Multi-Source Ingestion Routing & Route Tables**: Rule-selected YAML workflows, pathspec route tables, concurrent sub-workflows (PDF, Office, Web, Git), and single-writer fan-in into Ladybug. |
 | **05** | [05_mcp_and_agent_navigation.md](05_mcp_and_agent_navigation.md) | **Model Context Protocol (MCP 2.0) & Graph Tools**: Document Graph MCP servers (stdio and SSE), navigation tool suite (`list_documents`, `get_document_outline`, `get_section_content`, `search_sections`, `query_cypher`), and IDE integration. |
 | **06** | [06_decision_model_navigation.md](06_decision_model_navigation.md) | **Decision-Model Navigation (DecisionRAG)**: LLM-free document/section navigation via shared-context decision-model scoring (Clef-flash), budgeted evidence packs, tool-factory configuration, and per-run navigation telemetry. |
+| **07** | [07_kg_backend_abstraction.md](07_kg_backend_abstraction.md) | **KG Backend Abstraction & Neo4j**: capability protocols (introspector, index manager, transactions), per-thread connection lifecycle (`kg.connections`), Neo4j index/DDL mapping, and a phased migration path. |
 
 ---
 

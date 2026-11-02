@@ -20,16 +20,15 @@ from __future__ import annotations
 import contextlib
 import os
 import re
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 import yaml
-from genai_tk.utils.ladybug import get_shared_database
 from loguru import logger
 from pydantic import BaseModel
 
-from genai_graph.kg.backend import KgBackend, KuzuBackend, LadybugBackend
+from genai_graph.kg.backend import KgBackend, KuzuBackend
+from genai_graph.kg.connections import get_connection
 from genai_graph.kg.ids import is_bare_digest
 
 if TYPE_CHECKING:
@@ -1884,93 +1883,14 @@ def execute_image_query(
         return f"Error analyzing image with model '{vlm_model_id}': {exc}"
 
 
-# One Ladybug connection per (thread, db): tool calls reuse their thread's
-# connection instead of churning a new native one per call.
-_TOOL_CONN_LOCAL = threading.local()
-
-# Process-lifetime references to every shared-DB backend created. Ladybug
-# native code corrupts the heap when a Connection object is garbage-collected
-# while other threads still query the shared Database (observed as SIGSEGV /
-# "free(): invalid size"), so connections are never dropped mid-run; they are
-# closed in ordered fashion by genai_tk.utils.ladybug.shared at interpreter
-# shutdown.
-_KEEPALIVE_BACKENDS: list[KgBackend] = []
-
-
-def resolve_buffer_pool_size() -> int | str:
-    """Return the Ladybug buffer-pool size to request.
-
-    Resolution order: ``LADYBUG_BUFFER_POOL_SIZE`` env var, then the project's
-    ``ladybug.buffer_pool_size`` config key (e.g. in ``config/app_conf.yaml``),
-    then ``8GB``. The engine default (~80% of system RAM) lets the pool squeeze
-    the host process on long concurrent runs, which surfaces as
-    "buffer pool is full" tool errors, so an explicit bound is preferable.
-    """
-    env_size = os.getenv("LADYBUG_BUFFER_POOL_SIZE", "").strip()
-    if env_size:
-        return env_size
-    try:
-        from genai_tk.config_mgmt.config_mngr import global_config
-
-        configured = global_config().get("ladybug.buffer_pool_size", None)
-        if configured:
-            return str(configured)
-    except Exception as exc:
-        logger.debug("Could not read ladybug.buffer_pool_size from config: {}", exc)
-    return "8GB"
-
-
 def _connect(db_path: str) -> KgBackend:
     """Return the calling thread's Document Graph connection, creating it once.
 
-    Reuses the process-shared ``ladybug.Database`` handle and keeps the native
-    connection alive for the whole process (see ``_KEEPALIVE_BACKENDS``).
-    The database is opened read-only whenever the file already exists — every
-    tool here is a pure read, and read-only handles skip WAL bookkeeping and
-    checkpointing entirely (a missing file keeps the legacy read-write open so
-    the "not ingested yet" experience still works).
+    The lifecycle (one connection per thread and target, explicit release, ordered
+    shutdown) is owned by :mod:`genai_graph.kg.connections`; the database is opened
+    read-only whenever the file already exists.
     """
-    backends: dict[str, KgBackend] | None = getattr(_TOOL_CONN_LOCAL, "backends", None)
-    if backends is None:
-        backends = {}
-        _TOOL_CONN_LOCAL.backends = backends
-    backend = backends.get(db_path)
-    if backend is None:
-        backend = LadybugBackend()
-        pool_size = resolve_buffer_pool_size()
-        backend.attach(get_shared_database(db_path, read_only=Path(db_path).exists(), buffer_pool_size=pool_size))
-        backends[db_path] = backend
-        _KEEPALIVE_BACKENDS.append(backend)
-    return backend
-
-
-def release_connection(db_path: str) -> None:
-    """Close and forget the calling thread's connection for *db_path*.
-
-    Each Ladybug ``Connection`` carries a large native working set (~120 MB
-    measured), and connections used to be kept for the whole process lifetime.
-    A 20-question loop grew RSS from 150 MB to 3.2 GB that way, until the buffer
-    manager could not allocate ("buffer pool is full and no memory could be
-    freed") and every later query failed — the failure mode behind the wedged
-    benchmark runs.
-
-    A bench question task owns its thread's connection exclusively, so closing
-    it when the question finishes is safe and bounds the process footprint.
-    Closing is explicit and orderly (``Connection.close()`` releases cached
-    results and prepared statements, then unregisters from the Database), which
-    is what the keep-alive list existed to guarantee.
-    """
-    backends: dict[str, KgBackend] | None = getattr(_TOOL_CONN_LOCAL, "backends", None)
-    if not backends:
-        return
-    backend = backends.pop(db_path, None)
-    if backend is None:
-        return
-    with contextlib.suppress(ValueError):
-        _KEEPALIVE_BACKENDS.remove(backend)
-    with contextlib.suppress(Exception):
-        backend.close()
-    logger.debug("Released Document Graph connection for {}", db_path)
+    return get_connection(db_path)
 
 
 def _tool_error(exc: Exception) -> str:

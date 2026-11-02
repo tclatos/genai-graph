@@ -315,7 +315,7 @@ def run_question_task(
     from genai_tk.agents.harness.profiles import load_agent_profiles
 
     from genai_graph.agent import create_docgraph_agent
-    from genai_graph.kg.query.document_graph_tools import release_connection
+    from genai_graph.kg.connections import release_connection
 
     sem = _get_semaphore(_QUESTION_SEMAPHORES, concurrency)
 

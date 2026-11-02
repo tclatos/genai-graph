@@ -33,13 +33,13 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from genai_graph.kg.backend import KgBackend, KuzuBackend
+from genai_graph.kg.connections import release_connection
 from genai_graph.kg.query.document_graph_tools import (
     _connect,
     get_document,
     get_document_toc,
     get_section_content,
     list_documents,
-    release_connection,
     search_sections,
 )
 

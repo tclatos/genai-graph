@@ -70,7 +70,8 @@ agents:
     skill_directories: []
     enable_planning: false
     enable_file_system: false
-    recursion_limit: 100
+    # Backstop only (WrapUpMiddleware hard limit is the primary stop): ~2 steps per tool call.
+    recursion_limit: 48
     examples:
       - "What IT services is Alko requesting in the RFP?"
       - "Summarize the SLA requirements in the RFP folder."

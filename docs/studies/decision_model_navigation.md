@@ -422,8 +422,11 @@ was the dominant cost driver, not navigation quality (the `low_confidence` flag 
 - **Baseline on the same 33 ids** (official judge): strict 69.7%, weighted 75.8%, 21.8 tool calls,
   614k input tokens. The new profile capped the baseline's worst tails (1.3–4.0M tokens dropped to
   0.9M / 0.9M / 0.2M), so Option C's bounded worst case held.
-- **Gold-evidence hit rate is not computable on OfficeQA Pro**: `evidence` is empty for all 33 subset
-  questions. Keep this metric for MMLongBench-Doc only.
+- **Gold-ANSWER comparison works as before** (the judge grades against the `answer` column — that is the
+  27.3% vs 69.7% figure above). What is not computable is the study's *evidence-hit-rate* retrieval metric
+  (gold evidence snippet ∈ selected sections): the OfficeQA Pro split ships **no `evidence` column at all**
+  (columns: uid, question, answer, source_docs, source_files, difficulty, doc_names, doc_name). Keep the
+  evidence-hit-rate metric for MMLongBench-Doc only.
 
 ### 6.4 What went right
 
@@ -458,7 +461,8 @@ was the dominant cost driver, not navigation quality (the `low_confidence` flag 
 2. **Tighten the decision toolset**: remove `search_sections` and `get_folder_toc` from the decision profile and
    keep `get_section_content` for re-reads plus `query_image`. Make re-navigation with `hints` the primary recovery
    path, with graph-tool fallback gated on `low_confidence` only.
-3. **Raise `recursion_limit` to about 100**; keep the wrap-up soft limit at 12.
+3. **Set `recursion_limit: 48`** (backstop ~2 steps/tool-call above the wrap-up hard limit of 20 calls);
+   keep the wrap-up soft limit at 12.
 4. **Fix the upstream bugs**: the genai-tk embeddings `model_name` kwarg (restores vector search) and the
    deepagents large-tool-result assertion (or chunk tool results above 10k chars).
 5. **Grade the 32 pending runs** (`cli bench grade -p decision_fast`) before drawing accuracy conclusions. The
@@ -471,7 +475,7 @@ was the dominant cost driver, not navigation quality (the `low_confidence` flag 
 ### 6.7 Recommendations implemented (2026-11-02, post-run)
 
 Recommendations 1–5 were implemented immediately after grading; the design was promoted to
-[docs/design/05_decision_model_navigation.md](../design/05_decision_model_navigation.md):
+[docs/design/06_decision_model_navigation.md](../design/06_decision_model_navigation.md):
 
 1. **Pack budgeting** — `pack_char_budget` (default 20000): sections are inlined best-score-first,
    all-or-nothing; over-budget sections render as a header plus a `get_section_content('<id>')` pointer
@@ -479,16 +483,39 @@ Recommendations 1–5 were implemented immediately after grading; the design was
 2. **Tightened toolset** — officeqa `decision` profile sets `excluded_tools: [get_folder_toc,
    search_sections, list_documents]` (stripped by deepagents' tool-exclusion middleware); recovery path is
    re-navigation with `hints` plus `get_document_toc` / `get_section_content`.
-3. **`recursion_limit: 100`** on both decision profiles.
+3. **Wrap-up / recursion pairing** — wrap-up soft 8 / hard 12 with cross-page extension capped at
+   12 / 16, `recursion_limit: 64` (~3 LangGraph steps per tool call; see §6.8 for the arithmetic).
 4. **Upstream fixes** — genai-tk `embeddings_factory` no longer passes `model_name`/`cache_dir` into
    pydantic embeddings classes (vector search restored on deepinfra; verified `embed_query` → dim 1024).
    The deepagents `_aintercept_large_tool_result` assertion is external; pack budgeting removes its trigger.
 5. **Parallel L2** — `l2_workers` (default 1) scores the kept documents' sections concurrently with
    per-document traces merged into the run trace (OfficeQA profile: 3).
 
-Pending: re-run `decision_fast` on the frozen subset to validate the fixes
-(from `~/prj/officeqa`: `cli bench run -p decision_fast --rerun --skip fetch --skip build -q $(python3 -c "import json; print(','.join(json.load(open('bench/officeqa_dm_subset.json'))['question_ids']))"))`,
-then the remaining matrix rows.
+### 6.8 Validation re-run (3 questions, 2026-11-02)
+
+Re-ran UID0015 (previously correct), UID0005 (hard multi-period, previously incorrect) and UID0068
+(previously deepagents-crashed) with the §6.7 fixes:
+
+- **UID0015**: correct → **correct** with 6 tool calls / 79k input tokens (was 13 calls / 207k) —
+  pack-first now holds end-to-end; one navigation, no fallback tools.
+- **UID0005**: incorrect-halted → **partial** (retrieval error) — pack budgeting + tool exclusion
+  removed the crash; wrap-up's forced answer fired at 12 calls (242k tokens) instead of dying.
+- **UID0068**: crashed → run now completes but still ends empty (`halted_or_empty`): after wrap-up
+  strips tools, `glm_5.3_Flash` keeps emitting rejected tool calls instead of text — a model-level
+  convergence failure on a genuinely hard question (the OCS rents line was dropped from modern
+  FFO-4; 2–3 low-confidence re-navigations never found it).
+
+**Wrap-up / recursion arithmetic (learned the hard way)**: LangGraph counts steps (~3 per tool call
+with deep agents + skills), WrapUpMiddleware counts tool calls and **auto-extends** limits for
+cross-page conversations (defaults: hard 20 → extended 28 ≈ 84 steps). A `recursion_limit` below
+the extended trajectory kills the run *before* wrap-up can force an answer — strictly worse than a
+forced (possibly wrong) answer. Final pairing: wrap-up soft 8 / hard 12, cross-page extension capped
+at 12 / 16, `recursion_limit: 64` (16 × ~3 + finalize < 64). The ACL warning was also de-duplicated
+(warn once per backend — previously ~150 warnings per bench run).
+
+**Remaining known issue**: the deepagents tool-rejection loop (model keeps calling stripped tools)
+ends an empty answer for glm; a downstream fix could make the rejection path inject the final-answer
+prompt as a user turn. Full-subset re-run of `decision_fast` still pending.
 
 ## 7. References
 

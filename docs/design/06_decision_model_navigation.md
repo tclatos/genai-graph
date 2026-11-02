@@ -83,6 +83,15 @@ Excess injected graph tools are stripped with `excluded_tools` (deepagents tool-
 OfficeQA excludes `get_folder_toc`, `search_sections`, `list_documents`; recovery is re-navigation with
 `hints` (≤2) and `get_document_toc` / `get_section_content`; `query_image` stays for visual questions.
 
+**Wrap-up / recursion pairing (critical)**: LangGraph counts *steps* (~3 per tool call with deep
+agents + skills); `WrapUpMiddleware` counts *tool calls* and auto-extends limits for cross-page
+conversations. `recursion_limit` must sit **above** the extended wrap-up trajectory, otherwise the
+run dies with `GraphRecursionError` before wrap-up can force a final answer (observed: limit 48 with
+cross-page hard 20 → 2/3 validation runs died answerless). OfficeQA pairing: wrap-up soft 8 / hard 12,
+`extended_soft_limit: 12`, `extended_hard_limit: 16`, `recursion_limit: 64`. Known limitation: when
+tools are stripped, `glm_5.3_Flash` may keep emitting rejected tool calls and end with an empty
+answer instead of text.
+
 ### 2.4 Benchmarks & telemetry
 
 - `runs.jsonl` records a per-question `navigation` block (`dm_calls`, `dm_tokens`, `dm_cost`,

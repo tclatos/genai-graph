@@ -138,12 +138,14 @@ def _get_authorized_content_hashes(backend: KgBackend, user_context: Any = None)
                 _DOCUMENT_LABEL,
             )
             return set()
-        logger.warning(
-            "{}.allowed_principals column missing — access control is NOT enforced "
-            "(likely a pre-ACL database; rebuild with `cli docgraph build` to add it, "
-            "or set GENAI_GRAPH_ACL_REQUIRED=1 to fail closed instead)",
-            _DOCUMENT_LABEL,
-        )
+        # Every tool call re-enters here; warn once per backend so bench logs stay readable.
+        if not getattr(backend, "_docgraph_acl_warned", False):
+            backend._docgraph_acl_warned = True
+            logger.warning(
+                "{}.allowed_principals column missing — access control is NOT enforced "
+                "(likely a pre-ACL database; rebuild with `cli docgraph build` to add it, or set GENAI_GRAPH_ACL_REQUIRED=1 to fail closed instead)",
+                _DOCUMENT_LABEL,
+            )
         return None
 
     query = f"MATCH (d:{_DOCUMENT_LABEL}) RETURN d.content_hash AS mh, d.allowed_principals AS principals"
@@ -176,13 +178,14 @@ def _is_document_authorized(backend: KgBackend, document_id: str, user_context: 
                 document_id,
             )
             return False
-        logger.warning(
-            "{}.allowed_principals column missing — access control is NOT enforced for {} "
-            "(likely a pre-ACL database; rebuild with `cli docgraph build` to add it, "
-            "or set GENAI_GRAPH_ACL_REQUIRED=1 to fail closed instead)",
-            _DOCUMENT_LABEL,
-            document_id,
-        )
+        if not getattr(backend, "_docgraph_acl_warned", False):
+            backend._docgraph_acl_warned = True
+            logger.warning(
+                "{}.allowed_principals column missing — access control is NOT enforced for {} "
+                "(likely a pre-ACL database; rebuild with `cli docgraph build` to add it, or set GENAI_GRAPH_ACL_REQUIRED=1 to fail closed instead)",
+                _DOCUMENT_LABEL,
+                document_id,
+            )
         return True
 
     clean_id = document_id.strip()

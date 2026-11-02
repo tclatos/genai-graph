@@ -500,10 +500,27 @@ Re-ran UID0015 (previously correct), UID0005 (hard multi-period, previously inco
   pack-first now holds end-to-end; one navigation, no fallback tools.
 - **UID0005**: incorrect-halted → **partial** (retrieval error) — pack budgeting + tool exclusion
   removed the crash; wrap-up's forced answer fired at 12 calls (242k tokens) instead of dying.
-- **UID0068**: crashed → run now completes but still ends empty (`halted_or_empty`): after wrap-up
-  strips tools, `glm_5.3_Flash` keeps emitting rejected tool calls instead of text — a model-level
-  convergence failure on a genuinely hard question (the OCS rents line was dropped from modern
-  FFO-4; 2–3 low-confidence re-navigations never found it).
+- **UID0068**: crashed → completed but still graded incorrect — now honestly a **retrieval miss**
+  (the OCS rents line is absent from modern FFO-4; 2–4 low-confidence re-navigations never found it)
+  instead of a crash.
+
+Trajectory inspection answered "why did we crash at all — it should be the contrary":
+
+1. **Per-step cost did NOT grow.** Both profiles consume ~3 LangGraph supersteps per tool call.
+   The baseline never crashed only because its pairing was consistent: wrap-up hard 36 calls × ~4
+   steps ≈ 144 < `recursion_limit: 160`. The first decision profiles broke that pairing
+   (cross-page-extended wrap-up 28 calls ≈ 84 steps vs `recursion_limit: 48/64`).
+2. **The decision agent flailed into the FILESYSTEM.** With the graph discovery tools excluded,
+   a disappointing pack pushed glm into `grep`/`glob`/`ls` — mostly against `/officeqa/data`, which
+   is fs-DENIED, plus an 8-variant `grep` loop over the skills workspace ("OCS", "royalt", "Shelf").
+   The baseline flailed into the *graph* (useful tools); excluding them created a new failure mode.
+   Fixed by excluding `ls`/`glob`/`grep` as well (`read_file` stays — SkillsMiddleware reads
+   SKILL.md through it).
+
+Final trio state (vs baseline on the same ids): UID0015 correct/79k (baseline correct/409k),
+UID0005 partial/436k (baseline incorrect/1.6M), UID0068 incorrect-retrieval/257k (baseline
+incorrect/2.1M) — **772k vs 4.1M tokens (−81%), no crashes**, tool sequences exactly the designed
+loop (navigate → pointers → python → answer).
 
 **Wrap-up / recursion arithmetic (learned the hard way)**: LangGraph counts steps (~3 per tool call
 with deep agents + skills), WrapUpMiddleware counts tool calls and **auto-extends** limits for

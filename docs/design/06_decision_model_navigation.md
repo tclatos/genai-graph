@@ -79,9 +79,13 @@ and no change to `create_docgraph_agent` are needed. Bench variants (different d
 sibling agent profiles differing only in factory kwargs.
 
 The synthesis agent is `type: deep` (the only engine with the skill system), `enable_planning: false`.
-Excess injected graph tools are stripped with `excluded_tools` (deepagents tool-exclusion middleware) —
-OfficeQA excludes `get_folder_toc`, `search_sections`, `list_documents`; recovery is re-navigation with
-`hints` (≤2) and `get_document_toc` / `get_section_content`; `query_image` stays for visual questions.
+Excess tools are stripped with `excluded_tools` (deepagents tool-exclusion middleware) — OfficeQA
+excludes the graph discovery tools (`get_folder_toc`, `search_sections`, `list_documents`) **and the
+filesystem exploration tools (`ls`, `glob`, `grep`)**: when a pack disappoints, the model otherwise
+flails into denied file paths and skills-workspace grep loops instead of re-navigating with hints
+(observed in the validation run). `read_file` stays — SkillsMiddleware reads SKILL.md through it.
+Recovery path is re-navigation with `hints` (≤2) and `get_document_toc` / `get_section_content`;
+`query_image` stays for visual questions.
 
 **Wrap-up / recursion pairing (critical)**: LangGraph counts *steps* (~3 per tool call with deep
 agents + skills); `WrapUpMiddleware` counts *tool calls* and auto-extends limits for cross-page

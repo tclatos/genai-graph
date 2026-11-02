@@ -77,7 +77,6 @@ class DecisionNavigatorConfig(BaseModel):
     max_depth: int = 2
     candidate_cap: int = 48
     prefilter: str = "off"
-    include_summaries: bool = False
     domain_context: str | None = None
     answerable_gate: bool = False
     pack_char_budget: int = 20000
@@ -286,23 +285,51 @@ class DecisionNavigator:
     # -- candidate assembly --------------------------------------------------
 
     @staticmethod
-    def _candidate_from_doc(doc: dict[str, Any]) -> Candidate:
+    def _compose_hint(
+        *,
+        edition: str | None = None,
+        description: str | None = None,
+        summary: str | None = None,
+    ) -> str:
+        """Compose the routing text the decision model scores for one candidate.
+
+        Both ingestion signals are included rather than picking one: in the
+        OfficeQA corpus a section ``summary`` exists for only ~21% of sections and
+        averages 42 characters, while ``description`` covers ~90% at 105
+        characters, so preferring the summary sends the model *less* text than is
+        available. The description leads, the summary is appended when it adds
+        text, and the edition (bulletin filename) is always included because
+        period-specific questions hinge on it.
+        """
+        parts: list[str] = []
+        if edition:
+            parts.append(f"From {edition}.")
+        desc = (description or "").strip()
+        summ = (summary or "").strip()
+        if desc:
+            parts.append(desc)
+        if summ and summ not in desc:
+            parts.append(summ)
+        return " ".join(parts)[:_HINT_CHARS]
+
+    @classmethod
+    def _candidate_from_doc(cls, doc: dict[str, Any]) -> Candidate:
         return Candidate(
             id=doc["content_hash"],
             label=doc.get("filename") or doc["content_hash"],
-            hint=(doc.get("summary") or doc.get("description") or "")[:_HINT_CHARS],
+            hint=cls._compose_hint(description=doc.get("description"), summary=doc.get("summary")),
         )
 
-    @staticmethod
-    def _candidate_from_section(row: dict[str, Any], document_id: str, doc_label: str | None = None) -> Candidate:
-        hint_source = row.get("summary") or row.get("description") or ""
-        # Prefix the edition so period-specific questions can discriminate between
-        # the same table in different bulletin issues (the filename carries the date).
-        prefix = f"From {doc_label}: " if doc_label else ""
+    @classmethod
+    def _candidate_from_section(cls, row: dict[str, Any], document_id: str, doc_label: str | None = None) -> Candidate:
         return Candidate(
             id=row["section_id"],
             label=row.get("title") or row["section_id"],
-            hint=f"{prefix}{hint_source}"[:_HINT_CHARS],
+            hint=cls._compose_hint(
+                edition=doc_label,
+                description=row.get("description"),
+                summary=row.get("summary"),
+            ),
             parent_id=document_id,
         )
 
@@ -453,6 +480,7 @@ class DecisionNavigator:
         score: float,
         depth: int,
         trace: NavigationTrace,
+        doc_label: str | None = None,
     ) -> tuple[Candidate, float]:
         """Descend into a selected section's subtree while the depth budget remains."""
         by_parent: dict[str | None, list[dict[str, Any]]] = {}
@@ -464,12 +492,7 @@ class DecisionNavigator:
             if not children:
                 break
             child_candidates = [
-                Candidate(
-                    id=row["section_id"],
-                    label=row.get("title") or row["section_id"],
-                    hint=(row.get("summary") or row.get("description") or "")[:_HINT_CHARS],
-                    parent_id=current.id,
-                )
+                self._candidate_from_section(row, current.id, doc_label)
                 for row in sorted(children, key=lambda r: r.get("sequence") or 0)
             ]
             ranked, _scores = self._score_candidates(state, child_candidates, trace)
@@ -582,7 +605,9 @@ class DecisionNavigator:
         selected: list[SectionEvidence] = []
         seen_sections: set[str] = set()
         for section, score in kept:
-            leaf, leaf_score = self._descend(state, toc_rows, section, score, self.config.max_depth, doc_trace)
+            leaf, leaf_score = self._descend(
+                state, toc_rows, section, score, self.config.max_depth, doc_trace, doc_label=doc_name
+            )
             fetch_ids = [sid for sid in (*self._ancestor_ids(toc_rows, leaf.id), leaf.id) if sid not in seen_sections]
             seen_sections.update(fetch_ids)
             for row in get_section_content(backend, fetch_ids):

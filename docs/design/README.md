@@ -15,6 +15,7 @@ The core architecture is presented in a didactic, numbered sequence designed for
 | **03** | [03_access_control_and_security_trimming.md](03_access_control_and_security_trimming.md) | **Enterprise Access Control & Security Trimming**: Document-level authorization, principal propagation via harness, early-binding Cypher query filtering, and fail-closed security. |
 | **04** | [04_rule_selected_ingest_routing.md](04_rule_selected_ingest_routing.md) | **Multi-Source Ingestion Routing & Route Tables**: Rule-selected YAML workflows, pathspec route tables, concurrent sub-workflows (PDF, Office, Web, Git), and single-writer fan-in into Ladybug. |
 | **05** | [05_mcp_and_agent_navigation.md](05_mcp_and_agent_navigation.md) | **Model Context Protocol (MCP 2.0) & Graph Tools**: Document Graph MCP servers (stdio and SSE), navigation tool suite (`list_documents`, `get_document_outline`, `get_section_content`, `search_sections`, `query_cypher`), and IDE integration. |
+| **06** | [06_decision_model_navigation.md](06_decision_model_navigation.md) | **Decision-Model Navigation (DecisionRAG)**: LLM-free document/section navigation via shared-context decision-model scoring (Clef-flash), budgeted evidence packs, tool-factory configuration, and per-run navigation telemetry. |
 
 ---
 

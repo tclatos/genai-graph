@@ -14,6 +14,7 @@ from typing import Any
 
 from loguru import logger
 
+from genai_graph.agent.decision_navigator import extract_navigation_trace, merge_navigation_traces
 from genai_graph.bench.models import BenchQuestion, BenchRunRecord
 from genai_graph.bench.watchdog import check_suspend
 
@@ -63,6 +64,7 @@ async def run_one_question(
     thinking_tokens: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     tool_results: list[dict[str, Any]] = []
+    navigation_blocks: list[dict[str, Any]] = []
     input_tokens = 0
     output_tokens = 0
     error: str | None = None
@@ -79,7 +81,12 @@ async def run_one_question(
                 tool_calls.append({"tool": event.tool_name, "args": event.args})
                 final_turn_tokens = []
             elif isinstance(event, ToolResultEvent):
-                tool_results.append({"tool": event.tool_name, "content": (event.content or "")[:1500]})
+                content = event.content or ""
+                if event.tool_name == "navigate_folder":
+                    trace = extract_navigation_trace(content)
+                    if trace:
+                        navigation_blocks.append(trace)
+                tool_results.append({"tool": event.tool_name, "content": content[:1500]})
             elif isinstance(event, UsageEvent):
                 input_tokens += event.input_tokens
                 output_tokens += event.output_tokens
@@ -114,6 +121,7 @@ async def run_one_question(
         thread_id=q_id,
         llm=llm,
         started_at=started_at,
+        navigation=merge_navigation_traces(navigation_blocks),
         metadata={
             k: v
             for k, v in q_dict.items()
@@ -205,6 +213,7 @@ def load_existing_runs(runs_path: Path) -> dict[str, BenchRunRecord]:
                         thread_id=data.get("thread_id"),
                         llm=str(data.get("llm", "")),
                         started_at=data.get("started_at"),
+                        navigation=data.get("navigation"),
                         metadata={
                             k: v
                             for k, v in data.items()
@@ -226,6 +235,7 @@ def load_existing_runs(runs_path: Path) -> dict[str, BenchRunRecord]:
                                 "thread_id",
                                 "llm",
                                 "started_at",
+                                "navigation",
                             )
                         },
                     )

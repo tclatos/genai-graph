@@ -40,6 +40,9 @@ def compute_bench_summary(
     total_tool_calls = 0
     total_in_tokens = 0
     total_out_tokens = 0
+    total_dm_calls = 0
+    total_dm_tokens = 0
+    total_dm_cost = 0.0
 
     for s in scores:
         data = s if isinstance(s, dict) else s.to_legacy_dict()
@@ -71,6 +74,10 @@ def compute_bench_summary(
         total_tool_calls += int(data.get("n_tool_calls") or len(data.get("tool_calls") or []))
         total_in_tokens += int(data.get("input_tokens") or 0)
         total_out_tokens += int(data.get("output_tokens") or 0)
+        navigation = data.get("navigation") or {}
+        total_dm_calls += int(navigation.get("dm_calls") or 0)
+        total_dm_tokens += int(navigation.get("dm_input_tokens") or 0) + int(navigation.get("dm_output_tokens") or 0)
+        total_dm_cost += float(navigation.get("dm_cost") or 0.0)
 
         if not agent_llm and data.get("llm"):
             agent_llm = str(data.get("llm"))
@@ -94,6 +101,9 @@ def compute_bench_summary(
         incorrect=incorrect,
         accuracy=acc,
         partial_accuracy=part_acc,
+        total_dm_calls=total_dm_calls,
+        total_dm_tokens=total_dm_tokens,
+        total_dm_cost=round(total_dm_cost, 6) if total_dm_cost else None,
         ocr_errors=ocr_errors,
         ocr_adjusted_n=ocr_adj_n,
         ocr_adjusted_accuracy=ocr_adj_acc,
@@ -143,6 +153,12 @@ def display_bench_summary(summary: BenchSummary) -> None:
         "Total Tokens",
         f"In: {summary.total_input_tokens:,} | Out: {summary.total_output_tokens:,}",
     )
+    if summary.total_dm_calls:
+        table.add_row(
+            "Decision-Model Navigation",
+            f"calls: {summary.total_dm_calls} | tokens: {summary.total_dm_tokens:,}"
+            f" | cost: ${summary.total_dm_cost or 0:.4f}",
+        )
     table.add_row("Agent LLM", summary.agent_llm or "n/a")
     table.add_row("Judge LLM", summary.judge_llm or "n/a")
 

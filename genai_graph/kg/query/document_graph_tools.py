@@ -264,6 +264,21 @@ def _pick(cols: set[str], candidates: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(c for c in candidates if c in cols)
 
 
+def _doc_key(backend: KgBackend, table: str) -> str:
+    """Return the column of *table* holding the parent document's content key.
+
+    Current schema: ``content_hash``. Older databases (built before the rename,
+    e.g. the Sep-2026 officeqa corpus) used ``markdown_hash`` with identical
+    values — tolerating both keeps every query tool working without a rebuild.
+    """
+    cols = _table_columns(backend, table)
+    if "content_hash" in cols:
+        return "content_hash"
+    if "markdown_hash" in cols:
+        return "markdown_hash"
+    return "content_hash"
+
+
 def _return_fields(backend: KgBackend, table: str, alias: str, candidates: tuple[str, ...]) -> str:
     """Build a ``alias.col AS col, ...`` fragment from the columns that actually exist."""
     avail = _pick(_table_columns(backend, table), candidates)
@@ -628,9 +643,10 @@ def get_document_toc(
         query = f"-- No sections table for document: {document_id}"
         return (result, query) if return_query else result
 
+    doc_key = _doc_key(backend, _SECTION_LABEL)
     fields = _return_fields(backend, _SECTION_LABEL, "s", _SECTION_TOC_KEYS)
     query = f"""
-        MATCH (s:{_SECTION_LABEL} {{content_hash: $content_hash}})
+        MATCH (s:{_SECTION_LABEL} {{{doc_key}: $content_hash}})
         RETURN {fields}
         ORDER BY s.sequence
     """
@@ -641,7 +657,7 @@ def get_document_toc(
     if _has_table(backend, "Image") and _has_relationship(backend, "HAS_IMAGE"):
         try:
             img_query = f"""
-                MATCH (s:{_SECTION_LABEL} {{content_hash: $content_hash}})-[:HAS_IMAGE]->(i:Image)
+                MATCH (s:{_SECTION_LABEL} {{{doc_key}: $content_hash}})-[:HAS_IMAGE]->(i:Image)
                 RETURN s.section_id AS section_id, i.image_id AS image_id, i.filename AS filename,
                        i.caption AS caption, i.description AS description
             """
@@ -964,11 +980,12 @@ def get_section_content(
     or a prefix of one — e.g. a bare (or truncated) document hash matches every section of
     that document, so `cli docgraph list`'s short hash column can be used directly.
     """
+    doc_key = _doc_key(backend, _SECTION_LABEL)
     query = f"""
         UNWIND $section_ids AS sid
         MATCH (s:{_SECTION_LABEL})
         WHERE s.section_id = sid OR (s.section_id STARTS WITH sid AND NOT sid CONTAINS "::")
-        RETURN DISTINCT s.section_id AS section_id, s.content_hash AS content_hash, s.title AS title,
+        RETURN DISTINCT s.section_id AS section_id, s.{doc_key} AS content_hash, s.title AS title,
                s.line_start AS line_start, s.line_end AS line_end, s.sequence AS sequence, s.text AS text
         ORDER BY content_hash, sequence
     """
@@ -997,7 +1014,8 @@ def reconstruct_document(
     Sections partition the document's lines without overlap, so concatenating
     their ``text`` in ``sequence`` order reproduces the original document.
     """
-    query = f"MATCH (s:{_SECTION_LABEL} {{content_hash: $content_hash}}) RETURN s.text AS text ORDER BY s.sequence"
+    doc_key = _doc_key(backend, _SECTION_LABEL)
+    query = f"MATCH (s:{_SECTION_LABEL} {{{doc_key}: $content_hash}}) RETURN s.text AS text ORDER BY s.sequence"
     content_hash = _resolve_content_hash(backend, document_id)
     if not content_hash:
         return (None, query) if return_query else None
@@ -1030,9 +1048,10 @@ def reconstruct_section(
 
     Accepts a full ``section_id`` (``{content_hash}::{sequence}``) or a prefix of one.
     """
+    doc_key = _doc_key(backend, _SECTION_LABEL)
     query = (
         f"MATCH (s:{_SECTION_LABEL}) WHERE s.section_id = $id OR (s.section_id STARTS WITH $id AND NOT $id CONTAINS '::') "
-        "RETURN s.section_id AS section_id, s.content_hash AS content_hash LIMIT 1"
+        f"RETURN s.section_id AS section_id, s.{doc_key} AS content_hash LIMIT 1"
     )
     rows, _ = _query_rows(backend, query, {"id": section_id})
     if not rows:
@@ -1146,9 +1165,10 @@ def _semantic_section_hits(
     if allowed is not None and not allowed:
         return []
     k = max(limit * _HNSW_OVERFETCH, 50)
+    chunk_key = _doc_key(backend, _CHUNK_LABEL)
     query = (
         f"CALL QUERY_VECTOR_INDEX('{_CHUNK_LABEL}','{_CHUNK_VECTOR_INDEX}', $query_vector, {k}) "
-        "RETURN node.section_id AS section_id, node.content_hash AS content_hash, "
+        f"RETURN node.section_id AS section_id, node.{chunk_key} AS content_hash, "
         "node.chunk_id AS chunk_id, node.chunk_text AS chunk_text, distance AS distance "
         "ORDER BY distance ASC"
     )
@@ -1238,31 +1258,32 @@ def _contains_section_hits(
             f"(CASE WHEN lower(s.title) CONTAINS '{escaped}' OR lower(s.text) CONTAINS '{escaped}' THEN {weight} ELSE 0 END)"
         )
 
+    doc_key = _doc_key(backend, _SECTION_LABEL)
     where = "(" + " OR ".join(conditions) + ")"
     score = " + ".join(score_parts)
     ret = (
-        f"RETURN s.content_hash AS content_hash, s.section_id AS section_id, s.title AS title, "
+        f"RETURN s.{doc_key} AS content_hash, s.section_id AS section_id, s.title AS title, "
         f"s.level AS level, s.line_start AS line_start{desc_field}, ({score}) AS score "
-        f"ORDER BY score DESC, s.content_hash, s.line_start LIMIT {limit}"
+        f"ORDER BY score DESC, s.{doc_key}, s.line_start LIMIT {limit}"
     )
 
     if allowed is not None:
         if not allowed:
             return []
         allowed_list_str = "[" + ", ".join(f"'{h}'" for h in allowed) + "]"
-        query = f"MATCH (s:{_SECTION_LABEL}) WHERE s.content_hash IN {allowed_list_str} AND {where} {ret}"
+        query = f"MATCH (s:{_SECTION_LABEL}) WHERE s.{doc_key} IN {allowed_list_str} AND {where} {ret}"
     elif folder_id is not None:
         escaped_fid = folder_id.replace("'", "\\'")
         if _has_relationship(backend, "HAS_SUBFOLDER"):
             query = (
                 f"MATCH (root:{_FOLDER_LABEL} {{folder_id: '{escaped_fid}'}})-[:HAS_SUBFOLDER*0..30]->(f:{_FOLDER_LABEL}) "
                 f"MATCH (f)-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) "
-                f"MATCH (s:{_SECTION_LABEL} {{content_hash: d.content_hash}}) WHERE {where} {ret}"
+                f"MATCH (s:{_SECTION_LABEL} {{{doc_key}: d.content_hash}}) WHERE {where} {ret}"
             )
         else:
             query = (
                 f"MATCH (f:{_FOLDER_LABEL} {{folder_id: '{escaped_fid}'}})-[:CONTAINS]->(d:{_DOCUMENT_LABEL}) "
-                f"MATCH (s:{_SECTION_LABEL} {{content_hash: d.content_hash}}) WHERE {where} {ret}"
+                f"MATCH (s:{_SECTION_LABEL} {{{doc_key}: d.content_hash}}) WHERE {where} {ret}"
             )
     else:
         query = f"MATCH (s:{_SECTION_LABEL}) WHERE {where} {ret}"
@@ -1287,6 +1308,7 @@ def _keyword_section_hits(
             backend.ensure_fts_extension()
             fetch_k = max(limit * 20, 200) if allowed is not None else limit
             cols = _table_columns(backend, _SECTION_LABEL)
+            doc_key = _doc_key(backend, _SECTION_LABEL)
             desc_field = ", node.description AS description" if "description" in cols else ""
 
             def _run_fts(q_text: str) -> list[dict[str, Any]]:
@@ -1295,7 +1317,7 @@ def _keyword_section_hits(
                     return []
                 fts = (
                     f"CALL QUERY_FTS_INDEX('{_SECTION_LABEL}','{_SECTION_FTS_INDEX}', '{clean_q}') "
-                    "RETURN node.content_hash AS content_hash, node.section_id AS section_id, "
+                    f"RETURN node.{doc_key} AS content_hash, node.section_id AS section_id, "
                     f"node.title AS title, node.level AS level, node.line_start AS line_start{desc_field}, "
                     f"score AS score ORDER BY score DESC LIMIT {fetch_k}"
                 )
@@ -1336,10 +1358,11 @@ def _fetch_section_meta(backend: KgBackend, section_ids: list[str]) -> dict[str,
         return {}
     cols = _table_columns(backend, _SECTION_LABEL)
     desc_field = ", s.description AS description" if "description" in cols else ""
+    doc_key = _doc_key(backend, _SECTION_LABEL)
     query = (
         f"MATCH (s:{_SECTION_LABEL}) WHERE s.section_id IN $ids "
         f"RETURN s.section_id AS section_id, s.title AS title, s.level AS level, "
-        f"s.line_start AS line_start, s.content_hash AS content_hash{desc_field}"
+        f"s.line_start AS line_start, s.{doc_key} AS content_hash{desc_field}"
     )
     rows, _ = _query_rows(backend, query, {"ids": section_ids})
     return {r["section_id"]: r for r in rows}
@@ -1488,6 +1511,7 @@ def search_images(
     cols = _table_columns(backend, "Image")
     if not cols:
         return []
+    image_doc_key = _doc_key(backend, "Image")
 
     target_content_hash: str | None = None
     if document_id:
@@ -1516,7 +1540,7 @@ def search_images(
                         node = row["node"]
                         if not isinstance(node, dict):
                             continue
-                        m_hash = node.get("content_hash")
+                        m_hash = node.get(image_doc_key)
                         if target_content_hash and m_hash != target_content_hash:
                             continue
                         if section_id and node.get("section_id") != section_id:
@@ -1564,7 +1588,7 @@ def search_images(
     cypher = f"""
     MATCH (s:{_SECTION_LABEL})-[:HAS_IMAGE]->(i:Image)
     {where_clause}
-    OPTIONAL MATCH (d:Document) WHERE d.content_hash = i.content_hash
+    OPTIONAL MATCH (d:Document) WHERE d.content_hash = i.{image_doc_key}
     RETURN i.image_id AS image_id,
            i.name AS name,
            i.filename AS filename,
@@ -1574,7 +1598,7 @@ def search_images(
            i.section_id AS section_id,
            s.title AS section_title,
            d.filename AS document_name,
-           i.content_hash AS content_hash
+           i.{image_doc_key} AS content_hash
     LIMIT $limit
     """
     rows, _ = _query_rows(backend, cypher, params)
@@ -1672,7 +1696,8 @@ def execute_image_query(
     # 1. Try DB lookup if Image table exists (pull base64_data directly from node)
     cols = _table_columns(backend, "Image")
     if cols:
-        fields = ["i.image_id AS image_id", "i.filename AS filename"]
+        image_doc_key = _doc_key(backend, "Image")
+        fields = [f"i.{image_doc_key} AS image_doc_key", "i.image_id AS image_id", "i.filename AS filename"]
         if "description" in cols:
             fields.append("i.description AS description")
         if "caption" in cols:
@@ -1684,13 +1709,19 @@ def execute_image_query(
         if "path" in cols:
             fields.append("i.path AS path")
 
-        fields_str = ", ".join(fields)
+        # Older schemas express ACL via allowed_roles/allowed_users (handled by
+        # the security-trimming layer elsewhere); only gate on the column when present.
+        doc_cols = _table_columns(backend, _DOCUMENT_LABEL)
+        if "allowed_principals" in doc_cols:
+            fields_str = ", ".join(fields) + ", d.allowed_principals AS doc_principals"
+        else:
+            fields_str = ", ".join(fields)
         query = f"""
             MATCH (i:Image)
             WHERE i.image_id = $ref OR i.filename = $ref
                OR (i.image_hash IS NOT NULL AND i.image_hash = $ref)
                OR (i.name IS NOT NULL AND i.name = $ref)
-            OPTIONAL MATCH (d:Document) WHERE d.content_hash = i.content_hash
+            OPTIONAL MATCH (d:Document) WHERE d.content_hash = i.{image_doc_key}
             RETURN {fields_str}, d.allowed_principals AS doc_principals
             LIMIT 1
         """

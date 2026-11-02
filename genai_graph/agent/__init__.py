@@ -6,6 +6,7 @@ The CLI (``cli docgraph agent``) and downstream projects (e.g. rfq_pricing's
 ``cli agent extract``) both go through :func:`create_docgraph_agent`.
 """
 
+from genai_graph.agent.decision_navigation import create_decision_navigation_tools
 from genai_graph.agent.docgraph_agent import (
     DEFAULT_LLM,
     DEFAULT_PROFILE,
@@ -23,6 +24,7 @@ __all__ = [
     "DEFAULT_LLM",
     "DEFAULT_PROFILE",
     "build_docgraph_system_prompt",
+    "create_decision_navigation_tools",
     "create_docgraph_agent",
     "create_docgraph_tools",
     "create_document_graph_tools_from_config",

@@ -72,6 +72,10 @@ class BenchRunRecord(BaseModel):
     thread_id: str | None = Field(default=None, description="Harness thread identifier")
     llm: str = Field(default="", description="Agent LLM model ID")
     started_at: str | None = Field(default=None, description="ISO timestamp of run start")
+    navigation: dict[str, Any] | None = Field(
+        default=None,
+        description="Decision-model navigation telemetry (dm_calls, dm_tokens, dm_cost, levels, low_confidence)",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Dataset specific metadata")
 
     def to_legacy_dict(self) -> dict[str, Any]:
@@ -99,6 +103,8 @@ class BenchRunRecord(BaseModel):
             "llm": self.llm,
             "started_at": self.started_at,
         }
+        if self.navigation is not None:
+            d["navigation"] = self.navigation
         d.update(self.metadata)
         return d
 
@@ -160,6 +166,9 @@ class BenchSummary(BaseModel):
     avg_tool_calls: float = 0.0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_dm_calls: int = 0
+    total_dm_tokens: int = 0
+    total_dm_cost: float | None = None
     agent_llm: str = ""
     judge_llm: str = ""
     generated_at: str = ""

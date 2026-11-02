@@ -39,3 +39,38 @@ agents:
     examples:
       - "What IT services is Alko requesting in the RFP?"
       - "Summarize the SLA requirements in the RFP folder."
+
+  # Decision-model-navigated variant (docs/studies/decision_model_navigation.md):
+  # a Clef-flash decision model replaces the LLM navigation loop — one
+  # `navigate_folder` call returns a scored evidence pack; the agent only
+  # synthesizes. Graph tools stay available for the low-confidence fallback.
+  docgraph_decision:
+    harness: langchain
+    name: "Document Graph Agent (Decision-Navigated)"
+    type: deep
+    description: "Deep agent over decision-model-navigated evidence packs (DecisionRAG)."
+    llm: deepseek_v4flash@openrouter
+    system_prompt: |
+      You answer questions about an ingested document corpus from the EVIDENCE PACK
+      returned by `navigate_folder` (decision-model navigation over the Document
+      Graph). Read the pack's sections, then answer; cite section ids for every
+      claim and run arithmetic in python_interpreter when needed. Call
+      `navigate_folder` again with refined `hints` describing what is missing
+      (max 2 re-navigations); only if the pack still comes back low-confidence,
+      fall back to `get_document_toc` / `get_section_content` / `search_sections`.
+    tools:
+      - factory: genai_graph.agent.decision_navigation.create_decision_navigation_tools
+        decision_model: fast
+        beam_width: 3
+        top_r_sections: 6
+        min_confidence: 0.5
+        max_depth: 2
+        candidate_cap: 48
+        prefilter: hybrid
+    skill_directories: []
+    enable_planning: false
+    enable_file_system: false
+    recursion_limit: 100
+    examples:
+      - "What IT services is Alko requesting in the RFP?"
+      - "Summarize the SLA requirements in the RFP folder."

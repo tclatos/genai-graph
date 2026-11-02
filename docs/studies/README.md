@@ -14,6 +14,7 @@ This directory contains research studies, comparative benchmark evaluations, and
 | [wiki_agent_scaffolding_retrospective.md](wiki_agent_scaffolding_retrospective.md) | **Wiki Agent Scaffolding Retrospective** | Scaffolding retrospective, offline notes, and image query case study |
 | [other_agentic_search_frameworks.md](other_agentic_search_frameworks.md) | **MMLongBench-Doc Agentic Survey** | Synthesis and comparative landscape of external agentic frameworks (DocAtlas, MDocAgent, VLD-RAG, DocLens, MAGE-RAG) on multimodal long documents |
 | [codebase_audit_2026-09.md](codebase_audit_2026-09.md) | **Codebase Quality & Security Audit** | Static analysis review across `genai_graph/` covering security, schema validation, and maintainability |
+| [decision_model_navigation.md](decision_model_navigation.md) | **Decision-Model Navigation (DecisionRAG)** | Design study adapting DecisionRAG (arXiv:2610.35868) to the Document Graph via genai-tk decision models: alternatives analysis, `decision` agent profile, OfficeQA Pro subset comparison protocol — implemented and **promoted to [docs/design/06_decision_model_navigation.md](../design/06_decision_model_navigation.md)**; first 33-question subset run with Clef-flash analyzed in §6 (pack budgeting identified as the blocker) |
 
 ---
 
@@ -21,6 +22,7 @@ This directory contains research studies, comparative benchmark evaluations, and
 
 - **Rule-Selected Ingestion Routing**: Formerly an exploratory study, now fully implemented and documented in [docs/design/04_rule_selected_ingest_routing.md](../design/04_rule_selected_ingest_routing.md).
 - **Access Control & Security Trimming**: Fully implemented and documented in [docs/design/03_access_control_and_security_trimming.md](../design/03_access_control_and_security_trimming.md) and [docs/access-control-security-trimming.md](../access-control-security-trimming.md).
+- **Decision-Model Navigation (DecisionRAG)**: Promoted from [decision_model_navigation.md](decision_model_navigation.md) to [docs/design/06_decision_model_navigation.md](../design/06_decision_model_navigation.md) after the 2026-11-02 OfficeQA subset run (navigator + tool factory + telemetry implemented in `genai_graph/agent/`).
 
 ---
 

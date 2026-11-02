@@ -315,6 +315,7 @@ def run_question_task(
     from genai_tk.agents.harness.profiles import load_agent_profiles
 
     from genai_graph.agent import create_docgraph_agent
+    from genai_graph.kg.query.document_graph_tools import release_connection
 
     sem = _get_semaphore(_QUESTION_SEMAPHORES, concurrency)
 
@@ -334,6 +335,11 @@ def run_question_task(
             return await run_one_question(harness, q, llm)
         finally:
             await harness.aclose()
+            # Each Ladybug Connection holds ~120 MB of native working set; keeping
+            # one per question thread grew the process until the buffer manager
+            # could not allocate and every later query failed. The task owns its
+            # thread's connection, so release it here (same thread).
+            release_connection(db_path)
 
     with sem:
         record = asyncio.run(_execute())

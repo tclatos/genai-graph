@@ -39,6 +39,7 @@ from genai_graph.kg.query.document_graph_tools import (
     get_document_toc,
     get_section_content,
     list_documents,
+    release_connection,
     search_sections,
 )
 
@@ -545,11 +546,20 @@ class DecisionNavigator:
 
         # L2 — section ranking per kept document (optionally parallel across
         # documents; decision models are stateless per request), then subtree descent.
+        def _worker(doc: tuple[str, str | None]) -> tuple[list[SectionEvidence], NavigationTrace]:
+            # Worker threads each get their own thread-local connection (~120 MB of
+            # native working set). ThreadPoolExecutor recreates its threads per
+            # navigate() call, so without this release every navigation leaked the
+            # pool's connections and the buffer manager eventually failed.
+            try:
+                return self._select_sections_for_doc(query, doc[0], doc[1], state, hints)
+            finally:
+                if self.db_path:
+                    release_connection(self.db_path)
+
         if len(doc_ids) > 1 and self.config.l2_workers > 1:
             with ThreadPoolExecutor(max_workers=min(self.config.l2_workers, len(doc_ids))) as pool:
-                results = list(
-                    pool.map(lambda d: self._select_sections_for_doc(query, d[0], d[1], state, hints), doc_ids)
-                )
+                results = list(pool.map(_worker, doc_ids))
         else:
             results = [
                 self._select_sections_for_doc(query, doc_id, doc_name, state, hints) for doc_id, doc_name in doc_ids

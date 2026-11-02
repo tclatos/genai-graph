@@ -1944,6 +1944,35 @@ def _connect(db_path: str) -> KgBackend:
     return backend
 
 
+def release_connection(db_path: str) -> None:
+    """Close and forget the calling thread's connection for *db_path*.
+
+    Each Ladybug ``Connection`` carries a large native working set (~120 MB
+    measured), and connections used to be kept for the whole process lifetime.
+    A 20-question loop grew RSS from 150 MB to 3.2 GB that way, until the buffer
+    manager could not allocate ("buffer pool is full and no memory could be
+    freed") and every later query failed — the failure mode behind the wedged
+    benchmark runs.
+
+    A bench question task owns its thread's connection exclusively, so closing
+    it when the question finishes is safe and bounds the process footprint.
+    Closing is explicit and orderly (``Connection.close()`` releases cached
+    results and prepared statements, then unregisters from the Database), which
+    is what the keep-alive list existed to guarantee.
+    """
+    backends: dict[str, KgBackend] | None = getattr(_TOOL_CONN_LOCAL, "backends", None)
+    if not backends:
+        return
+    backend = backends.pop(db_path, None)
+    if backend is None:
+        return
+    with contextlib.suppress(ValueError):
+        _KEEPALIVE_BACKENDS.remove(backend)
+    with contextlib.suppress(Exception):
+        backend.close()
+    logger.debug("Released Document Graph connection for {}", db_path)
+
+
 def _tool_error(exc: Exception) -> str:
     """Turn an exception into a concise, agent-friendly tool result string."""
     # Tool failures otherwise vanish from the console (they only surface inside

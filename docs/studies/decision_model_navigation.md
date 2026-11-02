@@ -582,6 +582,33 @@ tuned from the recorded runs.
 6. **Log noise.** Langfuse OTLP export fails every few seconds for the whole run (its container is
    restarting), burying real errors.
 
+### 6.10 Root cause of every wedge: leaked Ladybug connections (fixed)
+
+Every benchmark wedge traced back to one leak, measured directly:
+
+- `_connect()` creates one ``ladybug.Connection`` per (thread, db) and pushed it onto a
+  process-lifetime keep-alive list. Each connection carries **~120 MB** of native working set.
+- A 20-question simulation grew RSS from **151 MB to 3.25 GB** (≈155 MB/question) with
+  `db._connections` rising 1 per question — never released. Once allocation failed, every
+  later query raised "buffer pool is full and no memory could be freed", the agent retried
+  forever, and the run wedged (2,305 errors over 2 h in the 33-question attempt).
+- Pool size only moved the failure point: 8 GB/concurrency 4 wedged at 17 questions,
+  4 GB/concurrency 2 at 26, and the token-heavy hard set after ~5.
+
+Two releases fix it:
+
+1. `release_connection(db_path)` closes and forgets the calling thread's connection
+   (explicit ``Connection.close()``, which releases cached results and prepared statements
+   before unregistering from the Database). Called from the bench question task's `finally`,
+   which owns its thread's connection. Re-measured: `keepalive=0`, `db_connections=0`,
+   RSS plateaus at ~1.1 GB across 20 questions, no native heap corruption.
+2. The navigator's L2 worker threads (`l2_workers`) each opened their own connection and
+   `ThreadPoolExecutor` recreates its threads per `navigate()` call, so they leaked 3
+   connections per navigation. The worker wrapper now releases after each document.
+
+Result on the 8 hard questions: **8/8 completed with 0 buffer-pool errors** (previously 56
+errors and a crash), improved=2 / regressed=0 / same=6 against the baseline.
+
 Proposed improvements, priority order:
 
 1. **Release per-question native state** — close/evict the thread-local connection and drop agent

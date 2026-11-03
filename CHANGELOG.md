@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) — [Semantic V
 
 ## [Unreleased]
 
+### Changed
+
+- **Decision-model validator rename followed through**: `BaseDecisionModel.validate_question_count` was renamed to `validate_request` in `genai-tk` and now also enforces per-question option and level caps. The `ScriptedDecisionModel` test double in `tests/unit_tests/agent/test_decision_navigator.py` calls the renamed method. Navigator docs ([docs/design/06_decision_model_navigation.md](docs/design/06_decision_model_navigation.md), [docs/studies/decision_model_navigation.md](docs/studies/decision_model_navigation.md)) now describe `batch_invoke` chunking by the model's batching limit (`recommended_batch_size`, falling back to `max_questions`) rather than by `max_questions` alone.
+
 ### Added
 
 #### Layered DAG Visualization

@@ -43,7 +43,7 @@ class ScriptedDecisionModel(BaseDecisionModel):
         **kwargs: Any,
     ) -> ClassifierResponse:
         request = input if isinstance(input, ClassifierRequest) else ClassifierRequest.model_validate(input)
-        self.validate_question_count(request)
+        self.validate_request(request)
         self.requests.append(
             {
                 "state": str(request.state),
@@ -309,9 +309,7 @@ def test_parallel_l2_workers_merge_traces(monkeypatch: pytest.MonkeyPatch) -> No
         sections={},
     )
     model = ScriptedDecisionModel()
-    navigator = DecisionNavigator(
-        DecisionNavigatorConfig(beam_width=3, top_r_sections=1, l2_workers=3), model=model
-    )
+    navigator = DecisionNavigator(DecisionNavigatorConfig(beam_width=3, top_r_sections=1, l2_workers=3), model=model)
     pack = navigator.navigate("q")
     assert pack.trace.dm_calls == 1 + 3  # L1 + one L2 batch per kept document
     assert pack.trace.dm_input_tokens == 10 * (4 + 3 * 2)  # 4 docs at L1 + 2 sections per doc at L2

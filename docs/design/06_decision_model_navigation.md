@@ -45,7 +45,8 @@ flowchart LR
   (L2), `navigate(query, folder_id) -> EvidencePack` (beam search + descent + fetch).
 - Shared-context rule (paper's +7.7 pts): all candidates of one parent are scored against the
   same `state` = question + refinement hints + `domain_context`. `batch_invoke` chunking by the
-  provider's `max_questions` stays within one parent's list, so probabilities remain comparable.
+  model's batching limit (`recommended_batch_size`, falling back to `max_questions`) stays within
+  one parent's list, so probabilities remain comparable.
 - Domain routing knowledge (e.g. Treasury acronyms, revision-selection rules) is injected verbatim
   into `state` via `domain_context`/`domain_context_file` — navigation knowledge reaches the
   decision model; formulas/citations stay on the synthesis side.

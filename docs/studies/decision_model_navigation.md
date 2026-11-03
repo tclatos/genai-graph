@@ -151,8 +151,8 @@ class DecisionNavigatorConfig(BaseModel):
     answerable_gate: bool = False         # add a corpus-level 'answerable' Noul (MMLongBench)
 ```
 
-Sketch of the level-score primitive (batch chunking delegated to `batch_invoke`, so per-provider
-`max_questions` limits are respected automatically):
+Sketch of the level-score primitive (batch chunking delegated to `batch_invoke`, so the model's
+batching limits are respected automatically):
 
 ```python
 def _score_candidates(self, state: str, candidates: list[Candidate]) -> list[tuple[Candidate, float]]:

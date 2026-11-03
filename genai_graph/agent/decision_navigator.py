@@ -219,8 +219,8 @@ class DecisionNavigator:
     Per level, all candidates sharing a parent are scored in requests sharing
     the same ``state`` text (query + hints + ``domain_context``) — the paper's
     shared-context joint scoring. Chunking introduced by ``batch_invoke`` when a
-    level exceeds the provider's ``max_questions`` stays within one parent's
-    candidate list, so per-candidate probabilities remain comparable.
+    level exceeds the model's batching limit stays within one parent's candidate
+    list, so per-candidate probabilities remain comparable.
     """
 
     def __init__(

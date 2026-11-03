@@ -239,19 +239,34 @@ class BenchCommands(CliTopCommand):
                 str | None,
                 typer.Option("-p", "--profile", help="Bench run profile key"),
             ] = None,
+            question_ids: Annotated[
+                str | None,
+                typer.Option(
+                    "-q",
+                    "--question-ids",
+                    help="Comma-separated question IDs to grade (default: every run record on disk)",
+                ),
+            ] = None,
             config_path: Annotated[
                 str | None,
                 typer.Option("-c", "--config", help="Path to bench YAML configuration file"),
             ] = None,
         ) -> None:
-            """Grade existing question runs with LLM-as-judge without re-running agent turns."""
+            """Grade existing question runs with LLM-as-judge without re-running agent turns.
+
+            Restrict with -q when runs were produced in batches (e.g. one process per
+            chunk): grading always reads the LATEST record per question, so without a
+            filter a chunk would re-grade questions whose newest record came from an
+            earlier configuration.
+            """
             load_env()
             cfg_p = Path(config_path) if config_path else None
             cfg = load_bench_profile(profile_name=profile, config_path=cfg_p)
             from genai_graph.bench.flows import grade_flow
 
+            ids = [q.strip() for q in question_ids.split(",") if q.strip()] if question_ids else None
             _ensure_managed_prefect_server()
-            scores = grade_flow(cfg)
+            scores = grade_flow(cfg, run_ids=ids)
             summary = compute_bench_summary(
                 scores,
                 profile_name=cfg.profile_name,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import gc
 import shutil
 import threading
 from pathlib import Path
@@ -315,6 +316,7 @@ def run_question_task(
     from genai_tk.agents.harness.profiles import load_agent_profiles
 
     from genai_graph.agent import create_docgraph_agent
+    from genai_graph.bench.runner import process_memory_mb
     from genai_graph.kg.connections import release_connection
 
     sem = _get_semaphore(_QUESTION_SEMAPHORES, concurrency)
@@ -340,6 +342,18 @@ def run_question_task(
             # could not allocate and every later query failed. The task owns its
             # thread's connection, so release it here (same thread).
             release_connection(db_path)
+            # Drop the agent's object graph promptly and force a collection: the
+            # deep agent, its LLM clients and message history are the largest
+            # per-question allocations, and RSS is logged so a run's memory
+            # profile can be read against the questions it completed.
+            del harness, profile
+            collected = gc.collect()
+            logger.info(
+                "memory after {}: {:.0f} MB RSS ({} objects collected)",
+                q.id,
+                process_memory_mb(),
+                collected,
+            )
 
     with sem:
         record = asyncio.run(_execute())

@@ -185,6 +185,15 @@ def count_error_tool_results(records: list[BenchRunRecord]) -> dict[str, Any]:
     }
 
 
+def process_memory_mb() -> float:
+    """Return the process resident set size in MB (0.0 when unavailable)."""
+    try:
+        with open("/proc/self/statm") as fh:
+            return int(fh.read().split()[1]) * 4096 / 1e6
+    except Exception:
+        return 0.0
+
+
 def count_fatal_tool_results(record: BenchRunRecord) -> int:
     """Count tool results in *record* that carry an unrecoverable database error."""
     hits = 0

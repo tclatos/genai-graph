@@ -167,6 +167,8 @@ class LadybugConnectionManager(ThreadLocalConnectionManager):
 
     name: str = "ladybug"
 
+    _announced: set[str] = PrivateAttr(default_factory=set)
+
     def _create(self, target: str, **options: Any) -> KgBackend:
         """Attach a new Connection to the process-shared Database for *target*."""
         from genai_tk.utils.ladybug import get_shared_database
@@ -178,6 +180,12 @@ class LadybugConnectionManager(ThreadLocalConnectionManager):
             # bookkeeping entirely. A missing file keeps the read-write open so
             # the "not ingested yet" experience still works.
             read_only = Path(target).exists()
+        if target not in self._announced:
+            # The first connection fixes the shared Database's buffer pool for the
+            # whole process; log it so a "buffer pool is full" failure can be read
+            # against the size that was actually requested.
+            self._announced.add(target)
+            logger.info("ladybug: shared Database for {} (buffer pool {}, read_only={})", target, pool_size, read_only)
         backend = LadybugBackend()
         backend.attach(
             get_shared_database(target, read_only=read_only, buffer_pool_size=pool_size),

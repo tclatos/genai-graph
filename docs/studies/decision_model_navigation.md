@@ -628,6 +628,29 @@ Proposed improvements, priority order:
    since the two are currently merged into `halted_or_empty_response`.
 8. **Fix or disable Langfuse export** during bench runs.
 
+### 6.11 Final 33-question campaign report (2026-11-03)
+
+Full report: [officeqa/report/DECISION_NAVIGATION_33Q_REPORT.md](../../../officeqa/report/DECISION_NAVIGATION_33Q_REPORT.md).
+
+Headline: the navigator is not yet measurable at full-subset scale for infrastructure reasons, not
+navigation quality.
+
+| Group | n | decision_fast | baseline |
+|---|---|---|---|
+| All 33 | 33 | 8 correct / 4 partial (24.2% strict, 30.3% weighted) | 23 / 4 (69.7% / 75.8%) |
+| Healthy database (0 buffer-pool errors) | 16 | **8 / 4 — 50% strict, 62.5% weighted** | 11 / 2 — 68.8% / 75.0% |
+| Degraded by buffer-pool errors | 17 | **0 / 0 — 0%** | 12 / 2 — 76.5% |
+
+The pool still fails after ~14 questions (249 errors, run aborted by the fail-fast guard), and free
+memory declines 15 GB → 9 GB across the run. Connections are proven bounded (`live=0`,
+`db_connections=0`, RSS plateau 1.68 GB over 24 navigations), so the remaining growth is on the
+agent/LLM side — the top open item. On the healthy 16 questions the gap to baseline is **12.5 points**
+at **33% fewer input tokens**, and 3 of the 4 losses are the same table-column reading failure
+("national defense *and related activities*" vs the requested series) rather than navigation errors.
+
+Cost over the whole subset: 452 vs 718 tool calls (−37%), 10.78M vs 20.26M input tokens (−47%),
+navigation $0.031 total (~$0.0009/question, zero generated tokens).
+
 ## 7. References
 
 - Wan, Jünger, Du, Liu, Krishnan, Weinberger — [Retriever-Free Retrieval: Navigating Documents with Decision Models](https://arxiv.org/abs/2610.35868), arXiv:2610.35868, Oct 2026 (DecisionRAG)

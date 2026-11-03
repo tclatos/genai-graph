@@ -22,9 +22,9 @@ _EXPORTS = {
 }
 
 __all__ = [
-    "CypherQueryApp",
     "DEFAULT_CYPHER_EXAMPLES",
     "SYSTEM_PROMPT",
+    "CypherQueryApp",
     "build_kg_agent_system_prompt",
     "create_kg_cypher_tool",
     "query_kg",

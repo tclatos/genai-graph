@@ -651,6 +651,46 @@ at **33% fewer input tokens**, and 3 of the 4 losses are the same table-column r
 Cost over the whole subset: 452 vs 718 tool calls (−37%), 10.78M vs 20.26M input tokens (−47%),
 navigation $0.031 total (~$0.0009/question, zero generated tokens).
 
+### 6.12 Closing summary: LLM routing vs decision-model routing (2026-11-03)
+
+The paired comparison below holds the synthesizer and the questions fixed and varies **only the
+routing**, so it isolates the decision model from everything downstream. Both rows are the same 16
+questions, both graded on a healthy database, both synthesizing with `glm_5.3_Flash`.
+
+| Routing | Strict | Weighted | Input tokens | Tool calls |
+|---|---|---|---|---|
+| **LLM routing** (agent drives `get_folder_toc` → `get_document_toc` → `search_sections`) | 11 correct / 2 partial — 69% | **75.0%** | 12.28M | 373 |
+| **Decision-model routing** (`navigate_folder` evidence packs) | 8 correct / 4 partial — 50% | **62.5%** | 8.23M (**−33%**) | 263 (**−29%**) |
+
+Decision-model navigation itself, over those runs: **352 joint-scoring calls, 815k tokens,
+$0.029 total, ~10 s per question, zero generated tokens.**
+
+**Synthesizer swap (12-question overlap, decision routing):** `glm_5.3_Flash` 42% strict / 54.2%
+weighted at 6.46M tokens; `deepseek4.1flash-1017` 42% strict / 50.0% weighted at 9.12M tokens. The
+newer model is the same on strict accuracy and worse on weighted accuracy with 41% more tokens —
+the LLM change is not an improvement here.
+
+What this means:
+
+1. **Decision-model routing is a cost instrument, not yet a quality instrument.** It removes the
+   token-generating navigation loop (−33% tokens, −29% calls, deterministic and replayable, ~$0.001
+   and 10 s per question for navigation) at a **12.5-point weighted accuracy cost** on this set.
+2. **The accuracy gap is not a navigation failure.** On the healthy questions the navigator put the
+   right document and the right table in front of the agent; the losses are downstream *reading*
+   failures — the wrong column/series inside a correct table ("national defense and *related*
+   activities" vs "and *associated* activities" vs a table total) in 3 of the 4 losses.
+3. **The comparison is still bounded by infrastructure.** Only 16 of 33 questions could be measured
+   on a healthy database in one process; the residual agent-side growth (~370 MB per question, not
+   reclaimed by `gc.collect()`) killed the rest. Chunking (one process per 8 questions) is the
+   workaround and produced 0 buffer-pool errors where the monolithic run produced 249.
+4. **Where it already wins**: parity on the easy end at a fraction of the cost (UID0015 8–11 calls /
+   171–260k tokens vs 22 / 409k; UID0013 25 calls / 884k vs 67 / 4.03M), and it never degrades into
+   the baseline's multi-million-token search loops.
+
+**Verdict**: worth keeping and continuing, with the next effort on (a) the agent-side memory leak that
+blocks full-subset measurement, and (b) the table-column reading discipline — not on the navigator's
+routing decisions, which are cheap and correct at both levels when measured against the traces.
+
 ## 7. References
 
 - Wan, Jünger, Du, Liu, Krishnan, Weinberger — [Retriever-Free Retrieval: Navigating Documents with Decision Models](https://arxiv.org/abs/2610.35868), arXiv:2610.35868, Oct 2026 (DecisionRAG)

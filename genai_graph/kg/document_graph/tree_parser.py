@@ -198,6 +198,8 @@ def _strip_surrounding_emphasis(title: str) -> str:
         m = _SURROUNDING_EMPHASIS_RE.match(s)
     s = _LEADING_DANGLING_RE.sub("", s)
     s = _TRAILING_DANGLING_RE.sub("", s)
+    s = re.sub(r"[\t\r\n]+", " ", s)
+    s = re.sub(r"\s{2,}", " ", s).strip()
     return s
 
 

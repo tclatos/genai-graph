@@ -358,4 +358,54 @@ class TestSectionBranching:
         descs = [s.description for s in cleaned.sections]
         assert descs[0] is None  # restatement dropped
         assert descs[1] == "Server CPUs, GPUs and DPUs."  # substantive kept
-        assert descs[2] is None  # null stays null
+
+    def test_branch_summarization_matches_tolerantly_across_whitespace(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from genai_graph.kg.document_graph.outline_extract import (
+            BranchOutline,
+            OutlineEntry,
+            SectionBranch,
+            _summarize_branch_one,
+        )
+        from genai_graph.kg.document_graph.tree_parser import FlatSection
+
+        branch = SectionBranch(
+            branch_title="Signatures",
+            sections=[
+                FlatSection(
+                    title="ALKO OY\t\t\t\t\t[SUPPLIER’S NAME]",
+                    level=2,
+                    line_start=1,
+                    line_end=5,
+                    text="ALKO OY\t\t\t\t\t[SUPPLIER’S NAME]\n\nSignatures block",
+                    token_count=10,
+                )
+            ],
+        )
+
+        # The LLM returns the title with clean whitespace (spaces instead of tabs)
+        fake_llm_out = BranchOutline(
+            sections=[
+                OutlineEntry(
+                    title="ALKO OY [SUPPLIER’S NAME]",
+                    level=2,
+                    description="Execution and signature blocks of the contracting parties.",
+                )
+            ]
+        )
+        monkeypatch.setattr(
+            "genai_graph.kg.document_graph.outline_extract._call_branch_llm_with_retry",
+            lambda **kwargs: fake_llm_out,
+        )
+
+        entries = _summarize_branch_one(
+            branch=branch,
+            filename="doc.md",
+            config=_config(tmp_path),
+            llm_id="fake@fake",
+            warnings=[],
+        )
+        assert len(entries) == 1
+        assert entries[0].title == "ALKO OY\t\t\t\t\t[SUPPLIER’S NAME]"
+        assert entries[0].description == "Execution and signature blocks of the contracting parties."

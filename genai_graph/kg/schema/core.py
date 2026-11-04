@@ -822,10 +822,7 @@ class GraphSchema(BaseModel):
         for relation in self.relations:
             key = (relation.from_node.label, relation.to_node.label, relation.name)
             if key in relation_keys:
-                warnings_list.append(
-                    f"Duplicate relationship '{relation.name}' defined between "
-                    f"{key[0]} and {key[1]}"
-                )
+                warnings_list.append(f"Duplicate relationship '{relation.name}' defined between {key[0]} and {key[1]}")
             else:
                 relation_keys.add(key)
 

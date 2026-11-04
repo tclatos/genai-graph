@@ -139,16 +139,16 @@ New module `genai_graph/agent/decision_navigator.py`. Pydantic-configured, provi
 
 ```python
 class DecisionNavigatorConfig(BaseModel):
-    decision_model: str = "fast"          # tag or 'model@provider' → get_decision_model()
-    beam_width: int = 3                   # documents kept at L1
-    top_r_sections: int = 6               # sections kept per document at L2 (total cap)
-    min_confidence: float = 0.5           # Noul gate; below → low-confidence flag (fallback)
-    max_depth: int = 2                    # section-tree levels to descend
-    candidate_cap: int = 48               # max questions per level per parent
-    prefilter: str = "off"                # off | hybrid  (search_sections prefilter above cap)
-    include_summaries: bool = False       # use section summary instead of description
-    domain_context: str | None = None     # domain routing knowledge injected into `state`
-    answerable_gate: bool = False         # add a corpus-level 'answerable' Noul (MMLongBench)
+    decision_model: str = "fast"  # tag or 'model@provider' → get_decision_model()
+    beam_width: int = 3  # documents kept at L1
+    top_r_sections: int = 6  # sections kept per document at L2 (total cap)
+    min_confidence: float = 0.5  # Noul gate; below → low-confidence flag (fallback)
+    max_depth: int = 2  # section-tree levels to descend
+    candidate_cap: int = 48  # max questions per level per parent
+    prefilter: str = "off"  # off | hybrid  (search_sections prefilter above cap)
+    include_summaries: bool = False  # use section summary instead of description
+    domain_context: str | None = None  # domain routing knowledge injected into `state`
+    answerable_gate: bool = False  # add a corpus-level 'answerable' Noul (MMLongBench)
 ```
 
 Sketch of the level-score primitive (batch chunking delegated to `batch_invoke`, so the model's
@@ -159,14 +159,14 @@ def _score_candidates(self, state: str, candidates: list[Candidate]) -> list[tup
     request = {
         "state": state,
         "questions": {
-            c.id: Noul(instructions=f"Is '{c.label}' likely to contain information needed "
-                                    f"to answer the question? {c.hint}")
+            c.id: Noul(
+                instructions=f"Is '{c.label}' likely to contain information needed to answer the question? {c.hint}"
+            )
             for c in candidates
         },
     }
     response = self.model.batch_invoke(request)
-    ranked = sorted(((c, response.answers[c.id].noul) for c in candidates),
-                    key=lambda t: t[1], reverse=True)
+    ranked = sorted(((c, response.answers[c.id].noul) for c in candidates), key=lambda t: t[1], reverse=True)
     return ranked
 ```
 

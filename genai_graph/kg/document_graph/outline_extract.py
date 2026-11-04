@@ -394,6 +394,10 @@ def _clean_markdown_for_prompt(raw: str, head_rows: int = 3, tail_rows: int = 2)
     )
     text = num_run_re.sub(_condense_numbers, text)
 
+    # 5. Sanitize control characters and tabs to avoid JSON string parsing failures in LLM outputs
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", text)
+    text = text.replace("\t", " ")
+
     return text
 
 
@@ -690,7 +694,12 @@ def _render_headings_block(headings: list[tuple[str, int, int]]) -> str:
     """Render detected headings as a numbered ``[Llevel] title`` list for the prompt."""
     if not headings:
         return "(no headings detected)"
-    return "\n".join(f"{i}. [L{level}] {title}" for i, (title, level, _line) in enumerate(headings, 1))
+    rendered = []
+    for i, (title, level, _line) in enumerate(headings, 1):
+        clean_title = re.sub(r"[\x00-\x1f]", " ", title)
+        clean_title = re.sub(r"\s+", " ", clean_title).strip()
+        rendered.append(f"{i}. [L{level}] {clean_title}")
+    return "\n".join(rendered)
 
 
 def _align_outline(outline: DocumentOutline, algo_headings: list[tuple[str, int, int]]) -> DocumentOutline:
@@ -1036,8 +1045,15 @@ def _summarize_branch_one(
             entry_map = {e.title: e for e in res.sections}
             out: list[OutlineEntry] = []
             for h_title, h_level, _ in branch_headings:
+                matched: OutlineEntry | None = None
                 if h_title in entry_map:
                     matched = entry_map[h_title]
+                else:
+                    for e in res.sections:
+                        if _titles_match(h_title, e.title):
+                            matched = e
+                            break
+                if matched is not None:
                     out.append(
                         OutlineEntry(
                             title=h_title,

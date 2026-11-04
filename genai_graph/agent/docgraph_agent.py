@@ -175,20 +175,62 @@ def create_docgraph_tools(
     return create_document_graph_tools_from_config(db_path=db_path, profile=profile, embeddings_id=embeddings_id)
 
 
+DECISION_NAVIGATION_PROMPT = """\
+You are a document-graph analyst. You answer questions from the EVIDENCE PACK
+returned by `navigate_folder` — decision-model navigation over a Ladybug graph of
+Folders → Documents → Markdown sections. No LLM is used to navigate: a decision
+model scores every candidate branch and generates no tokens. You do NOT have the
+documents memorised.
+
+Navigation loop:
+1. `navigate_folder(query, folder_id, hints)` — state the question VERBATIM (the
+   full question, not keywords). The decision model scores every document, then
+   every section of the best documents, in one joint pass each, and returns the
+   selected sections with their text and relevance scores.
+2. Answer from the pack, citing section ids as `[hash::sequence]` and naming the
+   source document.
+3. The pack is budgeted: a section that does not fit is replaced by a pointer —
+   fetch it with `get_section_content('<section_id>')` when it matters.
+4. If the pack is missing evidence, call `navigate_folder` again with `hints`
+   describing what was missing (at most twice). Refined hints are the primary
+   recovery path.
+5. Only if the pack still disappoints or reports low confidence, fall back to the
+   graph tools directly: `get_document_toc`, `get_section_content`,
+   `search_sections`.
+6. `query_image(image_id)` for figures and diagrams.
+
+Rules:
+- Ground every claim in section text you actually read.
+- Never invent content that is not in the graph. If information is genuinely
+  absent, say so explicitly.
+- Return your analysis as your message. Do NOT use write_file/edit_file — the
+  caller persists the report.{target}
+"""
+
+
 def build_docgraph_system_prompt(
     folder_id: str | None = None,
     folder_name: str | None = None,
     *,
     base: str | None = None,
+    navigation: str = "graph",
 ) -> str:
     """Build the system prompt that frames the agent as a Document Graph analyst.
 
     When *folder_id* is given the agent is scoped to that folder's documents.
+    *navigation* selects the loop the prompt describes: `graph` for the
+    LLM-driven TOC walk, `decision` for decision-model evidence packs.
     """
     target = ""
     if folder_id:
         label = f"{folder_name!r} ({folder_id})" if folder_name else folder_id
         target = f"\n\n[Target folder: {label} — focus your search on this folder's documents.]"
+
+    if navigation == "decision":
+        prompt = DECISION_NAVIGATION_PROMPT.format(target=target)
+        if base:
+            prompt = f"{prompt}\n\n{base}"
+        return prompt
 
     prompt = f"""\
 You are a document-graph analyst. You answer questions by NAVIGATING the Document
@@ -269,12 +311,15 @@ def prepare_docgraph_profile(
     docgraph_profile: str = "default",
     folder_id: str | None = None,
     extra_skill_dirs: list[str] | None = None,
+    navigation: str = "graph",
 ) -> Any:
     """Mutate and return *profile* in place for a Document Graph run.
 
     Sets the system prompt (scoped to *folder_id* when given), the skill
     directories (package skills + caller extras + profile-listed), and a
     filesystem backend rooted at the common ancestor of those skill dirs.
+    *navigation* selects which loop the injected prompt describes (`graph` or
+    `decision`).
     """
     resolved_db = resolve_db_path(db_path, profile=docgraph_profile)
 
@@ -288,7 +333,9 @@ def prepare_docgraph_profile(
         finally:
             backend.close()
 
-    profile.system_prompt = build_docgraph_system_prompt(folder_resolved_id, folder_name, base=profile.system_prompt)
+    profile.system_prompt = build_docgraph_system_prompt(
+        folder_resolved_id, folder_name, base=profile.system_prompt, navigation=navigation
+    )
 
     excluded = frozenset(getattr(profile, "excluded_tools", []) or [])
     if "read_file" in excluded:
@@ -353,6 +400,8 @@ def create_docgraph_agent(
     extra_skill_dirs: list[str] | None = None,
     embeddings_id: str | None = None,
     extra_tools: list[Any] | None = None,
+    navigation: str = "graph",
+    navigation_config: dict[str, Any] | None = None,
 ) -> Any:
     """Prepare *profile* and return a ready-to-stream :class:`LangChainHarness` or :class:`DeerFlowHarness`.
 
@@ -372,6 +421,13 @@ def create_docgraph_agent(
         embeddings_id: Embeddings model id enabling the hybrid (vector + BM25)
             ``search_sections`` mode; None keeps keyword search only.
         extra_tools: Optional additional tools to combine with the navigation tools.
+        navigation: Navigation toolset and prompt loop: `graph` (LLM-driven TOC
+            walk, the default) or `decision` (decision-model evidence packs, which
+            generate no navigation tokens and need per-section descriptions).
+        navigation_config: Extra kwargs for the decision navigator, forwarded to
+            :func:`genai_graph.agent.decision_navigation.create_decision_navigation_tools`
+            (``decision_model``, ``beam_width``, ``pack_char_budget``,
+            ``domain_context_file``, ...). Ignored for the `graph` toolset.
 
     Returns:
         A :class:`genai_tk.agents.harness.base.BaseHarness` instance (:class:`LangChainHarness` or :class:`DeerFlowHarness`).
@@ -382,10 +438,22 @@ def create_docgraph_agent(
         docgraph_profile=docgraph_profile,
         folder_id=folder_id,
         extra_skill_dirs=extra_skill_dirs,
+        navigation=navigation,
     )
-    tools = list(
-        create_document_graph_tools_from_config(db_path, profile=docgraph_profile, embeddings_id=embeddings_id)
-    )
+    if navigation == "decision":
+        # Imported lazily: decision_navigation imports resolve_db_path from this
+        # module, so a module-level import would be circular.
+        from genai_graph.agent.decision_navigation import create_decision_navigation_tools
+
+        tools = list(
+            create_decision_navigation_tools(
+                db_path, profile=docgraph_profile, embeddings_id=embeddings_id, **(navigation_config or {})
+            )
+        )
+    else:
+        tools = list(
+            create_document_graph_tools_from_config(db_path, profile=docgraph_profile, embeddings_id=embeddings_id)
+        )
     if extra_tools:
         tools.extend(extra_tools)
     if getattr(profile, "harness", "langchain") == "deerflow":

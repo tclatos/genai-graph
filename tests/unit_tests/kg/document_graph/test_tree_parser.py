@@ -169,3 +169,7 @@ class TestStripSurroundingEmphasis:
     def test_backticks_and_internal_math_are_preserved(self) -> None:
         assert _strip_surrounding_emphasis("See `footnote`") == "See `footnote`"
         assert _strip_surrounding_emphasis("Note: 2 * 3") == "Note: 2 * 3"
+
+    def test_tabs_and_consecutive_whitespace_collapsed(self) -> None:
+        assert _strip_surrounding_emphasis("ALKO OY\t\t\t\t\t[SUPPLIER’S NAME]") == "ALKO OY [SUPPLIER’S NAME]"
+        assert _strip_surrounding_emphasis("Section   1.1\tTitle") == "Section 1.1 Title"

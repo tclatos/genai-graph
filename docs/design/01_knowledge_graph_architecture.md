@@ -44,24 +44,29 @@ Defining a knowledge graph requires only standard Pydantic models:
 from pydantic import BaseModel, Field
 from genai_graph.kg.schema.core import GraphNode, GraphRelation, GraphSchema
 
+
 class Company(BaseModel):
     name: str = Field(..., description="Unique company name")
     sector: str
     country: str = "US"
 
+
 class Investment(BaseModel):
     round_name: str
     amount_usd: float
 
+
 # Register nodes and relations
 schema = GraphSchema()
 schema.add_node(GraphNode.from_model(Company, primary_key="name"))
-schema.add_relation(GraphRelation(
-    name="INVESTED_IN",
-    from_node="Company",
-    to_node="Company",
-    properties_model=Investment,
-))
+schema.add_relation(
+    GraphRelation(
+        name="INVESTED_IN",
+        from_node="Company",
+        to_node="Company",
+        properties_model=Investment,
+    )
+)
 ```
 
 The schema compiler automatically inspects types, deduces field paths, validates primary keys, and compiles Ladybug-compatible table schemas.

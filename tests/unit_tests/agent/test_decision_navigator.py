@@ -400,3 +400,137 @@ def test_tool_factory_navigate_folder_renders_pack(monkeypatch: pytest.MonkeyPat
     assert "[h::1]" in result and "body" in result
     extracted = extract_navigation_trace(result)
     assert extracted is not None and extracted["dm_calls"] == 3
+
+
+def _counting_navigator(monkeypatch: pytest.MonkeyPatch, *, failures: int, pack: EvidencePack) -> dict[str, int]:
+    """Patch in a navigator that raises for the first *failures* calls, then returns *pack*."""
+    calls = {"n": 0}
+
+    class _CountingNavigator:
+        config = DecisionNavigatorConfig()
+
+        def __init__(self, config: DecisionNavigatorConfig, *, db_path: str | None = None) -> None: ...
+
+        def navigate(self, query: str, folder_id: str | None = None, *, hints: str | None = None) -> EvidencePack:
+            calls["n"] += 1
+            if calls["n"] <= failures:
+                raise RuntimeError("generator didn't stop")
+            return pack
+
+    monkeypatch.setattr(decision_navigation, "DecisionNavigator", _CountingNavigator)
+    monkeypatch.setattr(decision_navigation, "resolve_db_path", lambda db_path, profile: "/tmp/fake.db")
+    return calls
+
+
+def _one_section_pack() -> EvidencePack:
+    return EvidencePack(
+        query="q",
+        sections=[
+            SectionEvidence(
+                section_id="h::1", title="T", document_id="h", document_name="d.pdf", score=0.9, text="body"
+            )
+        ],
+        trace=NavigationTrace(dm_calls=1),
+    )
+
+
+def _navigate_tool() -> Any:
+    tools = decision_navigation.create_decision_navigation_tools()
+    return next(t for t in tools if t.name == "navigate_folder")
+
+
+def test_navigate_folder_retries_a_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One failed call must not hand the agent the fallback instruction.
+
+    In the Alko run the first navigation crashed and the tool answered "fall back
+    to the graph tools", which the agent obeyed for the remaining 20 resource
+    units — so decision navigation was never exercised.
+    """
+    calls = _counting_navigator(monkeypatch, failures=1, pack=_one_section_pack())
+    result = str(_navigate_tool().invoke({"query": "q"}))
+
+    assert calls["n"] == 2, "a single failure should be retried once"
+    assert "Fall back to" not in result
+    assert "body" in result
+
+
+def test_navigate_folder_reports_failure_only_after_exhausting_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every attempt fails: the agent gets an explicit, counted fallback instruction."""
+    calls = _counting_navigator(monkeypatch, failures=99, pack=_one_section_pack())
+    result = str(_navigate_tool().invoke({"query": "q"}))
+
+    assert calls["n"] == 2  # one attempt plus one retry by default
+    assert "navigation failed after 2 attempt(s)" in result
+    assert "generator didn't stop" in result
+
+
+def test_candidate_cap_records_how_many_branches_were_never_scored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An over-cap level reports n_available > n_candidates instead of truncating silently."""
+    docs = [{"content_hash": f"doc_{i}", "filename": f"b_{i}", "description": "d", "summary": None} for i in range(10)]
+    _stub_graph(monkeypatch, docs=docs, tocs={}, sections={})
+    model = ScriptedDecisionModel()
+    navigator = DecisionNavigator(DecisionNavigatorConfig(beam_width=2, candidate_cap=4, prefilter="off"), model=model)
+    trace = NavigationTrace()
+    navigator.rank_documents("q", trace=trace)
+
+    level = trace.levels[0]
+    assert level.n_available == 10, "all ten documents existed"
+    assert level.n_candidates == 4, "only the cap was scored"
+
+
+def test_pack_delivery_counters_are_recorded_in_the_trace() -> None:
+    """The trace reports inlined sections, pointer fallbacks and inlined characters."""
+    sections = [
+        dn.SectionEvidence(section_id=f"d::{i}", title=f"s{i}", document_id="d", score=1.0 - i / 10, text="x" * 500)
+        for i in range(6)
+    ]
+    trace = NavigationTrace(dm_calls=1)
+    pack = EvidencePack(query="q", sections=sections, trace=trace)
+    pack.render(pack_char_budget=1200)
+
+    assert trace.pack_inlined == 2
+    assert trace.pack_pointers == 4
+    assert trace.pack_chars == 1000
+
+
+def test_merge_navigation_traces_sums_pack_counters() -> None:
+    """Merging per-call traces keeps the pack counters so a run can be measured."""
+    block = {"dm_calls": 1, "pack_inlined": 3, "pack_pointers": 2, "pack_chars": 900}
+    merged = merge_navigation_traces([block, block])
+    assert merged is not None
+    assert merged["pack_inlined"] == 6
+    assert merged["pack_pointers"] == 4
+    assert merged["pack_chars"] == 1800
+
+
+def test_single_candidate_level_does_not_flag_low_confidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A forced pick must not be reported as a low-confidence selection.
+
+    On the Alko corpus a document with a single top-level section scored 0.29 and
+    flagged the whole navigation low-confidence, which tells the agent to fall back
+    even though it had no alternative to prefer.
+    """
+    docs = [{"content_hash": "doc_0", "filename": "b_0", "description": "d", "summary": None}]
+    _stub_graph(monkeypatch, docs=docs, tocs={"doc_0": _toc("doc_0", n_sections=1)}, sections={})
+    model = ScriptedDecisionModel(default_probability=0.29)
+    navigator = DecisionNavigator(DecisionNavigatorConfig(beam_width=1, top_r_sections=1), model=model)
+    pack = navigator.navigate("q")
+
+    assert pack.sections
+    assert pack.low_confidence is False
+
+
+def test_multi_candidate_level_still_flags_low_confidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When there is a real choice, a weak top score still flags low confidence."""
+    docs = [{"content_hash": f"doc_{i}", "filename": f"b_{i}", "description": "d", "summary": None} for i in range(3)]
+    _stub_graph(
+        monkeypatch,
+        docs=docs,
+        tocs={d["content_hash"]: _toc(d["content_hash"], n_sections=2) for d in docs},
+        sections={},
+    )
+    model = ScriptedDecisionModel(default_probability=0.1)
+    navigator = DecisionNavigator(DecisionNavigatorConfig(beam_width=1, top_r_sections=1), model=model)
+    pack = navigator.navigate("q")
+
+    assert pack.low_confidence is True

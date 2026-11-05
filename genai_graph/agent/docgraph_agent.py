@@ -186,18 +186,25 @@ Navigation loop:
 1. `navigate_folder(query, folder_id, hints)` — state the question VERBATIM (the
    full question, not keywords). The decision model scores every document, then
    every section of the best documents, in one joint pass each, and returns the
-   selected sections with their text and relevance scores.
+   selected sections with their text and relevance scores. Navigation generates
+   no tokens and costs about a second, so use it liberally: issue ONE navigation
+   per dimension or dimension group you have to decide — not one per section, and
+   not one per document. A run that decides N dimensions should navigate about N
+   times.
 2. Answer from the pack, citing section ids as `[hash::sequence]` and naming the
    source document.
 3. The pack is budgeted: a section that does not fit is replaced by a pointer —
    fetch it with `get_section_content('<section_id>')` when it matters.
-4. If the pack is missing evidence, call `navigate_folder` again with `hints`
+4. If a call returns an error, retry `navigate_folder` once with the same
+   arguments before considering a fallback. A single transient failure is never a
+   reason to abandon navigation for the rest of the run.
+5. If the pack is missing evidence, call `navigate_folder` again with `hints`
    describing what was missing (at most twice). Refined hints are the primary
    recovery path.
-5. Only if the pack still disappoints or reports low confidence, fall back to the
+6. Only if the pack still disappoints or reports low confidence, fall back to the
    graph tools directly: `get_document_toc`, `get_section_content`,
    `search_sections`.
-6. `query_image(image_id)` for figures and diagrams.
+7. `query_image(image_id)` for figures and diagrams.
 
 Rules:
 - Ground every claim in section text you actually read.

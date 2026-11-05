@@ -69,18 +69,36 @@ class DecisionNavigatorConfig(BaseModel):
     # separates a section within one document (correct picks 0.89-0.96). A single
     # absolute 0.5 gate therefore flagged correct L1 selections as low-confidence and
     # pushed the agent into the expensive fallback loop.
+    #
+    # Re-measured on the Alko RFQ corpus (19 documents, one recorded navigation):
+    # correct L1 picks scored 0.83-0.87 and correct L2 picks 0.85-0.95, so both gates
+    # already sit below the correct-pick band and do not need raising. The one false
+    # positive came from a *forced* single-candidate level, which is now excluded
+    # structurally — a level with one candidate makes no choice. Re-measure per corpus
+    # before changing these numbers: gates tuned on OfficeQA do not transfer.
     l1_min_confidence: float = 0.15
     l2_min_confidence: float = 0.5
     # Do not descend into a child section scoring below this floor; keep the parent.
     # Descent otherwise picks noise (observed child scores of 0.02-0.07).
     descent_min_confidence: float = 0.2
     max_depth: int = 2
-    candidate_cap: int = 48
+    # Hard ceiling on how many branches of one level are scored. With
+    # ``prefilter: off`` an over-cap list is truncated *lexically*, so sections
+    # beyond the cap are never scored at all — the retriever-free property the
+    # design exists to provide. Clef-flash chunks a level at 64 questions per
+    # request and chunking stays inside one parent, so a cap of 96 stays
+    # comparable while covering the largest documents observed (71 candidates).
+    candidate_cap: int = 96
     prefilter: str = "off"
     domain_context: str | None = None
     answerable_gate: bool = False
     pack_char_budget: int = 20000
     l2_workers: int = 1
+    # Attempts per ``navigate_folder`` call beyond the first. One retry, because a
+    # single transient failure used to end navigator use for the rest of a run:
+    # the tool returned a "fall back to the graph tools" instruction and the agent
+    # obeyed it for the remaining 20 resource units.
+    retries: int = 1
     trace_top_k: int = 12
 
 
@@ -98,6 +116,10 @@ class LevelTrace(BaseModel):
 
     level: int
     n_candidates: int
+    # Branches that existed before the candidate cap was applied. A gap between
+    # this and ``n_candidates`` means the level was truncated and some branches
+    # were never scored — the silent retrieval loss the cap used to hide.
+    n_available: int = 0
     scores: dict[str, float] = Field(default_factory=dict)
     kept: list[str] = Field(default_factory=list)
 
@@ -113,6 +135,12 @@ class NavigationTrace(BaseModel):
     low_confidence: bool = False
     unanswerable: bool = False
     elapsed_ms: float = 0.0
+    # Pack delivery: how many selected sections were inlined, how many were
+    # replaced by a pointer (each one costing the agent a get_section_content
+    # round trip), and how many characters were inlined in total.
+    pack_inlined: int = 0
+    pack_pointers: int = 0
+    pack_chars: int = 0
 
     def merge(self, other: NavigationTrace) -> None:
         """Fold another trace (e.g. computed on a worker thread) into this one."""
@@ -169,21 +197,23 @@ class EvidencePack(BaseModel):
 
         Ends with a single ``[[navigation-trace]]`` JSON footer line that the
         bench runner extracts into the run record's ``navigation`` block; the
-        synthesis agent also reads it to apply the low-confidence fallback.
+        synthesis agent also reads it to apply the low-confidence fallback. The
+        same footer carries the pack delivery counters (inlined / pointer / chars)
+        so the budget can be measured against the pointer round-trip cost instead
+        of assumed.
         """
-        footer = f"\n--- navigation trace ---\n{TRACE_MARKER} {self.trace.model_dump_json()}"
         if self.unanswerable:
             return (
                 "The decision model judged this question NOT answerable from the available "
                 "documents (answerable probability below threshold). If you have reasons to "
                 "doubt this (e.g. the question requires external facts or visual data), fall "
-                f"back to the graph tools directly.{footer}"
+                f"back to the graph tools directly.{self._footer()}"
             )
         if not self.sections:
             return (
                 "No relevant sections were found for this question. Fall back to "
                 "`search_sections` / `get_document_toc` / `get_section_content`."
-                f"{footer}"
+                f"{self._footer()}"
             )
 
         budget = pack_char_budget if pack_char_budget is not None else 20000
@@ -210,7 +240,14 @@ class EvidencePack(BaseModel):
                     f"{header}\n\n[text omitted: {len(s.text)} chars over pack budget — "
                     f"fetch with get_section_content('{s.section_id}') if needed]"
                 )
-        return "\n\n".join(blocks) + footer
+        self.trace.pack_inlined = len(included)
+        self.trace.pack_pointers = len(self.sections) - len(included)
+        self.trace.pack_chars = sum(len(s.text) for s in self.sections if s.section_id in included)
+        return "\n\n".join(blocks) + self._footer()
+
+    def _footer(self) -> str:
+        """Return the ``[[navigation-trace]]`` JSON footer line appended to the pack."""
+        return f"\n--- navigation trace ---\n{TRACE_MARKER} {self.trace.model_dump_json()}"
 
 
 class DecisionNavigator:
@@ -404,6 +441,7 @@ class DecisionNavigator:
         backend = self._backend()
         docs = list_documents(backend, folder_id=folder_id)
         candidates = [self._candidate_from_doc(d) for d in docs]
+        n_available = len(candidates)
         candidates = self._apply_prefilter(backend, query, candidates, folder_id=folder_id)
 
         extra: dict[str, Noul] | None = None
@@ -427,12 +465,19 @@ class DecisionNavigator:
                 LevelTrace(
                     level=1,
                     n_candidates=len(ranked),
+                    n_available=n_available,
                     kept=[c.id for c, _ in top],
                     scores=self._top_scores(ranked),
                 )
             )
-        if top:
-            trace.low_confidence = top[0][1] < self.config.l1_min_confidence
+        # Only a *choice* can be uncertain. A level with a single candidate makes no
+        # choice, so a low absolute score there says nothing about the selection and
+        # must not send the agent to the fallback for a forced pick. Measured on the
+        # Alko corpus: the two real L1 picks scored 0.87/0.87, while a
+        # single-section document scored 0.29 at L2 and flagged the whole
+        # navigation low-confidence.
+        if len(ranked) > 1 and top[0][1] < self.config.l1_min_confidence:
+            trace.low_confidence = True
         return top
 
     def rank_sections(
@@ -452,6 +497,7 @@ class DecisionNavigator:
         candidates = [
             self._candidate_from_section(row, document_id, doc_label) for row in self._top_level_sections(toc_rows)
         ]
+        n_available = len(candidates)
         candidates = self._apply_prefilter(backend, query, candidates, document_id=document_id)
         ranked, _scores = self._score_candidates(self._build_state(query, hints), candidates, trace)
         kept = ranked[: (r or self.config.top_r_sections)]
@@ -460,11 +506,12 @@ class DecisionNavigator:
                 LevelTrace(
                     level=2,
                     n_candidates=len(ranked),
+                    n_available=n_available,
                     kept=[c.id for c, _ in kept],
                     scores=self._top_scores(ranked),
                 )
             )
-            if kept[0][1] < self.config.l2_min_confidence:
+            if len(ranked) > 1 and kept[0][1] < self.config.l2_min_confidence:
                 trace.low_confidence = True
         return kept, toc_rows
 
@@ -650,6 +697,9 @@ def merge_navigation_traces(blocks: list[dict[str, Any]]) -> dict[str, Any] | No
         "low_confidence": any(bool(b.get("low_confidence")) for b in blocks),
         "unanswerable": any(bool(b.get("unanswerable")) for b in blocks),
         "elapsed_ms": round(sum(float(b.get("elapsed_ms") or 0.0) for b in blocks), 1),
+        "pack_inlined": sum(int(b.get("pack_inlined") or 0) for b in blocks),
+        "pack_pointers": sum(int(b.get("pack_pointers") or 0) for b in blocks),
+        "pack_chars": sum(int(b.get("pack_chars") or 0) for b in blocks),
         "levels": [lvl for b in blocks for lvl in (b.get("levels") or [])],
     }
     if not merged["dm_cost"]:

@@ -56,9 +56,10 @@ def create_decision_navigation_tools(
         **navigator_config: Everything else maps onto :class:`DecisionNavigatorConfig`
             fields (``decision_model``, ``beam_width``, ``top_r_sections``,
             ``min_confidence``, ``max_depth``, ``candidate_cap``, ``prefilter``,
-            ``include_summaries``, ``domain_context``, ``answerable_gate``) plus
-            ``domain_context_file`` — a file path whose content is loaded as
-            ``domain_context`` (keeps long domain routing knowledge in a file).
+            ``include_summaries``, ``domain_context``, ``answerable_gate``,
+            ``retries``) plus ``domain_context_file`` — a file path whose content
+            is loaded as ``domain_context`` (keeps long domain routing knowledge
+            in a file).
 
     Returns:
         ``[navigate_folder, get_folder_toc, get_document_toc, get_section_content,
@@ -85,23 +86,45 @@ def create_decision_navigation_tools(
         single joint pass each, fetches the selected sections' full text, and
         returns them with relevance scores. No LLM is used for navigation.
 
+        A transient failure is retried (``retries`` attempts beyond the first)
+        before the tool gives up, so one flaky call does not end navigation for a
+        whole run: the fallback instruction below is a last resort, not a first
+        response.
+
         Args:
             query: The question to ground (state verbatim, not keywords).
             folder_id: Optional folder scope (defaults to the whole corpus).
             hints: Optional refinement hints describing what a previous pack was
                 missing; they re-weight the next navigation pass.
         """
-        try:
-            pack = navigator.navigate(query, folder_id, hints=hints)
-        except Exception as exc:
-            logger.warning("navigate_folder failed — falling back to graph tools: {}", exc)
-            return (
-                f"Error: navigation failed ({type(exc).__name__}: {exc}). "
-                "Fall back to `get_folder_toc` / `get_document_toc` / `search_sections` directly."
-            )
-        # Best-score-first inclusion under the configured budget; oversized sections
-        # become get_section_content pointers instead of evicted tool results.
-        return pack.render(navigator.config.pack_char_budget)
+        attempts = max(1, navigator.config.retries + 1)
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                pack = navigator.navigate(query, folder_id, hints=hints)
+            except Exception as exc:
+                # Retried, then reported to the agent as text.
+                last_error = exc
+                logger.warning(
+                    "navigate_folder attempt {}/{} failed — {}: {}",
+                    attempt,
+                    attempts,
+                    type(exc).__name__,
+                    exc,
+                )
+                continue
+            if attempt > 1:
+                logger.info("navigate_folder recovered on attempt {}/{}", attempt, attempts)
+            # Best-score-first inclusion under the configured budget; oversized
+            # sections become get_section_content pointers instead of evicted tool
+            # results.
+            return pack.render(navigator.config.pack_char_budget)
+
+        error = f"{type(last_error).__name__}: {last_error}" if last_error else "unknown error"
+        return (
+            f"Error: navigation failed after {attempts} attempt(s) ({error}). "
+            "Fall back to `get_folder_toc` / `get_document_toc` / `search_sections` directly."
+        )
 
     fallback_tools = create_document_graph_tools(
         resolved_db, embeddings_id=embeddings_id, max_image_queries=max_image_queries

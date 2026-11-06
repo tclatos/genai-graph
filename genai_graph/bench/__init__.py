@@ -29,6 +29,7 @@ from genai_graph.bench.config import (
     DocGraphLlmsConfig,
     DocGraphPathsConfig,
     DocGraphProfileConfig,
+    DocGraphVisualizationConfig,
     GraderConfig,
     RunnerConfig,
     configure_bench_monitoring,
@@ -39,6 +40,7 @@ from genai_graph.bench.config import (
     load_env,
     load_raw_bench_yaml,
     load_raw_docgraph_yaml,
+    resolve_visualization_config,
 )
 from genai_graph.bench.flows import (
     batch_markdownize_task,
@@ -95,6 +97,7 @@ __all__ = [
     "DocGraphLlmsConfig",
     "DocGraphPathsConfig",
     "DocGraphProfileConfig",
+    "DocGraphVisualizationConfig",
     "ErrorCategory",
     "GraderConfig",
     "JudgeVerdict",
@@ -139,6 +142,7 @@ __all__ = [
     "match_docs_by_pathspecs",
     "merge_graph_task",
     "resolve_benchmark_adapter",
+    "resolve_visualization_config",
     "route_markdownize_task",
     "run_bench_tui",
     "run_one_question",

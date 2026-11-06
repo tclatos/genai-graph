@@ -19,10 +19,15 @@ from genai_graph.agent.docgraph_agent import (
     resolve_db_path,
     run_docgraph_agent,
 )
+from genai_graph.bench.config import (
+    DocGraphVisualizationConfig,
+    resolve_visualization_config,
+)
 
 __all__ = [
     "DEFAULT_LLM",
     "DEFAULT_PROFILE",
+    "DocGraphVisualizationConfig",
     "build_docgraph_system_prompt",
     "create_decision_navigation_tools",
     "create_docgraph_agent",
@@ -31,5 +36,6 @@ __all__ = [
     "find_docgraph_db_path",
     "prepare_docgraph_profile",
     "resolve_db_path",
+    "resolve_visualization_config",
     "run_docgraph_agent",
 ]

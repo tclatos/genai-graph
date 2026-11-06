@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) — [Semantic V
 
 ## [Unreleased]
 
+### Added
+
+#### Knowledge Graph Visualization Configuration
+- **DocGraph Visualization Configuration Model**: Added `DocGraphVisualizationConfig` and `resolve_visualization_config` in `genai_graph.bench.config` (re-exported via `genai_graph.bench`, `genai_graph.agent`, and `genai_graph.kg.export`). Supports declarative configuration of `top_node_type` (default: `"Opportunity"`), `default_exclude_node_types` (default: `["Image", "MarkdownSection"]`), `max_hops` (default: 6), `default_layout`, and `default_limit` via `docgraph.yaml` profiles or global configuration.
+- **Demo Visualization Config Resolution**: Updated `genai_graph/webapp/pages/demos/kg_visualization.py` to auto-resolve default excluded node types from profile configuration.
+
 ### Fixed
 
 - **Document Graph Outline Extraction JSON Control Characters**: Heading titles derived from tabular lines or signature blocks containing literal tabs (`\t`) and ASCII control characters are now sanitized in `_strip_surrounding_emphasis` ([genai_graph/kg/document_graph/tree_parser.py](genai_graph/kg/document_graph/tree_parser.py)), `_clean_markdown_for_prompt`, and `_render_headings_block` ([genai_graph/kg/document_graph/outline_extract.py](genai_graph/kg/document_graph/outline_extract.py)). In addition, branch summarization now matches headings tolerantly with `_titles_match` so normalized whitespace in LLM JSON output aligns with document headings without triggering strict JSON parsing errors or dropping section summaries.

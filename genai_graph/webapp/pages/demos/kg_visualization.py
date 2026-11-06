@@ -18,6 +18,7 @@ import streamlit as st
 from loguru import logger
 from streamlit import session_state as sss
 
+from genai_graph.bench.config import resolve_visualization_config
 from genai_graph.kg.backend import create_backend_from_config
 from genai_graph.kg.export import generate_html
 from genai_graph.webapp.ui_components.kg_config_selector import (
@@ -296,6 +297,8 @@ def main() -> None:
         if "prev_excluded_node_types" not in sss:
             sss.prev_excluded_node_types = []
 
+        viz_cfg = resolve_visualization_config(selected_config)
+
         # Node type filter (multiselect)
         if available_node_types:
             selected_node_types = st.multiselect(
@@ -313,11 +316,12 @@ def main() -> None:
         if available_node_types:
             # Filter out the selected include node types to prevent conflict
             exclude_options = [t for t in available_node_types if t not in sss.selected_node_types]
+            default_exclude = [t for t in viz_cfg.default_exclude_node_types if t in exclude_options]
             selected_exclude_types = st.multiselect(
                 "Exclude Node Types",
                 options=exclude_options,
-                default=[],
-                help="Select node types to exclude from the visualization",
+                default=default_exclude,
+                help="Select node types to exclude from the visualization (configurable default)",
             )
             sss.excluded_node_types = selected_exclude_types
         else:

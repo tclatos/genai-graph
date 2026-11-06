@@ -7,6 +7,10 @@ This package provides:
 - Warnings report generation
 """
 
+from genai_graph.bench.config import (
+    DocGraphVisualizationConfig,
+    resolve_visualization_config,
+)
 from genai_graph.kg.export.artifacts import (
     CacheFingerprints,
     HtmlExportResult,
@@ -26,6 +30,7 @@ from genai_graph.kg.export.html import generate_html
 
 __all__ = [
     "CacheFingerprints",
+    "DocGraphVisualizationConfig",
     "HtmlExportResult",
     "ParquetExportResult",
     "ParquetManifest",
@@ -38,5 +43,6 @@ __all__ = [
     "export_warnings",
     "generate_dag_html",
     "generate_html",
+    "resolve_visualization_config",
     "validate_parquet_cache",
 ]

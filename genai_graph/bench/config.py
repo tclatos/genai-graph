@@ -98,6 +98,18 @@ class DocGraphAccessControlConfig(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
 
+class DocGraphVisualizationConfig(BaseModel):
+    """Configuration for Document Graph visualization."""
+
+    top_node_type: str = "Opportunity"
+    default_exclude_node_types: list[str] = Field(default_factory=lambda: ["Image", "MarkdownSection"])
+    max_hops: int = 6
+    default_layout: str = "dag"
+    default_limit: int = 2000
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
 class DocGraphProfileConfig(BaseModel):
     """Complete profile definition for Document Graph creation."""
 
@@ -110,6 +122,7 @@ class DocGraphProfileConfig(BaseModel):
     images: DocGraphImagesConfig = Field(default_factory=DocGraphImagesConfig)
     build: DocGraphBuildConfig = Field(default_factory=DocGraphBuildConfig)
     access_control: DocGraphAccessControlConfig = Field(default_factory=DocGraphAccessControlConfig)
+    visualization: DocGraphVisualizationConfig = Field(default_factory=DocGraphVisualizationConfig)
     project_root: Path = Field(default_factory=Path.cwd)
 
     model_config = {"arbitrary_types_allowed": True}
@@ -353,6 +366,31 @@ def load_docgraph_profile(
             trimming_feedback=acl_raw.get("trimming_feedback", "aggregate_notice"),
             options=dict(acl_raw.get("options", {})),
         ),
+        visualization=DocGraphVisualizationConfig(
+            top_node_type=str(
+                (p_data.get("visualization", {}) or raw.get("docgraph_visualization", {}) or {}).get(
+                    "top_node_type", "Opportunity"
+                )
+            ),
+            default_exclude_node_types=list(
+                (p_data.get("visualization", {}) or raw.get("docgraph_visualization", {}) or {}).get(
+                    "default_exclude_node_types", ["Image", "MarkdownSection"]
+                )
+            ),
+            max_hops=int(
+                (p_data.get("visualization", {}) or raw.get("docgraph_visualization", {}) or {}).get("max_hops", 6)
+            ),
+            default_layout=str(
+                (p_data.get("visualization", {}) or raw.get("docgraph_visualization", {}) or {}).get(
+                    "default_layout", "dag"
+                )
+            ),
+            default_limit=int(
+                (p_data.get("visualization", {}) or raw.get("docgraph_visualization", {}) or {}).get(
+                    "default_limit", 2000
+                )
+            ),
+        ),
         project_root=root,
     )
 
@@ -361,6 +399,55 @@ def load_docgraph_profile(
             setattr(docgraph_cfg, k, v)
 
     return docgraph_cfg
+
+
+def resolve_visualization_config(
+    profile_name: str | None = None,
+    config_path: Path | None = None,
+    project_root: Path | None = None,
+) -> DocGraphVisualizationConfig:
+    """Resolve DocGraph visualization configuration from docgraph.yaml or global config.
+
+    Searches:
+    1. docgraph_profiles.<profile>.visualization in docgraph.yaml
+    2. docgraph_visualization in docgraph.yaml
+    3. global_config() sections matching above
+    4. Defaults: top_node_type="Opportunity", default_exclude_node_types=["Image", "MarkdownSection"]
+    """
+    root = project_root or Path.cwd()
+
+    # 1. Try from docgraph.yaml
+    try:
+        raw = load_raw_docgraph_yaml(config_path, project_root=root)
+        active_name = profile_name or raw.get("default_profile", "default")
+        profiles = raw.get("docgraph_profiles", {})
+        p_data = profiles.get(active_name, {}) if isinstance(profiles, dict) else {}
+        viz_raw = (
+            (p_data.get("visualization", {}) if isinstance(p_data, dict) else {})
+            or raw.get("docgraph_visualization", {})
+            or {}
+        )
+        if viz_raw:
+            return DocGraphVisualizationConfig(**viz_raw)
+    except Exception as exc:
+        logger.debug("Could not read visualization config from docgraph.yaml: {}", exc)
+
+    # 2. Try global_config()
+    try:
+        from genai_tk.config_mgmt.config_mngr import global_config
+
+        cfg = global_config()
+        if hasattr(cfg, "get"):
+            v1 = cfg.get(f"docgraph_profiles.{profile_name or 'default'}.visualization", None)
+            if v1 and isinstance(v1, dict):
+                return DocGraphVisualizationConfig(**v1)
+            v2 = cfg.get("docgraph_visualization", None)
+            if v2 and isinstance(v2, dict):
+                return DocGraphVisualizationConfig(**v2)
+    except Exception as exc:
+        logger.debug("Could not read visualization config from global_config: {}", exc)
+
+    return DocGraphVisualizationConfig()
 
 
 def load_raw_bench_yaml(

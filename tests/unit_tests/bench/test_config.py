@@ -11,8 +11,10 @@ from genai_graph.agent.docgraph_agent import find_docgraph_db_path, resolve_db_p
 from genai_graph.bench.config import (
     BenchConfig,
     DocGraphProfileConfig,
+    DocGraphVisualizationConfig,
     load_bench_profile,
     load_docgraph_profile,
+    resolve_visualization_config,
 )
 
 
@@ -136,6 +138,17 @@ def test_load_bench_profile(sample_config_dir: Path) -> None:
     assert bench_cfg.runner.concurrency == 8
     assert bench_cfg.files.pathspecs == ["test_doc_*"]
     assert bench_cfg.files.limit == 5
+
+
+def test_visualization_config(sample_config_dir: Path) -> None:
+    """Test DocGraphVisualizationConfig defaults and resolution."""
+    viz_cfg = resolve_visualization_config(project_root=sample_config_dir)
+    assert isinstance(viz_cfg, DocGraphVisualizationConfig)
+    assert viz_cfg.top_node_type == "Opportunity"
+    assert "Image" in viz_cfg.default_exclude_node_types
+    assert "MarkdownSection" in viz_cfg.default_exclude_node_types
+    assert viz_cfg.max_hops == 6
+    assert viz_cfg.default_layout == "dag"
 
 
 def test_resolve_docs_with_pathspecs(sample_config_dir: Path) -> None:

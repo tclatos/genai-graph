@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from pydantic import BaseModel
@@ -182,6 +183,213 @@ def introspect_schema(backend: KgBackend) -> tuple[list[str], list[str]]:
         return [], []
 
 
+def _detect_editor_language(lang: str = "sql") -> str | None:
+    """Return language for TextArea if supported by tree-sitter, otherwise None for plain text."""
+    try:
+        from textual._tree_sitter import TREE_SITTER, get_language
+
+        if TREE_SITTER and get_language(lang) is not None:
+            return lang
+    except Exception:
+        pass
+    return None
+
+
+def clean_internal_value(val: Any) -> Any:
+    """Recursively strip internal Kuzu metadata (_ID, _SRC, _DST) from dicts/lists."""
+    if isinstance(val, dict):
+        return {
+            k: clean_internal_value(v)
+            for k, v in val.items()
+            if str(k).upper() not in ("_ID", "_SRC", "_DST")
+        }
+    if isinstance(val, list):
+        return [clean_internal_value(v) for v in val]
+    return val
+
+
+def clean_node_or_rel_dict(d: dict[str, Any], include_label: bool = False) -> dict[str, Any]:
+    """Clean a node or relationship dictionary by removing internal keys."""
+    cleaned: dict[str, Any] = {}
+    for k, v in d.items():
+        k_upper = str(k).upper()
+        if k_upper in ("_ID", "_SRC", "_DST"):
+            continue
+        if k_upper == "_LABEL":
+            if include_label:
+                cleaned["label"] = v
+            continue
+        cleaned[k] = clean_internal_value(v)
+    return cleaned
+
+
+def is_node_dict(v: Any) -> bool:
+    """Return True if value appears to be a Kuzu/Ladybug node dictionary."""
+    if not isinstance(v, dict):
+        return False
+    keys_upper = {str(k).upper() for k in v}
+    return ("_ID" in keys_upper or "_LABEL" in keys_upper) and not ("_SRC" in keys_upper or "_DST" in keys_upper)
+
+
+def is_rel_dict(v: Any) -> bool:
+    """Return True if value appears to be a Kuzu/Ladybug relationship dictionary."""
+    if not isinstance(v, dict):
+        return False
+    keys_upper = {str(k).upper() for k in v}
+    return "_SRC" in keys_upper or "_DST" in keys_upper
+
+
+def format_node_display(node: Any) -> tuple[str, str]:
+    """Extract (label, summary) from a node dict for concise relationship display.
+
+    Returns:
+        (label, identifier): e.g. ("Employee", "Alice (id: 10)") or ("Opportunity", "Project Titan")
+    """
+    if not isinstance(node, dict):
+        return "", str(node) if node is not None else ""
+
+    label = str(node.get("_LABEL") or node.get("_label") or "")
+    clean = {k: v for k, v in node.items() if not str(k).startswith("_") and v is not None and v != ""}
+
+    name_val = None
+    for k in ("name", "title", "caption", "doc_name", "filename"):
+        if k in clean:
+            name_val = str(clean[k])
+            break
+
+    id_val = None
+    for k in ("opportunity_id", "requirement_id", "section_id", "table_id", "folder_id", "id", "code", "key"):
+        if k in clean:
+            id_val = str(clean[k])
+            break
+
+    if name_val and id_val and name_val != id_val:
+        summary = f"{name_val} ({id_val})"
+    elif name_val:
+        summary = name_val
+    elif id_val:
+        summary = id_val
+    elif clean:
+        parts = [f"{k}={v}" for k, v in list(clean.items())[:2]]
+        summary = ", ".join(parts)
+    else:
+        summary = label or "(empty)"
+
+    return label, summary
+
+
+def _first_non_null(series: pd.Series) -> Any:
+    """Return the first non-null, non-NA value in a pandas Series."""
+    for v in series:
+        if v is not None and not (isinstance(v, float) and pd.isna(v)):
+            return v
+    return None
+
+
+def format_graph_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Format and unpack a graph DataFrame for display in tables.
+
+    - If the DataFrame contains a relationship triple (node, rel, node), formats
+      into clean columns: source_type, source, relationship, [rel_props...], target_type, target.
+    - If the DataFrame contains a relationship pair (node, node), formats
+      into clean columns: source_type, source, target_type, target.
+    - If the DataFrame contains a single column with node/rel dicts (e.g. ``RETURN n``),
+      unpacks properties into individual table columns and strips internal ``_ID``.
+    - If columns share a common alias prefix (e.g. ``n.id``, ``n.name`` from ``RETURN n.*``),
+      strips the prefix for cleaner headers.
+    - Removes internal system columns (``_ID``, ``_SRC``, ``_DST``).
+    - Recursively strips internal IDs from any dict or list cells.
+    """
+    if df.empty:
+        return df
+
+    # Case 1: Relationship triple (node, rel, node) e.g. RETURN a, r, b
+    if len(df.columns) == 3:
+        v0 = _first_non_null(df.iloc[:, 0])
+        v1 = _first_non_null(df.iloc[:, 1])
+        v2 = _first_non_null(df.iloc[:, 2])
+        if is_node_dict(v0) and is_rel_dict(v1) and is_node_dict(v2):
+            records: list[dict[str, Any]] = []
+            for _, row in df.iterrows():
+                src_label, src_summary = format_node_display(row.iloc[0])
+                rel_dict = row.iloc[1] if isinstance(row.iloc[1], dict) else {}
+                rel_type = str(rel_dict.get("_LABEL") or rel_dict.get("_label") or "")
+                rel_props = clean_node_or_rel_dict(rel_dict, include_label=False)
+                tgt_label, tgt_summary = format_node_display(row.iloc[2])
+
+                entry: dict[str, Any] = {
+                    "source_type": src_label,
+                    "source": src_summary,
+                    "relationship": rel_type,
+                    **rel_props,
+                    "target_type": tgt_label,
+                    "target": tgt_summary,
+                }
+                records.append(entry)
+            return pd.DataFrame(records)
+
+    # Case 2: Relationship pair (node, node) e.g. RETURN a, b
+    if len(df.columns) == 2:
+        v0 = _first_non_null(df.iloc[:, 0])
+        v1 = _first_non_null(df.iloc[:, 1])
+        if is_node_dict(v0) and is_node_dict(v1):
+            records = []
+            for _, row in df.iterrows():
+                src_label, src_summary = format_node_display(row.iloc[0])
+                tgt_label, tgt_summary = format_node_display(row.iloc[1])
+                records.append({
+                    "source_type": src_label,
+                    "source": src_summary,
+                    "target_type": tgt_label,
+                    "target": tgt_summary,
+                })
+            return pd.DataFrame(records)
+
+    # Case 3: Single column containing node or rel dicts (e.g. RETURN n, RETURN r)
+    if len(df.columns) == 1:
+        col = df.columns[0]
+        has_dicts = any(
+            isinstance(v, dict)
+            for v in df[col]
+            if v is not None and not (isinstance(v, float) and pd.isna(v))
+        )
+        if has_dicts:
+            labels: set[str] = set()
+            for val in df[col]:
+                if isinstance(val, dict):
+                    lbl = val.get("_LABEL") or val.get("_label")
+                    if lbl:
+                        labels.add(str(lbl))
+            include_label = len(labels) > 1
+
+            records = []
+            for val in df[col]:
+                if isinstance(val, dict):
+                    records.append(clean_node_or_rel_dict(val, include_label=include_label))
+                else:
+                    records.append({str(col): clean_internal_value(val)})
+            return pd.DataFrame(records)
+
+    # Case 4: Column names with single alias prefix (e.g. RETURN n.* -> n.id, n.name)
+    if all("." in str(c) for c in df.columns):
+        prefixes = {str(c).split(".", 1)[0] for c in df.columns}
+        if len(prefixes) == 1:
+            df = df.rename(columns=lambda c: str(c).split(".", 1)[1])
+
+    # Case 5: Drop top-level internal system columns (_ID, _SRC, _DST)
+    clean_cols = [c for c in df.columns if str(c).upper() not in ("_ID", "_SRC", "_DST")]
+    if clean_cols and len(clean_cols) < len(df.columns):
+        df = df[clean_cols]
+
+    # Clean any dict/list cells in remaining columns
+    out_df = df.copy()
+    for col in out_df.columns:
+        if out_df[col].apply(lambda x: isinstance(x, (dict, list))).any():
+            out_df[col] = out_df[col].apply(clean_internal_value)
+
+    return out_df
+
+
 class CypherQueryApp(App[None]):
     """Interactive Textual application for querying graph databases with Cypher."""
 
@@ -316,7 +524,12 @@ class CypherQueryApp(App[None]):
                 yield Label("Cypher Query Editor (F5 to run, Ctrl+L to clear)", classes="panel-title")
                 with Vertical(id="editor-container"):
                     default_q = self.initial_query or "CALL show_tables() RETURN name, type"
-                    yield TextArea(default_q, id="query-editor", language="sql", theme="vscode_dark")
+                    yield TextArea(
+                        default_q,
+                        id="query-editor",
+                        language=_detect_editor_language("sql"),
+                        theme="vscode_dark",
+                    )
                 with Horizontal(id="button-bar"):
                     yield Button("▶ Run Query (F5)", variant="primary", id="run-btn")
                     yield Button("Clear (Ctrl+L)", variant="default", id="clear-btn")
@@ -367,31 +580,24 @@ class CypherQueryApp(App[None]):
             return
 
         editor = self.query_one("#query-editor", TextArea)
-        status = self.query_one("#status-bar", Static)
 
         if opt_id.startswith("tbl:"):
             table_name = opt_id.split(":", 1)[1]
             query = f"MATCH (n:{table_name}) RETURN n LIMIT 25"
             editor.load_text(query)
-            status.update(
-                f"Selected table [bold cyan]{table_name}[/bold cyan] — Press [bold green]F5[/bold green] to execute"
-            )
+            self.action_run_query()
         elif opt_id.startswith("rel:"):
             rel_name = opt_id.split(":", 1)[1]
             query = f"MATCH (a)-[r:{rel_name}]->(b) RETURN a, r, b LIMIT 25"
             editor.load_text(query)
-            status.update(
-                f"Selected relationship [bold cyan]{rel_name}[/bold cyan] — Press [bold green]F5[/bold green] to execute"
-            )
+            self.action_run_query()
         elif opt_id.startswith("ex:"):
             idx_str = opt_id.split(":", 1)[1]
             try:
                 idx = int(idx_str)
                 ex = self.examples[idx]
                 editor.load_text(ex.query)
-                status.update(
-                    f"💡 [bold]{ex.name}:[/bold] {ex.description} — Press [bold green]F5[/bold green] to execute"
-                )
+                self.action_run_query()
             except (IndexError, ValueError):
                 pass
 
@@ -409,18 +615,19 @@ class CypherQueryApp(App[None]):
         try:
             df = self.backend.execute_get_as_df(query, union=True)
             duration_ms = (time.perf_counter() - start_time) * 1000
-            self._last_df = df
+            display_df = format_graph_df(df)
+            self._last_df = display_df
             table.clear(columns=True)
 
-            if df.empty:
+            if display_df.empty:
                 status.update(f"[yellow]Query executed in {duration_ms:.1f}ms — No rows returned[/yellow]")
                 return
 
-            for col in df.columns:
-                table.add_column(str(col), key=str(col))
+            for idx, col in enumerate(display_df.columns):
+                table.add_column(str(col), key=f"col_{idx}_{col}")
 
             max_rows = 500
-            for i, (_, row) in enumerate(df.iterrows()):
+            for i, (_, row) in enumerate(display_df.iterrows()):
                 if i >= max_rows:
                     break
                 formatted_row: list[str] = []
@@ -433,14 +640,16 @@ class CypherQueryApp(App[None]):
                             s = s[:77] + "..."
                         formatted_row.append(s)
                     else:
-                        s = str(val)
+                        s = str(val).replace("\r\n", " ").replace("\n", " ")
                         if len(s) > 100:
                             s = s[:97] + "..."
                         formatted_row.append(s)
-                table.add_row(*formatted_row)
+                table.add_row(*formatted_row, label=str(i + 1))
 
-            suffix = f" (showing first {max_rows})" if len(df) > max_rows else ""
-            status.update(f"[bold green]✓ {len(df)} row(s) returned in {duration_ms:.1f}ms{suffix}[/bold green]")
+            suffix = f" (showing first {max_rows})" if len(display_df) > max_rows else ""
+            status.update(
+                f"[bold green]✓ {len(display_df)} row(s) returned ({len(display_df.columns)} columns) in {duration_ms:.1f}ms{suffix}[/bold green]"
+            )
         except Exception as exc:
             table.clear(columns=True)
             status.update(f"[bold red]Query Error:[/bold red] {exc}")

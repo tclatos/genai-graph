@@ -2,6 +2,19 @@
 
 from __future__ import annotations
 
+import importlib
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from genai_graph.ui.textual.apps.bench_tui import (
+        BenchQuestionDetail,
+        BenchViewerApp,
+        display_questions_table,
+        display_single_question_panel,
+        load_bench_dataset_with_results,
+        run_bench_tui,
+    )
+
 from genai_graph.bench.adapters.base import (
     BaseBenchmarkAdapter,
     download_hf_file,
@@ -70,14 +83,6 @@ from genai_graph.bench.summary import (
     compute_bench_summary,
     display_bench_summary,
     save_bench_summary,
-)
-from genai_graph.ui.textual.apps.bench_tui import (
-    BenchQuestionDetail,
-    BenchViewerApp,
-    display_questions_table,
-    display_single_question_panel,
-    load_bench_dataset_with_results,
-    run_bench_tui,
 )
 
 __all__ = [
@@ -150,3 +155,22 @@ __all__ = [
     "run_questions_flow",
     "save_bench_summary",
 ]
+
+_TUI_EXPORTS = {
+    "BenchQuestionDetail": "genai_graph.ui.textual.apps.bench_tui",
+    "BenchViewerApp": "genai_graph.ui.textual.apps.bench_tui",
+    "display_questions_table": "genai_graph.ui.textual.apps.bench_tui",
+    "display_single_question_panel": "genai_graph.ui.textual.apps.bench_tui",
+    "load_bench_dataset_with_results": "genai_graph.ui.textual.apps.bench_tui",
+    "run_bench_tui": "genai_graph.ui.textual.apps.bench_tui",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _TUI_EXPORTS:
+        mod = importlib.import_module(_TUI_EXPORTS[name])
+        val = getattr(mod, name)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+

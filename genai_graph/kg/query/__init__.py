@@ -19,6 +19,7 @@ _EXPORTS = {
     "CypherQueryApp": "genai_graph.ui.textual.apps.cypher_tui",
     "run_cypher_tui": "genai_graph.ui.textual.apps.cypher_tui",
     "DEFAULT_CYPHER_EXAMPLES": "genai_graph.ui.textual.apps.cypher_tui",
+    "format_graph_df": "genai_graph.ui.textual.apps.cypher_tui",
 }
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "CypherQueryApp",
     "build_kg_agent_system_prompt",
     "create_kg_cypher_tool",
+    "format_graph_df",
     "query_kg",
     "run_cypher_tui",
     "text2cypher_chain",

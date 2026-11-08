@@ -232,25 +232,28 @@ class GraphCommands(CliTopCommand):
                 backend = KuzuBackend()
                 backend.connect(resolved_db, read_only=read_only)
                 try:
+                    from genai_graph.ui.textual.apps.cypher_tui import format_graph_df
+
                     df = backend.execute_get_as_df(query_str, union=True)
                     if df.empty:
                         console.print("[yellow]Query returned no results[/yellow]")
                         return
 
-                    table = Table(title=f"Query Results ({len(df)} rows)")
-                    for col in df.columns:
+                    display_df = format_graph_df(df)
+                    table = Table(title=f"Query Results ({len(display_df)} rows, {len(display_df.columns)} columns)")
+                    for col in display_df.columns:
                         table.add_column(str(col), style="cyan")
 
                     max_rows = 50
-                    for i, (_, row) in enumerate(df.iterrows()):
+                    for i, (_, row) in enumerate(display_df.iterrows()):
                         if i >= max_rows:
-                            table.add_row(*["..." for _ in df.columns])
+                            table.add_row(*["..." for _ in display_df.columns])
                             break
                         table.add_row(*[str(val) for val in row])
 
                     console.print(table)
-                    if len(df) > max_rows:
-                        console.print(f"[dim]Showing first {max_rows} of {len(df)} results[/dim]")
+                    if len(display_df) > max_rows:
+                        console.print(f"[dim]Showing first {max_rows} of {len(display_df)} results[/dim]")
                 except Exception as exc:
                     console.print(f"[red]Query error: {exc}[/red]")
                     raise typer.Exit(1) from exc

@@ -19,10 +19,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) — [Semantic V
 
 ### Fixed
 
+- **Circular Import between Textual Apps and Benchmark Engine**: Resolved circular import where importing `genai_graph.ui.textual.apps.cypher_tui` triggered eager initialization of `bench_tui`, leading to premature import of `BenchQuestionDetail` from uninitialized module. Replaced eager imports in [genai_graph/ui/textual/apps/__init__.py](genai_graph/ui/textual/apps/__init__.py) and [genai_graph/bench/__init__.py](genai_graph/bench/__init__.py) with PEP 562 lazy attribute loading (`__getattr__`) and `TYPE_CHECKING` guards.
+- **Tree-sitter Language Fallback in `CypherQueryApp`**: Added safe editor language detection (`_detect_editor_language`) in [genai_graph/ui/textual/apps/cypher_tui.py](genai_graph/ui/textual/apps/cypher_tui.py) so that environments where `tree-sitter` is present without the `sql` grammar gracefully fall back to plain text instead of crashing with `LanguageDoesNotExist`.
 - **Document Graph Outline Extraction JSON Control Characters**: Heading titles derived from tabular lines or signature blocks containing literal tabs (`\t`) and ASCII control characters are now sanitized in `_strip_surrounding_emphasis` ([genai_graph/kg/document_graph/tree_parser.py](genai_graph/kg/document_graph/tree_parser.py)), `_clean_markdown_for_prompt`, and `_render_headings_block` ([genai_graph/kg/document_graph/outline_extract.py](genai_graph/kg/document_graph/outline_extract.py)). In addition, branch summarization now matches headings tolerantly with `_titles_match` so normalized whitespace in LLM JSON output aligns with document headings without triggering strict JSON parsing errors or dropping section summaries.
 
 ### Changed
 
+- **Tabular Entity and Relationship Inspection in `cli graph query`**:
+  - Implemented `format_graph_df` in [genai_graph/ui/textual/apps/cypher_tui.py](genai_graph/ui/textual/apps/cypher_tui.py) (re-exported via [genai_graph/kg/query/__init__.py](genai_graph/kg/query/__init__.py)) to unpack graph entities into structured tabular columns across both interactive TUI and `--batch` CLI modes.
+  - **Node tables**: Unpacks properties into individual columns, removes internal system fields (`_ID`), and hides redundant `_LABEL` in single-table views.
+  - **Relationship tables**: Unpacks edges into `source_type`, `source` (name and ID summary), `relationship` type, any relationship-specific properties, `target_type`, and `target` (name and ID summary), stripping internal metadata (`_ID`, `_SRC`, `_DST`).
+  - **Sidebar UX**: Selecting a table or relationship in the TUI sidebar now auto-executes the query immediately and renders into `DataTable` with row indices and line-break normalization.
+  - **CSV Export**: Exports cleaned tabular DataFrames with genuine property columns.
 - **Decision-model validator rename followed through**: `BaseDecisionModel.validate_question_count` was renamed to `validate_request` in `genai-tk` and now also enforces per-question option and level caps. The `ScriptedDecisionModel` test double in `tests/unit_tests/agent/test_decision_navigator.py` calls the renamed method. Navigator docs ([docs/design/06_decision_model_navigation.md](docs/design/06_decision_model_navigation.md), [docs/studies/decision_model_navigation.md](docs/studies/decision_model_navigation.md)) now describe `batch_invoke` chunking by the model's batching limit (`recommended_batch_size`, falling back to `max_questions`) rather than by `max_questions` alone.
 
 ### Added

@@ -24,7 +24,7 @@ from genai_graph.bench.summary import (
     display_bench_summary,
     save_bench_summary,
 )
-from genai_graph.bench.tui import (
+from genai_graph.ui.textual.apps.bench_tui import (
     display_questions_table,
     display_single_question_panel,
     load_bench_dataset_with_results,

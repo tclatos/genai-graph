@@ -110,7 +110,7 @@ paths:
 ####    
 ui:
   app_name: Enterprise Knowledge Graph Demos
-  pages_dir: ${paths.src}/webapp/pages
+  pages_dir: ${paths.src}/ui/streamlit/pages
   navigation:
     Settings:
       - settings/welcome.py

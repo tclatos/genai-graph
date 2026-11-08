@@ -998,7 +998,7 @@ class DocGraphCommands(CliTopCommand):
         ) -> None:
             """Launch an interactive Textual TUI to browse the Document Graph."""
             db_path = _resolve_db_path(db_path, profile=profile)
-            from genai_graph.kg.query.document_graph_tui import run_document_graph_tui
+            from genai_graph.ui.textual.apps.document_graph_tui import run_document_graph_tui
 
             run_document_graph_tui(db_path)
 
@@ -1040,7 +1040,7 @@ class DocGraphCommands(CliTopCommand):
                 resolved_db = None
 
             app_script = str(
-                Path(__file__).resolve().parent.parent / "webapp" / "pages" / "demos" / "docgraph_browser.py"
+                Path(__file__).resolve().parent.parent / "ui" / "streamlit" / "pages" / "demos" / "docgraph_browser.py"
             )
 
             cmd = [

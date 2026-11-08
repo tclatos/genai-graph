@@ -8,7 +8,7 @@ import pytest
 from textual.widgets import Button, DataTable, OptionList, Static, TextArea
 
 from genai_graph.kg.backend import KuzuBackend
-from genai_graph.kg.query.cypher_tui import (
+from genai_graph.ui.textual.apps.cypher_tui import (
     CypherQueryApp,
     introspect_schema,
     load_cypher_examples,

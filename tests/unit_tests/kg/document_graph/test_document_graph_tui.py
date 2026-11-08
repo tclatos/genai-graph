@@ -11,7 +11,7 @@ from textual.widgets._markdown import MarkdownTable
 from genai_graph.kg.backend import KuzuBackend
 from genai_graph.kg.document_graph.ingest import ingest_document_graph
 from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
-from genai_graph.kg.query.document_graph_tui import DocumentGraphApp, _dedupe_documents, _read_origin_path
+from genai_graph.ui.textual.apps.document_graph_tui import DocumentGraphApp, _dedupe_documents, _read_origin_path
 
 DOC_TEXT = """<!-- source: /path/to/original_guide.pdf -->
 # Guide Title

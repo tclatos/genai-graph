@@ -257,6 +257,6 @@ class GraphCommands(CliTopCommand):
                 return
 
             # Interactive TUI mode
-            from genai_graph.kg.query.cypher_tui import run_cypher_tui
+            from genai_graph.ui.textual.apps.cypher_tui import run_cypher_tui
 
             run_cypher_tui(db_path=resolved_db, initial_query=query_str, read_only=read_only)

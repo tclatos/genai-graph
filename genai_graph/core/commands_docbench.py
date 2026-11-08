@@ -78,7 +78,7 @@ class DocBenchCommands(CliTopCommand):
                 resolved_db = None
 
             app_script = str(
-                Path(__file__).resolve().parent.parent / "webapp" / "pages" / "demos" / "docgraph_browser.py"
+                Path(__file__).resolve().parent.parent / "ui" / "streamlit" / "pages" / "demos" / "docgraph_browser.py"
             )
 
             cmd = [

@@ -5,7 +5,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) — [Semantic V
 
 ## [Unreleased]
 
-### Added
+### Changed
+
+- **UI & Visualization Refactoring into `genai_graph.ui`**: Reorganized all UI, visualization, and TUI facilities into the unified `<pkg>/ui/` structure.
+  - **`genai_graph/ui/graph_html/`**: Extracted canonical D3 force and d3-dag Sugiyama HTML rendering engines, templates, graph models (`models.py`), sibling limiting algorithms (`algorithms.py`), Cypher query builder (`query_builder.py`), and Kùzu schema/table introspection (`schema_inspect.py`).
+  - **`genai_graph/ui/config/`**: Integrated `GraphDisplayConfig` (aliased as `DocGraphVisualizationConfig`) backed by `genai-tk`'s `ConfigModel` for declarative YAML resolution via `ui.display.graph`.
+  - **`genai_graph/ui/streamlit/`**: Reorganized pages into `pages/demos/` and `pages/settings/`. Built a reusable `graph_viewer` component (`render_graph_visualization`) eliminating duplicated visualizer code. Removed duplicated `webapp/ui_components/` in favor of `genai_tk.ui.streamlit.components`.
+  - **`genai_graph/ui/textual/`**: Consolidated all Textual terminal applications into `apps/` (`CypherQueryApp`, `DocumentGraphApp`, `BenchViewerApp`).
 
 #### Knowledge Graph Visualization Configuration
 - **DocGraph Visualization Configuration Model**: Added `DocGraphVisualizationConfig` and `resolve_visualization_config` in `genai_graph.bench.config` (re-exported via `genai_graph.bench`, `genai_graph.agent`, and `genai_graph.kg.export`). Supports declarative configuration of `top_node_type` (default: `"Opportunity"`), `default_exclude_node_types` (default: `["Image", "MarkdownSection"]`), `max_hops` (default: 6), `default_layout`, and `default_limit` via `docgraph.yaml` profiles or global configuration.

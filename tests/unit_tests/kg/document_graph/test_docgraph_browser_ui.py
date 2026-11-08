@@ -13,8 +13,7 @@ from genai_graph.core.commands_docgraph import DocGraphCommands
 from genai_graph.kg.backend import KuzuBackend
 from genai_graph.kg.document_graph.ingest import ingest_document_graph
 from genai_graph.kg.factories.document_graph_factory import DocumentGraphFactory
-from genai_graph.webapp.pages.demos.docgraph_browser import _get_configured_profiles
-from genai_graph.webapp.ui_components.docgraph_view import (
+from genai_graph.ui.streamlit.components.docgraph_view import (
     build_tree_select_nodes,
     extract_markdown_images,
     fetch_database_stats,
@@ -24,6 +23,7 @@ from genai_graph.webapp.ui_components.docgraph_view import (
     format_section_expander_label,
     resolve_image_path,
 )
+from genai_graph.ui.streamlit.pages.demos.docgraph_browser import _get_configured_profiles
 
 SAMPLE_DOC_TEXT = """<!-- source: /path/to/annual_report.pdf -->
 # Annual Financial Report 2026

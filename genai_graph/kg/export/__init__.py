@@ -8,7 +8,6 @@ This package provides:
 """
 
 from genai_graph.bench.config import (
-    DocGraphVisualizationConfig,
     resolve_visualization_config,
 )
 from genai_graph.kg.export.artifacts import (
@@ -25,12 +24,17 @@ from genai_graph.kg.export.artifacts import (
     export_warnings,
     validate_parquet_cache,
 )
-from genai_graph.kg.export.dag_html import generate_dag_html
-from genai_graph.kg.export.html import generate_html
+from genai_graph.ui.config.graph import (
+    DocGraphVisualizationConfig,
+    GraphDisplayConfig,
+)
+from genai_graph.ui.graph_html.dag_html import generate_dag_html
+from genai_graph.ui.graph_html.html import generate_html
 
 __all__ = [
     "CacheFingerprints",
     "DocGraphVisualizationConfig",
+    "GraphDisplayConfig",
     "HtmlExportResult",
     "ParquetExportResult",
     "ParquetManifest",

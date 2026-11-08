@@ -71,7 +71,7 @@ from genai_graph.bench.summary import (
     display_bench_summary,
     save_bench_summary,
 )
-from genai_graph.bench.tui import (
+from genai_graph.ui.textual.apps.bench_tui import (
     BenchQuestionDetail,
     BenchViewerApp,
     display_questions_table,

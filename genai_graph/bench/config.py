@@ -17,6 +17,8 @@ from loguru import logger
 from omegaconf import OmegaConf
 from pydantic import BaseModel, Field
 
+from genai_graph.ui.config.graph import DocGraphVisualizationConfig
+
 ALL_STEPS = ("fetch", "build", "run", "grade")
 
 
@@ -94,18 +96,6 @@ class DocGraphAccessControlConfig(BaseModel):
     inheritance_mode: Literal["intersection", "override", "union"] = "intersection"
     trimming_feedback: Literal["zero_knowledge", "aggregate_notice", "placeholder"] = "aggregate_notice"
     options: dict[str, Any] = Field(default_factory=dict)
-
-    model_config = {"arbitrary_types_allowed": True}
-
-
-class DocGraphVisualizationConfig(BaseModel):
-    """Configuration for Document Graph visualization."""
-
-    top_node_type: str = "Opportunity"
-    default_exclude_node_types: list[str] = Field(default_factory=lambda: ["Image", "MarkdownSection"])
-    max_hops: int = 6
-    default_layout: str = "dag"
-    default_limit: int = 2000
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -438,6 +428,9 @@ def resolve_visualization_config(
 
         cfg = global_config()
         if hasattr(cfg, "get"):
+            v0 = cfg.get("ui.display.graph", None)
+            if v0 and isinstance(v0, dict):
+                return DocGraphVisualizationConfig(**v0)
             v1 = cfg.get(f"docgraph_profiles.{profile_name or 'default'}.visualization", None)
             if v1 and isinstance(v1, dict):
                 return DocGraphVisualizationConfig(**v1)

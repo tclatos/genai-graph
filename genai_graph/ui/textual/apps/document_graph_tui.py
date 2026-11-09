@@ -112,6 +112,7 @@ class DocumentGraphApp(App[None]):
     """
 
     BINDINGS = [
+        ("ctrl+q", "quit", "Quit"),
         ("q", "quit", "Quit"),
         ("r", "refresh_tree", "Refresh"),
         ("m", "open_markdown", "Open .md"),

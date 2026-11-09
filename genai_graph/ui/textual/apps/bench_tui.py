@@ -440,7 +440,8 @@ class BenchViewerApp(App):
     """
 
     BINDINGS = [
-        Binding("q", "quit", "Quit", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
+        Binding("q", "quit", "Quit", show=False),
         Binding("/", "focus_search", "Search", show=True),
         Binding("escape", "clear_search", "Back to Table", show=True),
         Binding("t", "toggle_tools", "Toggle Tool Calls", show=True),

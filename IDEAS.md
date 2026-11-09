@@ -1,45 +1,6 @@
-# Decision Models — DONE (closed 2026-11-03)
+# New benchark : Vidore v3
+https://huggingface.co/blog/QuentinJG/introducing-vidore-v3
 
-**Status**: implemented and benchmarked. Deliverables:
-- Design: [docs/design/06_decision_model_navigation.md](docs/design/06_decision_model_navigation.md)
-- Study + campaign record: [docs/studies/decision_model_navigation.md](docs/studies/decision_model_navigation.md) (§6)
-- Benchmark report: [../officeqa/report/DECISION_NAVIGATION_33Q_REPORT.md](../officeqa/report/DECISION_NAVIGATION_33Q_REPORT.md)
-
-**Outcome — decision-model routing vs LLM routing** (paired: same 16 questions, same
-`glm_5.3_Flash` synthesizer, both on a healthy database):
-
-| Routing | Strict | Weighted | Input tokens | Tool calls |
-|---|---|---|---|---|
-| LLM routing (baseline) | 69% | 75.0% | 12.28M | 373 |
-| Decision-model routing | 50% | 62.5% | 8.23M (−33%) | 263 (−29%) |
-
-Navigation itself costs 352 joint-scoring calls, 815k tokens, $0.029 total (~$0.001 and 10 s per
-question) and generates zero tokens.
-
-**Verdict**: keep it — it is a **cost** instrument today, not yet a quality one. The 12.5-point
-weighted gap is *not* a navigation failure: the navigator selects the right document and table, and
-the losses are downstream reading failures (wrong column/series inside a correct table). Two open
-items remain: the agent-side memory growth (~370 MB per question, not reclaimed by `gc.collect()`)
-that blocks full-subset measurement in one process (use `officeqa/run_subset_chunked.py`), and the
-table-column reading discipline. The `deepseek4.1flash-1017` synthesizer swap was not an improvement
-(same strict, worse weighted, +41% tokens).
-
-Original request, for the record:
-
-In genai-graph : 
-We want to use Decision Model to reduce  calls to LLM  when an agent navigate in a document graph - it's typically a process where such model can evaluate Folders / Focuments in prder to pick the most relevant Sections.
-
-Get inspiration from: 
-
-https://www.researchgate.net/publication/416921648_Retriever-Free_Retrieval_Navigating_Documents_with_Decision_Models
-
-
-Use our Decision model class and factory (se) get_decision_model in genai-tk . Read that paper.
-
-Our idea is to have a new Agent Profile with different tools; skills etc. Make decision model configurable, as well as other important paramaters. 
-
-We will compare the new approach with the LLm based one on subset of the benchmarks officequa. Have a look at that project to ensure will at least equivalent results.
-Think, analyse alternatives, propose a plan and write it in docs/studies
 
 
 

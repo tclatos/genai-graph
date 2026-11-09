@@ -440,13 +440,20 @@ class BenchViewerApp(App):
     """
 
     BINDINGS = [
-        Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
-        Binding("q", "quit", "Quit", show=False),
+        Binding("q", "quit", "Quit", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=False),
         Binding("/", "focus_search", "Search", show=True),
         Binding("escape", "clear_search", "Back to Table", show=True),
         Binding("t", "toggle_tools", "Toggle Tool Calls", show=True),
         Binding("r", "refresh_data", "Reload Data", show=True),
     ]
+
+    def action_quit(self) -> None:
+        """Quit one level at a time: dismiss modal if open, otherwise exit app."""
+        if len(self.screen_stack) > 1:
+            self.pop_screen()
+        else:
+            self.exit()
 
     def __init__(
         self,
@@ -593,8 +600,18 @@ class BenchViewerApp(App):
                     self.render_detail(q)
                     break
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "search-input":
+            val = event.value.strip().lower()
+            if val in ("/q", "/quit", "/exit", ":q", ":quit"):
+                self.action_quit()
+                return
+            self.query_one(DataTable).focus()
+
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search-input":
+            if event.value.strip().lower() in ("/q", "/quit", "/exit", ":q", ":quit"):
+                return
             self.apply_filter()
 
     def on_select_changed(self, event: Select.Changed) -> None:

@@ -112,12 +112,19 @@ class DocumentGraphApp(App[None]):
     """
 
     BINDINGS = [
-        ("ctrl+q", "quit", "Quit"),
         ("q", "quit", "Quit"),
+        ("ctrl+q", "quit", "Quit"),
         ("r", "refresh_tree", "Refresh"),
         ("m", "open_markdown", "Open .md"),
         ("o", "open_source", "Open source"),
     ]
+
+    def action_quit(self) -> None:
+        """Quit one level at a time: dismiss modal if open, otherwise exit app."""
+        if len(self.screen_stack) > 1:
+            self.pop_screen()
+        else:
+            self.exit()
 
     def __init__(self, db_path: str) -> None:
         super().__init__()

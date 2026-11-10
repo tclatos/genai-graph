@@ -1,6 +1,6 @@
 ---
 name: kg-cli
-description: Add or modify the genai-graph CLI command groups — cli kg (create/info/schema/agent/cypher/query/view), cli docgraph (run/build/list/toc/cat/search/tui), and cli neo4j (analyze/convert/subset/import/query/info). Use when editing genai_graph/core/commands_*.py or genai_graph/neo4j_import/commands.py, adding a KG CLI subcommand, or wiring a command to the workflow engine.
+description: Add or modify the genai-graph CLI command groups — cli kg (create/info/schema/agent/cypher/query/view), cli graph (display/schema/query), cli docgraph (run/build/list/toc/cat/search/tui), and cli neo4j (analyze/convert/subset/import/query/info). Use when editing genai_graph/core/commands_*.py or genai_graph/neo4j_import/commands.py, adding a KG CLI subcommand, or wiring a command to the workflow engine.
 ---
 
 # GenAI Graph CLI
@@ -48,6 +48,22 @@ cli kg view                            # open the HTML graph visualization
 `cli kg create <name>` wraps `cli workflow run <profile>`; CLI flags always override YAML
 defaults. `--force <stage>`, `--delete-first`, `--no-export-html`, `--dry-run`, `--all` are
 the main flags (see `kg-workflows` for force stages).
+
+### `cli graph` — `GraphCommands` (`core/commands_graph.py`)
+
+```bash
+cli graph display --db path/to/db.db                # interactive D3.js HTML graph visualization
+cli graph display --db path/to/db.db --no-browser   # export HTML without opening browser
+cli graph schema --db path/to/db.db                 # interactive D3.js HTML schema visualization
+cli graph schema --db path/to/db.db --output ./out.html
+cli graph schema --kg my_graph                      # visualize schema from KG config / manager
+cli graph query --db path/to/db.db                  # interactive Textual Cypher TUI
+cli graph query --db path/to/db.db -q "CALL show_tables() RETURN *" --batch  # batch Cypher query
+```
+
+`cli graph display` generates an interactive graph visualization from a Cypher query.
+`cli graph schema` generates an interactive D3 force-directed schema diagram with node/table
+definitions, primary keys, and relationship endpoints.
 
 ### `cli docgraph` — `DocGraphCommands` (`core/commands_docgraph.py`)
 

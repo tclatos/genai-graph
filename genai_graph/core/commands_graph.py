@@ -3,6 +3,8 @@
 Provides:
 - ``display`` : Generate an interactive HTML graph visualization (D3.js force-directed layout)
                 and open it in the default web browser.
+- ``schema``  : Generate an interactive HTML graph schema visualization (D3.js force-directed layout)
+                and open it in the default web browser.
 - ``query``   : Launch an interactive Textual TUI to test Cypher queries, explore
                 schema tables, and run generic examples, or execute in batch mode.
 """
@@ -169,6 +171,144 @@ class GraphCommands(CliTopCommand):
                 raise typer.Exit(1) from exc
 
             console.print(f"[bold green]✓ HTML graph visualization created:[/bold green] {dest_path}")
+
+            if browser:
+                file_url = dest_path.resolve().as_uri()
+                console.print(f"[dim]🌐 Opening in browser: {file_url}[/dim]")
+                webbrowser.open(file_url)
+
+        @cli_app.command("schema")
+        def schema(
+            db_path: Annotated[
+                str | None,
+                typer.Option(
+                    "--db",
+                    "-d",
+                    help="Path to Ladybug/Kùzu database directory or schema JSON file. Defaults to graph_db.default.",
+                ),
+            ] = None,
+            output: Annotated[
+                str | None,
+                typer.Option(
+                    "--output",
+                    "-o",
+                    help="Destination path for generated HTML file. Defaults to ./<db_stem>_schema.html.",
+                ),
+            ] = None,
+            kg: Annotated[
+                str | None,
+                typer.Option(
+                    "--kg",
+                    help="Knowledge graph configuration name to visualize schema for.",
+                ),
+            ] = None,
+            browser: Annotated[
+                bool,
+                typer.Option(
+                    "--browser/--no-browser",
+                    help="Automatically open generated HTML file in default web browser.",
+                ),
+            ] = True,
+        ) -> None:
+            """Create an interactive HTML graph schema visualization and open it in the browser."""
+            import json as _json
+            from typing import Any
+
+            from genai_graph.kg.schema.schema_html import generate_schema_html
+            from genai_graph.ui.graph_html.schema_inspect import introspect_schema_data
+
+            schema_data: dict[str, Any] | None = None
+            dest_stem: str = "graph"
+
+            if kg:
+                dest_stem = kg
+                try:
+                    from genai_graph.kg.manager import get_kg_manager
+
+                    mgr = get_kg_manager()
+                    json_path = mgr.get_schema_json_path_for(kg)
+                    if json_path.exists():
+                        schema_data = _json.loads(json_path.read_text(encoding="utf-8"))
+                        console.print(f"[dim]Loaded schema from KG manager: {json_path}[/dim]")
+                    else:
+                        from genai_graph.kg.export.artifacts import export_schema_json
+
+                        dest_json = export_schema_json(kg)
+                        schema_data = _json.loads(dest_json.read_text(encoding="utf-8"))
+                except Exception as exc:
+                    console.print(f"[yellow]Could not resolve schema via KG manager for '{kg}': {exc}[/yellow]")
+
+                if schema_data is None:
+                    try:
+                        from genai_graph.kg.schema.resolved import ResolvedSchema
+
+                        resolved = ResolvedSchema.from_registry([kg])
+                        schema_data = resolved.to_d3_json()
+                    except Exception as exc:
+                        console.print(f"[red]Error: Could not resolve schema for KG profile '{kg}': {exc}[/red]")
+                        raise typer.Exit(1) from exc
+            else:
+                resolved_db = resolve_graph_db_path(db_path)
+                db_file = Path(resolved_db)
+                if not db_file.exists():
+                    console.print(f"[red]Error: Graph database not found at:[/red] {resolved_db}")
+                    raise typer.Exit(1)
+
+                dest_stem = db_file.stem
+
+                # 1. Direct JSON schema file
+                if db_file.is_file() and db_file.suffix == ".json":
+                    try:
+                        schema_data = _json.loads(db_file.read_text(encoding="utf-8"))
+                        console.print(f"[dim]Loaded schema from JSON file: {db_file}[/dim]")
+                    except Exception as exc:
+                        console.print(f"[red]Error: Failed to parse schema JSON file {db_file}: {exc}[/red]")
+                        raise typer.Exit(1) from exc
+
+                # 2. Check for adjacent pre-generated schema JSON
+                if schema_data is None:
+                    adjacent_candidates = [
+                        db_file.parent / f"{db_file.stem}_schema.json",
+                        db_file.parent / f"{db_file.stem}-schema.json",
+                        db_file.parent / "schema.json",
+                    ]
+                    for cand in adjacent_candidates:
+                        if cand.exists():
+                            try:
+                                schema_data = _json.loads(cand.read_text(encoding="utf-8"))
+                                console.print(f"[dim]Loaded schema metadata from: {cand}[/dim]")
+                                break
+                            except Exception:
+                                pass
+
+                # 3. Live database introspection
+                if schema_data is None:
+                    console.print(f"[dim]Introspecting schema from database: {resolved_db}[/dim]")
+                    backend = KuzuBackend()
+                    backend.connect(resolved_db, read_only=True)
+                    try:
+                        schema_data = introspect_schema_data(backend, graph_name=db_file.stem)
+                    except Exception as exc:
+                        console.print(f"[red]Failed to introspect schema from database: {exc}[/red]")
+                        raise typer.Exit(1) from exc
+                    finally:
+                        backend.close()
+
+            # Determine HTML destination path
+            dest_path = Path(output).resolve() if output else Path.cwd() / f"{dest_stem}_schema.html"
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+            node_count = len(schema_data.get("nodes", []))
+            rel_count = len(schema_data.get("links", []))
+            console.print(f"[dim]Schema summary: {node_count} node types, {rel_count} relationship types[/dim]")
+
+            try:
+                generate_schema_html(schema_data, destination_file_path=str(dest_path))
+            except Exception as exc:
+                console.print(f"[red]Failed to generate HTML schema visualization: {exc}[/red]")
+                raise typer.Exit(1) from exc
+
+            console.print(f"[bold green]✓ HTML schema visualization created:[/bold green] {dest_path}")
 
             if browser:
                 file_url = dest_path.resolve().as_uri()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -175,3 +175,130 @@ def get_opportunity_folders(backend: KgBackend) -> list[dict[str, str]]:
         logger.warning("Could not fetch opportunity folders: {}", exc)
 
     return sorted(results, key=lambda x: x["label"])
+
+
+def introspect_schema_data(backend: KgBackend, graph_name: str = "") -> dict[str, Any]:
+    """Extract full schema in D3-compatible format directly from a live graph database.
+
+    Args:
+        backend: Connected KgBackend instance.
+        graph_name: Optional graph identifier to include in metadata.
+
+    Returns:
+        Dictionary conforming to the D3 schema visualization format
+        with keys 'meta', 'nodes', 'links', and 'vector_indexes'.
+    """
+    from datetime import UTC, datetime
+
+    node_types = get_node_types(backend)
+    rel_types = get_relationship_types(backend)
+
+    nodes: list[dict[str, Any]] = []
+    links: list[dict[str, Any]] = []
+
+    for node_type in node_types:
+        pk = get_primary_key(backend, node_type)
+        fields: list[dict[str, Any]] = []
+        try:
+            info_df = backend.execute_get_as_df(f"CALL table_info('{node_type}') RETURN *", union=False)
+            for _, f_row in info_df.iterrows():
+                col_name = str(f_row["name"])
+                if col_name.startswith("_") or col_name in ("_ID", "_SRC", "_DST"):
+                    continue
+                col_type = str(f_row.get("type", "STRING"))
+                is_pk = bool(f_row.get("primary key", False)) or (col_name == pk)
+                fields.append(
+                    {
+                        "name": col_name,
+                        "type_human": col_type,
+                        "type_kuzu": col_type,
+                        "description": "",
+                        "indexed": is_pk,
+                        "embedded": False,
+                    }
+                )
+        except Exception as exc:
+            logger.debug("Failed to get table_info for node {}: {}", node_type, exc)
+
+        nodes.append(
+            {
+                "id": node_type,
+                "label": node_type,
+                "description": "",
+                "primary_key": pk,
+                "name_from": pk,
+                "index_fields": [pk] if pk else [],
+                "fields": fields,
+            }
+        )
+
+    for rel_type in rel_types:
+        conn_df = None
+        try:
+            conn_df = backend.execute_get_as_df(f"CALL show_connection('{rel_type}') RETURN *", union=False)
+        except Exception as exc:
+            logger.debug("Failed to get show_connection for rel {}: {}", rel_type, exc)
+
+        props: list[dict[str, Any]] = []
+        try:
+            info_df = backend.execute_get_as_df(f"CALL table_info('{rel_type}') RETURN *", union=False)
+            for _, p_row in info_df.iterrows():
+                prop_name = str(p_row["name"])
+                if prop_name.startswith("_") or prop_name in ("_ID", "_SRC", "_DST"):
+                    continue
+                prop_type = str(p_row.get("type", "STRING"))
+                props.append(
+                    {
+                        "name": prop_name,
+                        "type_human": prop_type,
+                        "type_kuzu": prop_type,
+                        "description": "",
+                    }
+                )
+        except Exception as exc:
+            logger.debug("Failed to get table_info for rel {}: {}", rel_type, exc)
+
+        if conn_df is not None and not conn_df.empty:
+            for _, c_row in conn_df.iterrows():
+                src = str(c_row.get("source table name", ""))
+                dst = str(c_row.get("destination table name", ""))
+                links.append(
+                    {
+                        "id": f"{src}::{rel_type}::{dst}",
+                        "source": src,
+                        "target": dst,
+                        "label": rel_type,
+                        "description": "",
+                        "field_paths": [],
+                        "properties": props,
+                    }
+                )
+
+    vector_indexes: list[dict[str, Any]] = []
+    try:
+        idx_df = backend.execute_get_as_df("CALL show_indexes() RETURN *", union=False)
+        if not idx_df.empty and "index_name" in idx_df.columns:
+            for _, i_row in idx_df.iterrows():
+                vector_indexes.append(
+                    {
+                        "table": str(i_row.get("table_name", "")),
+                        "index_name": str(i_row.get("index_name", "")),
+                        "embedding_column": "",
+                        "source_field": str(i_row.get("property_names", "")),
+                    }
+                )
+    except Exception as exc:
+        logger.debug("Failed to get indexes: {}", exc)
+
+    return {
+        "meta": {
+            "format": "genai_graph.resolved_schema",
+            "format_version": 1,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "graphs": [graph_name] if graph_name else [],
+            "root_model": nodes[0]["id"] if nodes else None,
+        },
+        "nodes": nodes,
+        "links": links,
+        "vector_indexes": vector_indexes,
+    }

@@ -443,8 +443,11 @@ def detect_headings(raw: str) -> list[tuple[str, int, int]]:
     """
     from markdown_it import MarkdownIt
 
+    # Guard against OCR sequence grids (e.g. " 1.   2.   3.   4. ...") that corrupt
+    # CommonMark list parsing into pathological states and swallow subsequent headings.
+    sanitized_raw = re.sub(r"(?m)^\s*(?:1\.\s+2\.\s+3\.\s+4\..*)$", "<!-- OCR sequence grid omitted -->", raw)
     md = MarkdownIt("commonmark", {"html": True}).enable("table").enable("strikethrough")
-    tokens = md.parse(raw)
+    tokens = md.parse(sanitized_raw)
 
     headings: list[tuple[str, int, int]] = []  # (title, level, line_start 1-indexed)
     depth = 0

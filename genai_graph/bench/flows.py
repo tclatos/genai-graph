@@ -355,8 +355,22 @@ def run_question_task(
                 collected,
             )
 
+    try:
+        from langchain_openai.chat_models import _client_utils
+
+        _client_utils._cached_async_httpx_client.cache_clear()
+    except Exception:
+        pass
+
     with sem:
         record = asyncio.run(_execute())
+
+    try:
+        from langchain_openai.chat_models import _client_utils
+
+        _client_utils._cached_async_httpx_client.cache_clear()
+    except Exception:
+        pass
 
     if runs_path:
         append_run_record(record, Path(runs_path))
@@ -383,8 +397,22 @@ def grade_run_task(
     """Grade a question run with the LLM-as-judge."""
     sem = _get_semaphore(_JUDGE_SEMAPHORES, concurrency)
 
+    try:
+        from langchain_openai.chat_models import _client_utils
+
+        _client_utils._cached_async_httpx_client.cache_clear()
+    except Exception:
+        pass
+
     with sem:
         score = asyncio.run(evaluate_single_run(judge_llm, run, system_rubric=system_rubric))
+
+    try:
+        from langchain_openai.chat_models import _client_utils
+
+        _client_utils._cached_async_httpx_client.cache_clear()
+    except Exception:
+        pass
 
     if scores_path:
         from genai_graph.bench.judge import append_score_record

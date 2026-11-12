@@ -1865,7 +1865,7 @@ def execute_image_query(
     # model id to override it.
     vlm_model_id = model or "default_vlm"
     try:
-        llm = get_llm(vlm_model_id)
+        llm = get_llm(vlm_model_id, request_timeout=60.0)
         resp = llm.invoke(messages)
         return str(resp.content)
     except Exception as exc:
@@ -1875,7 +1875,7 @@ def execute_image_query(
                 continue
             try:
                 logger.info("Retrying vision query with fallback '{}'...", fallback)
-                llm = get_llm(fallback)
+                llm = get_llm(fallback, request_timeout=60.0)
                 resp = llm.invoke(messages)
                 return str(resp.content)
             except Exception:

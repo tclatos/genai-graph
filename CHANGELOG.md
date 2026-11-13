@@ -5,9 +5,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) — [Semantic V
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- **UI & Visualization Refactoring into `genai_graph.ui`**: Reorganized all UI, visualization, and TUI facilities into the unified `<pkg>/ui/` structure.
+- **Interactive Streamlit Benchmark Dashboard (`cli bench web`)**:
+  - Added `cli bench web` subcommand in [genai_graph/core/commands_bench.py](genai_graph/core/commands_bench.py) to launch the Streamlit benchmark outcomes explorer on any profile and port.
+  - Added [genai_graph/ui/streamlit/components/bench_browser.py](genai_graph/ui/streamlit/components/bench_browser.py) providing a reusable benchmark outcomes browser with KPI summary cards (strict accuracy %, weighted accuracy %, groundedness %, average tool calls), multi-criteria filtering (verdict, document, text query), master-detail comparison (question, gold answer, model response, judge rationale), and step-by-step tool execution traces and DecisionRAG navigation evidence packs.
+  - Added [genai_graph/ui/streamlit/pages/demos/bench_browser.py](genai_graph/ui/streamlit/pages/demos/bench_browser.py) as the standalone page runner.
+- **Reusable Document Graph & PDF Section Inspector (`docgraph_inspector.py`)**:
+  - Added [genai_graph/ui/streamlit/components/docgraph_inspector.py](genai_graph/ui/streamlit/components/docgraph_inspector.py) enabling section-by-section navigation for long documents.
+  - Renders Markdown text, tables, and resolved embedded images/figures (`data/markdown_multi/images/`).
+  - Added `find_document_pdf()` for automatic origin/pattern source PDF resolution, and `render_pdf_view()` with native Streamlit PDF display and base64 iframe fallback.
+  - Provides both tabbed layout and side-by-side **Split Screen** comparison between Markdown sections and the original source PDF.
+
+### Fixed
+
+- **Benchmark Dataset Loading Document Filtering**: In [genai_graph/ui/textual/apps/bench_tui.py](genai_graph/ui/textual/apps/bench_tui.py), updated `load_bench_dataset_with_results` to filter questions by `cfg.files.docs` and `cfg.question_ids` while preserving any questions with recorded runs/scores, ensuring uningested documents do not clutter TUI or CLI question views.
+- **Synchronous Document Graph Section Enrichment**: Added `get_document_sections_full()` in [genai_graph/ui/streamlit/components/docgraph_view.py](genai_graph/ui/streamlit/components/docgraph_view.py) for synchronous callers (preventing coroutine iteration errors in Streamlit scripts) while retaining `fetch_document_sections_full()` for async callers. Fixed Cypher query syntax for non-structural relationship exclusions.
+
   - **`genai_graph/ui/graph_html/`**: Extracted canonical D3 force and d3-dag Sugiyama HTML rendering engines, templates, graph models (`models.py`), sibling limiting algorithms (`algorithms.py`), Cypher query builder (`query_builder.py`), and Kùzu schema/table introspection (`schema_inspect.py`).
   - **`genai_graph/ui/config/`**: Integrated `GraphDisplayConfig` (aliased as `DocGraphVisualizationConfig`) backed by `genai-tk`'s `ConfigModel` for declarative YAML resolution via `ui.display.graph`.
   - **`genai_graph/ui/streamlit/`**: Reorganized pages into `pages/demos/` and `pages/settings/`. Built a reusable `graph_viewer` component (`render_graph_visualization`) eliminating duplicated visualizer code. Removed duplicated `webapp/ui_components/` in favor of `genai_tk.ui.streamlit.components`.

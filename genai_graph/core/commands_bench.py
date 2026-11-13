@@ -405,3 +405,70 @@ class BenchCommands(CliTopCommand):
             cfg_p = Path(config_path) if config_path else None
             cfg = load_bench_profile(profile_name=profile, config_path=cfg_p)
             run_bench_tui(cfg, initial_question_id=question_id)
+
+        @cli_app.command("web")
+        def web_command(
+            profile: Annotated[
+                str | None,
+                typer.Option("-p", "--profile", help="Bench run profile key"),
+            ] = None,
+            port: Annotated[
+                int,
+                typer.Option("--port", help="Port for the Streamlit web server"),
+            ] = 8501,
+            host: Annotated[
+                str,
+                typer.Option("--host", help="Host address for the Streamlit web server"),
+            ] = "localhost",
+            browser: Annotated[
+                bool,
+                typer.Option("--browser/--no-browser", help="Automatically open browser tab"),
+            ] = True,
+            config_path: Annotated[
+                str | None,
+                typer.Option("-c", "--config", help="Path to bench YAML configuration file"),
+            ] = None,
+        ) -> None:
+            """Launch the interactive Streamlit Benchmark Outcomes dashboard.
+
+            Examples:
+                cli bench web
+                cli bench web -p decision_fast
+                cli bench web --port 8502
+            """
+            import os
+            import subprocess
+            import sys
+
+            load_env()
+            cfg_p = Path(config_path) if config_path else None
+            cfg = load_bench_profile(profile_name=profile, config_path=cfg_p)
+
+            app_script = str(
+                Path(__file__).resolve().parent.parent / "ui" / "streamlit" / "pages" / "demos" / "bench_browser.py"
+            )
+
+            cmd = [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                app_script,
+                "--server.port",
+                str(port),
+                "--server.address",
+                str(host),
+            ]
+            if not browser:
+                cmd.extend(["--server.headless", "true"])
+
+            env = os.environ.copy()
+            if cfg.profile_name:
+                env["BENCH_PROFILE"] = cfg.profile_name
+            if config_path:
+                env["BENCH_CONFIG_PATH"] = str(config_path)
+
+            console.print(
+                f"[bold green]Starting Benchmark Web Dashboard ({cfg.profile_name}) on http://{host}:{port}...[/bold green]"
+            )
+            subprocess.run(cmd, env=env)

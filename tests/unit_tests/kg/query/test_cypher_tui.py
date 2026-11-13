@@ -140,10 +140,12 @@ def test_format_graph_df_unpacks_node_and_removes_id() -> None:
     """Test that format_graph_df unpacks node dicts and removes _ID."""
     import pandas as pd
 
-    raw_df = pd.DataFrame([
-        {"n": {"_ID": {"offset": 0, "table": 0}, "_LABEL": "Company", "id": 1, "name": "Atos", "city": "Paris"}},
-        {"n": {"_ID": {"offset": 1, "table": 0}, "_LABEL": "Company", "id": 2, "name": "Google", "city": "MTV"}},
-    ])
+    raw_df = pd.DataFrame(
+        [
+            {"n": {"_ID": {"offset": 0, "table": 0}, "_LABEL": "Company", "id": 1, "name": "Atos", "city": "Paris"}},
+            {"n": {"_ID": {"offset": 1, "table": 0}, "_LABEL": "Company", "id": 2, "name": "Google", "city": "MTV"}},
+        ]
+    )
 
     formatted = format_graph_df(raw_df)
     assert "_ID" not in formatted.columns
@@ -166,15 +168,19 @@ def test_format_graph_df_strips_internal_ids_from_rel_cells() -> None:
     """Test that relationship internal identifiers (_ID, _SRC, _DST) are stripped from cells."""
     import pandas as pd
 
-    raw_df = pd.DataFrame([{
-        "r": {
-            "_SRC": {"offset": 0, "table": 1},
-            "_DST": {"offset": 0, "table": 0},
-            "_LABEL": "WORKS_AT",
-            "_ID": {"offset": 0, "table": 2},
-            "since": 2020,
-        }
-    }])
+    raw_df = pd.DataFrame(
+        [
+            {
+                "r": {
+                    "_SRC": {"offset": 0, "table": 1},
+                    "_DST": {"offset": 0, "table": 0},
+                    "_LABEL": "WORKS_AT",
+                    "_ID": {"offset": 0, "table": 2},
+                    "since": 2020,
+                }
+            }
+        ]
+    )
 
     formatted = format_graph_df(raw_df)
     assert "_ID" not in formatted.columns
@@ -188,29 +194,33 @@ def test_format_graph_df_unpacks_relationship_triple() -> None:
     """Test formatting a (node, rel, node) relationship triple into a clean table."""
     import pandas as pd
 
-    raw_df = pd.DataFrame([{
-        "a": {
-            "_ID": {"offset": 0, "table": 1},
-            "_LABEL": "Employee",
-            "id": 10,
-            "name": "Alice",
-            "role": "Engineer",
-        },
-        "r": {
-            "_SRC": {"offset": 0, "table": 1},
-            "_DST": {"offset": 0, "table": 0},
-            "_LABEL": "WORKS_AT",
-            "_ID": {"offset": 0, "table": 2},
-            "since": 2020,
-            "department": "Cloud",
-        },
-        "b": {
-            "_ID": {"offset": 0, "table": 0},
-            "_LABEL": "Company",
-            "id": 1,
-            "name": "Atos",
-        },
-    }])
+    raw_df = pd.DataFrame(
+        [
+            {
+                "a": {
+                    "_ID": {"offset": 0, "table": 1},
+                    "_LABEL": "Employee",
+                    "id": 10,
+                    "name": "Alice",
+                    "role": "Engineer",
+                },
+                "r": {
+                    "_SRC": {"offset": 0, "table": 1},
+                    "_DST": {"offset": 0, "table": 0},
+                    "_LABEL": "WORKS_AT",
+                    "_ID": {"offset": 0, "table": 2},
+                    "since": 2020,
+                    "department": "Cloud",
+                },
+                "b": {
+                    "_ID": {"offset": 0, "table": 0},
+                    "_LABEL": "Company",
+                    "id": 1,
+                    "name": "Atos",
+                },
+            }
+        ]
+    )
 
     formatted = format_graph_df(raw_df)
     assert list(formatted.columns) == [
@@ -233,5 +243,3 @@ def test_format_graph_df_unpacks_relationship_triple() -> None:
     assert "_ID" not in formatted.columns
     assert "_SRC" not in formatted.columns
     assert "_DST" not in formatted.columns
-
-

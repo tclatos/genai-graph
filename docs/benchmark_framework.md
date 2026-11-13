@@ -433,6 +433,11 @@ cli bench questions -q UID0056 --no-trajectory
 # Launch the interactive Textual TUI browser
 cli bench tui
 cli bench tui -q UID0056                    # Launch and focus on a specific question
+
+# Launch the interactive Streamlit Web dashboard
+cli bench web
+cli bench web -p decision_fast
+cli bench web --port 8502
 ```
 
 ---
@@ -452,7 +457,26 @@ Implemented in `genai_graph.bench.tui`:
 
 ---
 
-## 10. Adding a New Benchmark in 3 Steps
+## 10. Interactive Streamlit Web Dashboard (`cli bench web`)
+
+Implemented in `genai_graph.ui.streamlit.components.bench_browser` and `genai_graph.ui.streamlit.components.docgraph_inspector`:
+
+- **KPI Metric Summary Cards**: Displays total questions, strict accuracy %, weighted accuracy %, groundedness %, average tool calls, and run completion rate.
+- **Multi-Criteria Filtering**: Filter by outcome status (`All`, `✓ Correct`, `~ Partial`, `✗ Incorrect`, `Unrun`), source document/manual, and free-text search across questions and answers.
+- **Master-Detail Comparison**:
+  - Question callout and gold reference answer with justification evidence.
+  - Model response, thinking/reasoning, latency, and token consumption meters.
+  - LLM-as-a-judge evaluation card with verdict, groundedness, numeric match, error category, and full judge rationale.
+- **Execution Trajectory & DecisionRAG Inspector**:
+  - Interactive expanders for every recorded tool call, displaying structured arguments and truncated outputs.
+  - DecisionRAG navigation metadata inspector displaying candidate sections evaluated at each level, beam width, relevance scores, and latency.
+- **Document Graph & PDF Inspector (`docgraph_inspector.py`)**:
+  - Section-by-section navigator for long technical manuals, rendering Markdown text, tables, and resolved embedded images/figures.
+  - Automatic source PDF matching (`find_document_pdf`) with side-by-side **Split Screen** or **Tabbed** comparison views via native Streamlit PDF display.
+
+---
+
+## 11. Adding a New Benchmark in 3 Steps
 
 To test `genai-graph` against a new benchmark (e.g. `mybench`):
 

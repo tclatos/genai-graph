@@ -127,133 +127,132 @@ async def fetch_folders_and_documents(
     return await asyncio.to_thread(_query)
 
 
+def get_document_sections_full(backend: KgBackend, content_hash: str) -> list[dict[str, Any]]:
+    """Fetch all sections for a document including body text, tables, and images."""
+    if not _has_table(backend, _SECTION_LABEL):
+        return []
+
+    fields = _return_fields(
+        backend,
+        _SECTION_LABEL,
+        "s",
+        (
+            "section_id",
+            "content_hash",
+            "parent_section_id",
+            "title",
+            "level",
+            "line_start",
+            "line_end",
+            "token_count",
+            "sequence",
+            "description",
+            "summary",
+            "summary_source",
+            "keywords",
+            "text",
+        ),
+    )
+    cypher = f"""
+        MATCH (s:{_SECTION_LABEL} {{content_hash: $content_hash}})
+        RETURN {fields}
+        ORDER BY s.sequence
+    """
+    rows, _ = _query_rows(backend, cypher, {"content_hash": content_hash})
+
+    # Fetch table counts for this document
+    tables_by_sec: dict[str, list[dict[str, Any]]] = {}
+    if _has_table(backend, "MarkdownTable"):
+        t_rows, _ = _query_rows(
+            backend,
+            """
+            MATCH (s:MarkdownSection)-[:HAS_TABLE]->(t:MarkdownTable)
+            WHERE s.content_hash = $content_hash
+            RETURN s.section_id AS section_id, t.table_id AS table_id, t.name AS name,
+                   t.table_format AS table_format, t.caption AS caption,
+                   t.token_count AS token_count, t.content AS content
+            """,
+            {"content_hash": content_hash},
+        )
+        for tr in t_rows:
+            tables_by_sec.setdefault(tr["section_id"], []).append(tr)
+
+    # Fetch image counts for this document
+    images_by_sec: dict[str, list[dict[str, Any]]] = {}
+    if _has_table(backend, "Image"):
+        i_rows, _ = _query_rows(
+            backend,
+            """
+            MATCH (s:MarkdownSection)-[:HAS_IMAGE]->(i:Image)
+            WHERE s.content_hash = $content_hash
+            RETURN s.section_id AS section_id, i.image_id AS image_id, i.name AS name,
+                   i.filename AS filename, i.path AS path, i.description AS description,
+                   i.size AS size
+            """,
+            {"content_hash": content_hash},
+        )
+        for ir in i_rows:
+            images_by_sec.setdefault(ir["section_id"], []).append(ir)
+
+    # Fetch graph entity links for this document's sections
+    graph_links_by_sec: dict[str, list[dict[str, Any]]] = {}
+    try:
+        # Query non-structural relationships connected to MarkdownSection
+        rel_rows, _ = _query_rows(
+            backend,
+            """
+            MATCH (s:MarkdownSection)-[r]-(e)
+            WHERE s.content_hash = $content_hash
+              AND NOT (type(r) IN ['HAS_SECTION', 'HAS_SUBSECTION', 'HAS_CHUNK', 'HAS_TABLE', 'HAS_IMAGE'])
+            RETURN s.section_id AS section_id, type(r) AS rel_type,
+                   labels(e) AS entity_labels,
+                   coalesce(e.name, e.title, e.id, 'Entity') AS entity_name
+            """,
+            {"content_hash": content_hash},
+        )
+        for gr in rel_rows:
+            graph_links_by_sec.setdefault(gr["section_id"], []).append(gr)
+    except Exception as exc:
+        logger.debug("Graph links query skipped: {}", exc)
+
+    # Merge and enrich sections
+    enriched_sections: list[dict[str, Any]] = []
+    for r in rows:
+        sid = r["section_id"]
+        sec_text = r.get("text") or ""
+
+        # Check for tables
+        sec_tables = tables_by_sec.get(sid, [])
+        has_table = bool(sec_tables) or bool(_MD_TABLE_ROW_RE.search(sec_text)) or bool(_HTML_TABLE_RE.search(sec_text))
+
+        # Check for images
+        sec_images = images_by_sec.get(sid, [])
+        has_image = (
+            bool(sec_images)
+            or bool(_MD_IMAGE_RE.search(sec_text))
+            or bool(_MISTRAL_IMG_RE.search(sec_text))
+            or bool(_HTML_IMG_RE.search(sec_text))
+        )
+
+        # Check for graph links
+        sec_graph_links = graph_links_by_sec.get(sid, [])
+        has_graph = bool(sec_graph_links)
+
+        r_copy = dict(r)
+        r_copy["tables"] = sec_tables
+        r_copy["images"] = sec_images
+        r_copy["graph_links"] = sec_graph_links
+        r_copy["has_table"] = has_table
+        r_copy["has_image"] = has_image
+        r_copy["has_graph"] = has_graph
+        enriched_sections.append(r_copy)
+
+    return enriched_sections
+
+
 async def fetch_document_sections_full(backend: KgBackend, content_hash: str) -> list[dict[str, Any]]:
     """Asynchronously fetch all sections for a document including body text, tables, and images."""
-
-    def _query() -> list[dict[str, Any]]:
-        if not _has_table(backend, _SECTION_LABEL):
-            return []
-
-        fields = _return_fields(
-            backend,
-            _SECTION_LABEL,
-            "s",
-            (
-                "section_id",
-                "content_hash",
-                "parent_section_id",
-                "title",
-                "level",
-                "line_start",
-                "line_end",
-                "token_count",
-                "sequence",
-                "description",
-                "summary",
-                "summary_source",
-                "keywords",
-                "text",
-            ),
-        )
-        cypher = f"""
-            MATCH (s:{_SECTION_LABEL} {{content_hash: $content_hash}})
-            RETURN {fields}
-            ORDER BY s.sequence
-        """
-        rows, _ = _query_rows(backend, cypher, {"content_hash": content_hash})
-
-        # Fetch table counts for this document
-        tables_by_sec: dict[str, list[dict[str, Any]]] = {}
-        if _has_table(backend, "MarkdownTable"):
-            t_rows, _ = _query_rows(
-                backend,
-                """
-                MATCH (s:MarkdownSection)-[:HAS_TABLE]->(t:MarkdownTable)
-                WHERE s.content_hash = $content_hash
-                RETURN s.section_id AS section_id, t.table_id AS table_id, t.name AS name,
-                       t.table_format AS table_format, t.caption AS caption,
-                       t.token_count AS token_count, t.content AS content
-                """,
-                {"content_hash": content_hash},
-            )
-            for tr in t_rows:
-                tables_by_sec.setdefault(tr["section_id"], []).append(tr)
-
-        # Fetch image counts for this document
-        images_by_sec: dict[str, list[dict[str, Any]]] = {}
-        if _has_table(backend, "Image"):
-            i_rows, _ = _query_rows(
-                backend,
-                """
-                MATCH (s:MarkdownSection)-[:HAS_IMAGE]->(i:Image)
-                WHERE s.content_hash = $content_hash
-                RETURN s.section_id AS section_id, i.image_id AS image_id, i.name AS name,
-                       i.filename AS filename, i.path AS path, i.description AS description,
-                       i.size AS size
-                """,
-                {"content_hash": content_hash},
-            )
-            for ir in i_rows:
-                images_by_sec.setdefault(ir["section_id"], []).append(ir)
-
-        # Fetch graph entity links for this document's sections
-        graph_links_by_sec: dict[str, list[dict[str, Any]]] = {}
-        try:
-            # Query non-structural relationships connected to MarkdownSection
-            rel_rows, _ = _query_rows(
-                backend,
-                """
-                MATCH (s:MarkdownSection)-[r]-(e)
-                WHERE s.content_hash = $content_hash
-                  AND type(r) NOT IN ['HAS_SECTION', 'HAS_SUBSECTION', 'HAS_CHUNK', 'HAS_TABLE', 'HAS_IMAGE']
-                RETURN s.section_id AS section_id, type(r) AS rel_type,
-                       labels(e) AS entity_labels,
-                       coalesce(e.name, e.title, e.id, 'Entity') AS entity_name
-                """,
-                {"content_hash": content_hash},
-            )
-            for gr in rel_rows:
-                graph_links_by_sec.setdefault(gr["section_id"], []).append(gr)
-        except Exception as exc:
-            logger.debug("Graph links query skipped: {}", exc)
-
-        # Merge and enrich sections
-        enriched_sections: list[dict[str, Any]] = []
-        for r in rows:
-            sid = r["section_id"]
-            sec_text = r.get("text") or ""
-
-            # Check for tables
-            sec_tables = tables_by_sec.get(sid, [])
-            has_table = (
-                bool(sec_tables) or bool(_MD_TABLE_ROW_RE.search(sec_text)) or bool(_HTML_TABLE_RE.search(sec_text))
-            )
-
-            # Check for images
-            sec_images = images_by_sec.get(sid, [])
-            has_image = (
-                bool(sec_images)
-                or bool(_MD_IMAGE_RE.search(sec_text))
-                or bool(_MISTRAL_IMG_RE.search(sec_text))
-                or bool(_HTML_IMG_RE.search(sec_text))
-            )
-
-            # Check for graph links
-            sec_graph_links = graph_links_by_sec.get(sid, [])
-            has_graph = bool(sec_graph_links)
-
-            r_copy = dict(r)
-            r_copy["tables"] = sec_tables
-            r_copy["images"] = sec_images
-            r_copy["graph_links"] = sec_graph_links
-            r_copy["has_table"] = has_table
-            r_copy["has_image"] = has_image
-            r_copy["has_graph"] = has_graph
-            enriched_sections.append(r_copy)
-
-        return enriched_sections
-
-    return await asyncio.to_thread(_query)
+    return await asyncio.to_thread(get_document_sections_full, backend, content_hash)
 
 
 async def fetch_all_images_async(

@@ -98,6 +98,24 @@ def load_bench_dataset_with_results(
     runs = load_existing_runs(Path(cfg.runs))
     scores = load_existing_scores(Path(cfg.scores))
 
+    # Filter by target documents if configured on the profile, unless inspecting a specific question
+    if not question_id:
+        if cfg.files.docs:
+            doc_set = {d.removesuffix(".pdf") for d in cfg.files.docs} | set(cfg.files.docs)
+            questions = [
+                q
+                for q in questions
+                if (
+                    q.id in runs
+                    or q.id in scores
+                    or not doc_set
+                    or any(d.removesuffix(".pdf") in doc_set or d in doc_set for d in q.doc_names)
+                )
+            ]
+        if cfg.question_ids:
+            q_set = set(cfg.question_ids)
+            questions = [q for q in questions if q.id in q_set or q.id in runs or q.id in scores]
+
     items: list[BenchQuestionDetail] = []
     for q in questions:
         q_id = q.id

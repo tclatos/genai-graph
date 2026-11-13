@@ -198,11 +198,7 @@ def _detect_editor_language(lang: str = "sql") -> str | None:
 def clean_internal_value(val: Any) -> Any:
     """Recursively strip internal Kuzu metadata (_ID, _SRC, _DST) from dicts/lists."""
     if isinstance(val, dict):
-        return {
-            k: clean_internal_value(v)
-            for k, v in val.items()
-            if str(k).upper() not in ("_ID", "_SRC", "_DST")
-        }
+        return {k: clean_internal_value(v) for k, v in val.items() if str(k).upper() not in ("_ID", "_SRC", "_DST")}
     if isinstance(val, list):
         return [clean_internal_value(v) for v in val]
     return val
@@ -337,21 +333,21 @@ def format_graph_df(df: pd.DataFrame) -> pd.DataFrame:
             for _, row in df.iterrows():
                 src_label, src_summary = format_node_display(row.iloc[0])
                 tgt_label, tgt_summary = format_node_display(row.iloc[1])
-                records.append({
-                    "source_type": src_label,
-                    "source": src_summary,
-                    "target_type": tgt_label,
-                    "target": tgt_summary,
-                })
+                records.append(
+                    {
+                        "source_type": src_label,
+                        "source": src_summary,
+                        "target_type": tgt_label,
+                        "target": tgt_summary,
+                    }
+                )
             return pd.DataFrame(records)
 
     # Case 3: Single column containing node or rel dicts (e.g. RETURN n, RETURN r)
     if len(df.columns) == 1:
         col = df.columns[0]
         has_dicts = any(
-            isinstance(v, dict)
-            for v in df[col]
-            if v is not None and not (isinstance(v, float) and pd.isna(v))
+            isinstance(v, dict) for v in df[col] if v is not None and not (isinstance(v, float) and pd.isna(v))
         )
         if has_dicts:
             labels: set[str] = set()
